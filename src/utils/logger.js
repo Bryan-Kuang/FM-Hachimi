@@ -13,9 +13,15 @@ const logger = winston.createLogger({
     new winston.transports.File({
       filename: "error.log",
       level: "error",
+      maxsize: 10 * 1024 * 1024, // 10MB
+      maxFiles: 3, // 保留最多3个文件
+      tailable: true // 保持当前文件名不变
     }),
     new winston.transports.File({
       filename: config.logging.file,
+      maxsize: 10 * 1024 * 1024, // 10MB
+      maxFiles: 3, // 保留最多3个文件
+      tailable: true // 保持当前文件名不变
     }),
   ],
 });
