@@ -63,14 +63,8 @@ module.exports = {
         });
       }
 
-      // Show loading message
-      const loadingEmbed = EmbedBuilders.createLoadingEmbed(
-        "Extracting audio from Bilibili video..."
-      );
-
-      await interaction.reply({
-        embeds: [loadingEmbed],
-      });
+      // 🔧 修复：使用deferReply避免Discord超时
+      await interaction.deferReply();
 
       // Use audio manager to play the video
       const result = await AudioManager.playBilibiliVideo(interaction, url);

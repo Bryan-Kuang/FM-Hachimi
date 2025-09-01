@@ -62,10 +62,24 @@ class AudioPlayer {
       logger.info("Audio player became idle", {
         track: this.currentTrack?.title,
         guild: this.currentGuild,
+        resource: this.audioPlayer.state.resource !== null,
+        playbackDuration: this.audioPlayer.state.playbackDuration,
       });
 
-      // Auto-advance to next track
-      this.handleTrackEnd();
+      // 🔧 修复：检查是否应该自动进入下一首
+      // 只有在播放时间超过1秒或者是正常结束时才进入下一首
+      const playbackDuration = this.audioPlayer.state.playbackDuration || 0;
+      if (playbackDuration > 1000) {
+        // 正常播放结束，进入下一首
+        this.handleTrackEnd();
+      } else {
+        // 播放时间太短，可能是错误，重试当前曲目
+        logger.warn("Playback duration too short, retrying current track", {
+          playbackDuration,
+          track: this.currentTrack?.title,
+        });
+        this.retryCurrentTrack();
+      }
     });
 
     this.audioPlayer.on("error", (error) => {
@@ -155,18 +169,42 @@ class AudioPlayer {
         return;
       }
 
+      // 🔧 修复：减少超时时间，添加更多状态监听
       const timeout = setTimeout(() => {
+        logger.error("Voice connection timeout", {
+          currentStatus: this.voiceConnection?.state?.status,
+          guild: this.currentGuild,
+        });
         reject(new Error("Voice connection timeout"));
-      }, 10000); // 10 second timeout
+      }, 5000); // 减少到5秒
 
-      this.voiceConnection.on(VoiceConnectionStatus.Ready, () => {
+      const cleanup = () => {
         clearTimeout(timeout);
+        this.voiceConnection.removeAllListeners(VoiceConnectionStatus.Ready);
+        this.voiceConnection.removeAllListeners(
+          VoiceConnectionStatus.Disconnected
+        );
+        this.voiceConnection.removeAllListeners(
+          VoiceConnectionStatus.Destroyed
+        );
+      };
+
+      this.voiceConnection.once(VoiceConnectionStatus.Ready, () => {
+        logger.info("Voice connection is ready");
+        cleanup();
         resolve();
       });
 
-      this.voiceConnection.on(VoiceConnectionStatus.Disconnected, () => {
-        clearTimeout(timeout);
+      this.voiceConnection.once(VoiceConnectionStatus.Disconnected, () => {
+        logger.warn("Voice connection disconnected during wait");
+        cleanup();
         reject(new Error("Voice connection disconnected"));
+      });
+
+      this.voiceConnection.once(VoiceConnectionStatus.Destroyed, () => {
+        logger.warn("Voice connection destroyed during wait");
+        cleanup();
+        reject(new Error("Voice connection destroyed"));
       });
     });
   }
@@ -351,6 +389,7 @@ class AudioPlayer {
           // FFmpeg is available, proceed with audio resource creation
           logger.debug("FFmpeg available, creating audio stream");
 
+          // 🔧 修复：输出Raw PCM格式而不是Opus，避免管道问题
           const ffmpegProcess = spawn("ffmpeg", [
             "-user_agent",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -359,13 +398,11 @@ class AudioPlayer {
             "-i",
             audioUrl,
             "-f",
-            "opus",
+            "s16le", // Raw PCM 16-bit signed little-endian
             "-ar",
             "48000",
             "-ac",
             "2",
-            "-b:a",
-            "128k",
             "-vn",
             "-loglevel",
             "error",
@@ -398,8 +435,9 @@ class AudioPlayer {
           });
 
           try {
+            // 🔧 修复：使用Raw PCM而不是Opus，让Discord.js处理编码
             const audioResource = createAudioResource(ffmpegProcess.stdout, {
-              inputType: StreamType.Opus,
+              inputType: StreamType.Raw,
             });
 
             logger.info("Audio resource created successfully");
@@ -605,6 +643,42 @@ class AudioPlayer {
 
       logger.info("Left voice channel");
     }
+  }
+
+  /**
+   * Retry current track (when playback fails immediately)
+   */
+  async retryCurrentTrack() {
+    if (!this.currentTrack) {
+      logger.warn("No current track to retry");
+      return;
+    }
+
+    logger.info("Retrying current track", {
+      title: this.currentTrack.title,
+      attempt: (this.currentTrack.retryCount || 0) + 1,
+    });
+
+    // 限制重试次数
+    this.currentTrack.retryCount = (this.currentTrack.retryCount || 0) + 1;
+    if (this.currentTrack.retryCount > 2) {
+      logger.error("Max retry attempts reached, skipping track", {
+        title: this.currentTrack.title,
+      });
+      this.handleTrackEnd();
+      return;
+    }
+
+    // 等待一下再重试
+    setTimeout(() => {
+      this.playCurrentTrack().catch((error) => {
+        logger.error("Retry failed", {
+          error: error.message,
+          title: this.currentTrack?.title,
+        });
+        this.handleTrackEnd();
+      });
+    }, 2000);
   }
 
   /**
