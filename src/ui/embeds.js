@@ -51,15 +51,21 @@ class EmbedBuilders {
       }
     );
 
-    // Add progress bar
+    // Add progress bar with time display
     if (videoData.duration > 0) {
       const progressBar = Formatters.generateProgressBar(
         currentTime,
         videoData.duration
       );
+      const currentTimeStr = Formatters.formatTime(currentTime);
+      const totalTimeStr = Formatters.formatTime(videoData.duration);
+
+      // Use embed description for better visual progress bar
+      const progressDesc = `${progressBar} \`[${currentTimeStr}/${totalTimeStr}]\``;
+
       embed.addFields({
         name: "📊 Progress",
-        value: `\`${progressBar}\``,
+        value: progressDesc,
         inline: false,
       });
     }

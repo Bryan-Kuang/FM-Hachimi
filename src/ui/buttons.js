@@ -17,12 +17,14 @@ class ButtonBuilders {
       hasQueue = false,
       canGoBack = false,
       canSkip = false,
+      loopMode = "none",
     } = state;
 
-    const row = new ActionRowBuilder();
+    // First row: prev, play/pause, next, stop
+    const row1 = new ActionRowBuilder();
 
     // Previous button
-    row.addComponents(
+    row1.addComponents(
       new ButtonBuilder()
         .setCustomId("prev")
         .setLabel("⏮️")
@@ -31,7 +33,7 @@ class ButtonBuilders {
     );
 
     // Play/Pause button
-    row.addComponents(
+    row1.addComponents(
       new ButtonBuilder()
         .setCustomId("pause_resume")
         .setLabel(isPlaying ? "⏸️" : "▶️")
@@ -39,8 +41,8 @@ class ButtonBuilders {
         .setDisabled(!hasQueue)
     );
 
-    // Skip button
-    row.addComponents(
+    // Next button (same as skip)
+    row1.addComponents(
       new ButtonBuilder()
         .setCustomId("skip")
         .setLabel("⏭️")
@@ -48,15 +50,29 @@ class ButtonBuilders {
         .setDisabled(!canSkip)
     );
 
-    // Queue button
-    row.addComponents(
+    // Stop button
+    row1.addComponents(
       new ButtonBuilder()
-        .setCustomId("queue")
-        .setLabel("📋")
-        .setStyle(ButtonStyle.Secondary)
+        .setCustomId("stop")
+        .setLabel("⏹️")
+        .setStyle(ButtonStyle.Danger)
+        .setDisabled(!hasQueue)
     );
 
-    return row;
+    // Second row: loop button
+    const row2 = new ActionRowBuilder();
+
+    const loopEmoji =
+      loopMode === "none" ? "➡️" : loopMode === "queue" ? "🔁" : "🔂";
+    row2.addComponents(
+      new ButtonBuilder()
+        .setCustomId("loop")
+        .setLabel(`${loopEmoji} Loop`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!hasQueue)
+    );
+
+    return [row1, row2];
   }
 
   /**

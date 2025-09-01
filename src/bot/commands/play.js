@@ -46,6 +46,24 @@ module.exports = {
         });
       }
 
+      // Check if bot is in a voice channel and if it's different from user's
+      const botVoiceChannel = interaction.guild.members.me?.voice?.channel;
+      if (botVoiceChannel && botVoiceChannel.id !== member.voice.channel.id) {
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          "Wrong Voice Channel",
+          `Bot is already playing in <#${botVoiceChannel.id}>!`,
+          {
+            suggestion:
+              "Join the same voice channel as the bot or use `/stop` to stop current playback.",
+          }
+        );
+
+        return await interaction.reply({
+          embeds: [errorEmbed],
+          ephemeral: true,
+        });
+      }
+
       // Validate Bilibili URL
       if (!UrlValidator.isValidBilibiliUrl(url)) {
         const errorEmbed = EmbedBuilders.createErrorEmbed(
@@ -144,13 +162,18 @@ module.exports = {
         hasQueue: result.player.queueLength > 0,
         canGoBack: result.player.hasPrevious,
         canSkip: result.player.hasNext,
+        loopMode: result.player.loopMode,
       });
 
       // Update the message with success
-      await interaction.editReply({
+      const reply = await interaction.editReply({
         embeds: [playingEmbed],
-        components: [controlButtons],
+        components: controlButtons, // Now returns array of rows
       });
+
+      // Start progress tracking for real-time updates
+      const ProgressTracker = require("../../audio/progress-tracker");
+      ProgressTracker.startTracking(interaction.guild.id, reply);
 
       logger.info("Play command completed successfully", {
         url,

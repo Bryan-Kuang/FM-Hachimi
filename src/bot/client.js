@@ -63,7 +63,7 @@ class BotClient {
    */
   setupEventHandlers() {
     // Bot ready event
-    this.client.once("ready", () => {
+    this.client.once("clientReady", () => {
       this.isReady = true;
       this.startTime = new Date();
 
@@ -74,9 +74,41 @@ class BotClient {
       });
 
       // Set bot activity status
-      this.client.user.setActivity("🎵 Bilibili Music", {
-        type: "LISTENING",
+      this.client.user.setActivity("寻找蜂蜜饮料中...", {
+        type: "PLAYING",
       });
+    });
+
+    // Voice state update event - handle disconnects
+    this.client.on("voiceStateUpdate", (oldState, newState) => {
+      // Check if bot was disconnected from a voice channel
+      if (
+        oldState.member.id === this.client.user.id &&
+        oldState.channel &&
+        !newState.channel
+      ) {
+        logger.info("Bot was disconnected from voice channel", {
+          guild: oldState.guild.name,
+          channel: oldState.channel.name,
+        });
+
+        // Clear queue and reset player state for this guild
+        const AudioManager = require("../../audio/manager");
+        const player = AudioManager.getPlayer(oldState.guild.id);
+        if (player) {
+          player.queue = [];
+          player.currentTrack = null;
+          player.currentIndex = -1;
+          player.isPlaying = false;
+          player.isPaused = false;
+          player.startTime = null;
+          player.voiceConnection = null;
+
+          logger.info("Queue cleared due to voice disconnect", {
+            guild: oldState.guild.name,
+          });
+        }
+      }
     });
 
     // Load interaction handlers
@@ -174,6 +206,7 @@ class BotClient {
       require("./commands/prev"),
       require("./commands/queue"),
       require("./commands/nowplaying"),
+      require("./commands/help"),
     ];
 
     for (const command of commands) {

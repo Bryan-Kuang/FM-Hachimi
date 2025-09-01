@@ -16,6 +16,11 @@ module.exports = {
     if (interaction.isButton()) {
       await handleButtonInteraction(interaction);
     }
+
+    // Handle select menu interactions
+    if (interaction.isStringSelectMenu()) {
+      await handleSelectMenuInteraction(interaction);
+    }
   },
 };
 
@@ -28,8 +33,14 @@ async function handleButtonInteraction(interaction) {
     const customId = interaction.customId;
     const user = interaction.user;
 
+    logger.debug("Button interaction received", {
+      customId,
+      user: user.username,
+      guild: interaction.guild?.name,
+    });
+
     // Check if user is in a voice channel for control buttons
-    const controlButtons = ["pause_resume", "skip", "prev"];
+    const controlButtons = ["pause_resume", "skip", "prev", "stop"];
     if (controlButtons.includes(customId)) {
       if (!interaction.member.voice.channel) {
         const errorEmbed = EmbedBuilders.createErrorEmbed(
@@ -50,7 +61,7 @@ async function handleButtonInteraction(interaction) {
     // Handle button interaction with audio manager
     const result = await AudioManager.handleButtonInteraction(interaction);
 
-    if (!result.success) {
+    if (!result.success && !result.showMenu) {
       const errorEmbed = EmbedBuilders.createErrorEmbed(
         "Action Failed",
         result.error,
@@ -61,6 +72,51 @@ async function handleButtonInteraction(interaction) {
 
       return await interaction.reply({
         embeds: [errorEmbed],
+        ephemeral: true,
+      });
+    }
+
+    // Handle loop button menu display
+    if (result.showMenu && customId === "loop") {
+      logger.debug("Showing loop mode selection menu", {
+        user: user.username,
+        guild: interaction.guild?.name,
+      });
+
+      const {
+        StringSelectMenuBuilder,
+        ActionRowBuilder,
+      } = require("discord.js");
+
+      const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId("loop_select")
+        .setPlaceholder("Choose loop mode...")
+        .addOptions([
+          {
+            label: "No Loop",
+            description: "Play through queue once",
+            value: "none",
+            emoji: "➡️",
+          },
+          {
+            label: "Loop Queue",
+            description: "Repeat entire queue",
+            value: "queue",
+            emoji: "🔁",
+          },
+          {
+            label: "Loop Single",
+            description: "Repeat current track",
+            value: "track",
+            emoji: "🔂",
+          },
+        ]);
+
+      const selectRow = new ActionRowBuilder().addComponents(selectMenu);
+
+      return await interaction.reply({
+        content: "🔁 **Choose Loop Mode:**",
+        components: [selectRow],
         ephemeral: true,
       });
     }
@@ -82,6 +138,7 @@ async function handleButtonInteraction(interaction) {
           hasQueue: result.player.queueLength > 0,
           canGoBack: result.player.hasPrevious,
           canSkip: result.player.hasNext,
+          loopMode: result.player.loopMode,
         });
         break;
       }
@@ -105,6 +162,7 @@ async function handleButtonInteraction(interaction) {
           hasQueue: result.player.queueLength > 0,
           canGoBack: result.player.hasPrevious,
           canSkip: result.player.hasNext,
+          loopMode: result.player.loopMode,
         });
         break;
       }
@@ -128,6 +186,7 @@ async function handleButtonInteraction(interaction) {
           hasQueue: result.player.queueLength > 0,
           canGoBack: result.player.hasPrevious,
           canSkip: result.player.hasNext,
+          loopMode: result.player.loopMode,
         });
         break;
       }
@@ -195,6 +254,19 @@ async function handleButtonInteraction(interaction) {
         break;
       }
 
+      case "stop": {
+        responseEmbed = EmbedBuilders.createSuccessEmbed(
+          "⏹️ Playback Stopped",
+          "Music stopped, queue cleared, and left voice channel."
+        );
+        break;
+      }
+
+      case "loop": {
+        // This is handled above in the showMenu logic
+        return;
+      }
+
       default: {
         responseEmbed = EmbedBuilders.createSuccessEmbed(
           "Action Completed",
@@ -210,7 +282,7 @@ async function handleButtonInteraction(interaction) {
     };
 
     if (responseButtons) {
-      response.components = [responseButtons];
+      response.components = responseButtons;
     }
 
     await interaction.reply(response);
@@ -250,6 +322,108 @@ async function handleButtonInteraction(interaction) {
       }
     } catch (replyError) {
       logger.error("Failed to send error response for button interaction", {
+        error: replyError.message,
+      });
+    }
+  }
+}
+
+/**
+ * Handle select menu interactions
+ * @param {StringSelectMenuInteraction} interaction - Discord select menu interaction
+ */
+async function handleSelectMenuInteraction(interaction) {
+  try {
+    const customId = interaction.customId;
+    const user = interaction.user;
+
+    if (customId === "loop_select") {
+      const selectedMode = interaction.values[0];
+
+      logger.debug("Loop select menu interaction received", {
+        selectedMode,
+        user: user.username,
+        guild: interaction.guild?.name,
+      });
+
+      // Defer the reply immediately to avoid timeout
+      await interaction.deferReply({ ephemeral: true });
+
+      // Handle loop mode change with audio manager
+      const result = AudioManager.setLoopMode(
+        interaction.guild.id,
+        selectedMode
+      );
+
+      if (!result.success) {
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          "Loop Mode Failed",
+          result.error || "Failed to change loop mode",
+          {
+            suggestion: result.suggestion || "Please try again.",
+          }
+        );
+
+        return await interaction.editReply({
+          embeds: [errorEmbed],
+        });
+      }
+
+      const loopEmoji =
+        selectedMode === "none" ? "➡️" : selectedMode === "queue" ? "🔁" : "🔂";
+      const loopText =
+        selectedMode === "none"
+          ? "disabled"
+          : selectedMode === "queue"
+          ? "enabled (queue)"
+          : "enabled (track)";
+
+      const successEmbed = EmbedBuilders.createSuccessEmbed(
+        "Loop Mode Changed",
+        `${loopEmoji} Loop mode ${loopText}`
+      );
+
+      await interaction.editReply({
+        embeds: [successEmbed],
+      });
+
+      logger.info("Loop mode changed via select menu", {
+        mode: selectedMode,
+        user: user.username,
+        guild: interaction.guild?.name,
+      });
+    }
+  } catch (error) {
+    logger.error("Select menu interaction failed", {
+      customId: interaction.customId,
+      user: interaction.user.username,
+      guild: interaction.guild?.name,
+      error: error.message,
+      stack: error.stack,
+    });
+
+    // Try to respond with error if possible
+    try {
+      const errorEmbed = EmbedBuilders.createErrorEmbed(
+        "Interaction Failed",
+        "An error occurred while processing your selection.",
+        {
+          errorCode: "SELECT_MENU_FAILED",
+        }
+      );
+
+      if (interaction.deferred) {
+        await interaction.editReply({
+          embeds: [errorEmbed],
+        });
+      } else if (!interaction.replied) {
+        await interaction.reply({
+          embeds: [errorEmbed],
+          ephemeral: true,
+        });
+      }
+    } catch (replyError) {
+      logger.error("Failed to send error response for select menu", {
         error: replyError.message,
       });
     }

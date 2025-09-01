@@ -116,7 +116,17 @@ class AudioManager {
       // Start playing if nothing is currently playing
       if (!player.isPlaying && !player.isPaused) {
         try {
-          const playSuccess = await player.playNext();
+          let playSuccess;
+          // 🔧 修复：如果队列结束后添加新歌，从最新歌曲开始
+          if (player.currentTrack === null && player.queue.length > 0) {
+            // 队列结束后添加的新歌，从最后一首（新添加的）开始
+            player.currentIndex = player.queue.length - 1;
+            player.currentTrack = player.queue[player.currentIndex];
+            playSuccess = await player.playCurrentTrack();
+          } else {
+            playSuccess = await player.playNext();
+          }
+
           if (!playSuccess) {
             return {
               success: false,
@@ -230,11 +240,11 @@ class AudioManager {
       };
     }
 
-    if (!player.hasNext && player.loopMode === "none") {
+    if (!player.canSkip()) {
       return {
         success: false,
         error: "No next track in queue",
-        suggestion: "Add more tracks or enable loop mode.",
+        suggestion: "This is the last track in the queue with no loop enabled.",
       };
     }
 
@@ -262,7 +272,7 @@ class AudioManager {
       };
     }
 
-    if (!player.hasPrevious && player.loopMode === "none") {
+    if (!player.canGoBack()) {
       return {
         success: false,
         error: "No previous track in queue",
@@ -469,11 +479,19 @@ class AudioManager {
       case "prev":
         return await this.previousTrack(guildId);
 
+      case "stop":
+        return await this.stopPlayback(guildId);
+
       case "queue_clear":
         return this.clearQueue(guildId);
 
       case "queue_shuffle":
         return this.shuffleQueue(guildId);
+
+      case "loop": {
+        // Loop button now shows selection menu, handled in interactionCreate
+        return { success: true, showMenu: true };
+      }
 
       case "queue_loop": {
         const player = this.getPlayer(guildId);

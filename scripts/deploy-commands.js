@@ -14,8 +14,10 @@ const commands = [
   require("../src/bot/commands/resume"),
   require("../src/bot/commands/skip"),
   require("../src/bot/commands/prev"),
+  require("../src/bot/commands/stop"),
   require("../src/bot/commands/queue"),
   require("../src/bot/commands/nowplaying"),
+  require("../src/bot/commands/help"),
 ];
 
 async function deployCommands() {

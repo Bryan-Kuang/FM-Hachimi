@@ -39,6 +39,7 @@
     "dotenv": "^16.3.1",
     "moment": "^2.29.4",
     "opusscript": "^0.0.8",
+    "string-progressbar": "^1.0.4",
     "winston": "^3.11.0"
   },
   "devDependencies": {
