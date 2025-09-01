@@ -1,0 +1,14 @@
+
+🎯 快速部署清单：
+
+□ 1. 访问 https://discord.com/developers/applications
+□ 2. 创建新应用程序和机器人
+□ 3. 复制Bot Token和Application ID
+□ 4. 创建.env文件并填入配置
+□ 5. 运行 npm run deploy:commands
+□ 6. 使用OAuth2 URL邀请机器人
+□ 7. 运行 npm start
+□ 8. 测试 /play 命令
+
+🔗 需要详细步骤请查看：DEPLOYMENT_GUIDE.md
+

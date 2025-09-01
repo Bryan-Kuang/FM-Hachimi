@@ -115,12 +115,32 @@ class AudioManager {
 
       // Start playing if nothing is currently playing
       if (!player.isPlaying && !player.isPaused) {
-        const playSuccess = await player.playNext();
-        if (!playSuccess) {
+        try {
+          const playSuccess = await player.playNext();
+          if (!playSuccess) {
+            return {
+              success: false,
+              error: "Failed to start playback",
+              suggestion:
+                "Check if FFmpeg is installed and the video URL is accessible.",
+              keepConnection: true, // Stay in voice channel
+            };
+          }
+        } catch (playError) {
+          logger.error("Playback error occurred", {
+            error: playError.message,
+            track: track.title,
+            guild: guildId,
+          });
+
+          // Don't disconnect, stay in channel and report detailed error
           return {
             success: false,
-            error: "Failed to start playback",
-            suggestion: "Make sure FFmpeg is installed on the system.",
+            error: playError.message,
+            suggestion: this.getErrorSuggestion(playError.message),
+            keepConnection: true,
+            track, // Return track info even on failure
+            player: player.getState(),
           };
         }
       }
@@ -341,6 +361,61 @@ class AudioManager {
       success: true,
       message: "Stopped playback and left voice channel",
     };
+  }
+
+  /**
+   * Get error suggestion based on error message
+   * @param {string} errorMessage - The error message
+   * @returns {string} - Helpful suggestion
+   */
+  getErrorSuggestion(errorMessage) {
+    // Log the actual error message for debugging
+    logger.debug("Generating error suggestion for:", { errorMessage });
+
+    // Check for FFmpeg issues first (most specific)
+    if (
+      errorMessage.includes("FFmpeg") ||
+      errorMessage.includes("ffmpeg") ||
+      errorMessage.includes("not installed") ||
+      (errorMessage.includes("spawn") && errorMessage.includes("ENOENT"))
+    ) {
+      return "FFmpeg is required for audio playback. Install it with: `brew install ffmpeg` (macOS) or `sudo apt install ffmpeg` (Ubuntu)";
+    }
+
+    // Check for audio resource creation issues
+    if (
+      errorMessage.includes("Failed to create audio resource") ||
+      errorMessage.includes("audio resource creation failed")
+    ) {
+      return "Audio processing failed. This is usually due to missing FFmpeg. Install it with: `brew install ffmpeg` (macOS) or `sudo apt install ffmpeg` (Ubuntu)";
+    }
+
+    // Certificate/SSL issues
+    if (errorMessage.includes("certificate") || errorMessage.includes("SSL")) {
+      return "SSL certificate issue. This may be a temporary network problem. Please try again in a few minutes.";
+    }
+
+    // Video not found
+    if (errorMessage.includes("404") || errorMessage.includes("Not Found")) {
+      return "Video not found. The video may be private, deleted, or region-locked.";
+    }
+
+    // Network timeout
+    if (errorMessage.includes("timeout")) {
+      return "Connection timeout. Please check your internet connection and try again.";
+    }
+
+    // Voice connection issues (only if not related to FFmpeg)
+    if (
+      (errorMessage.includes("voice") || errorMessage.includes("connection")) &&
+      !errorMessage.includes("FFmpeg") &&
+      !errorMessage.includes("audio resource")
+    ) {
+      return "Voice connection issue. Make sure the bot has permission to join and speak in voice channels.";
+    }
+
+    // Default fallback
+    return "Please check the video URL and try again. If the problem persists, the video may not be accessible.";
   }
 
   /**

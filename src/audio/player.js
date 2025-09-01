@@ -247,27 +247,58 @@ class AudioPlayer {
         title: this.currentTrack.title,
         audioUrl: this.currentTrack.audioUrl ? "Available" : "Missing",
         guild: this.currentGuild,
+        voiceConnectionStatus: this.voiceConnection.state.status,
       });
 
+      // Ensure voice connection is ready
+      if (this.voiceConnection.state.status !== VoiceConnectionStatus.Ready) {
+        logger.warn("Voice connection not ready, waiting...", {
+          status: this.voiceConnection.state.status,
+        });
+
+        try {
+          await this.waitForVoiceConnection();
+        } catch (connectionError) {
+          throw new Error(
+            `Voice connection failed: ${connectionError.message}`
+          );
+        }
+      }
+
       // Create audio resource from URL
+      logger.debug("Creating audio resource for playback");
       const audioResource = await this.createAudioResource(
         this.currentTrack.audioUrl
       );
 
       if (!audioResource) {
-        throw new Error("Failed to create audio resource");
+        throw new Error("Failed to create audio resource - resource is null");
       }
 
+      logger.debug("Playing audio resource");
       // Play the audio
       this.audioPlayer.play(audioResource);
+
+      // Wait a moment to see if playback starts successfully
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      logger.info("Track playback initiated successfully", {
+        title: this.currentTrack.title,
+        playerStatus: this.audioPlayer.state.status,
+      });
 
       return true;
     } catch (error) {
       logger.error("Failed to play track", {
         title: this.currentTrack.title,
         error: error.message,
+        stack: error.stack,
+        voiceConnectionStatus: this.voiceConnection?.state?.status,
+        playerStatus: this.audioPlayer.state.status,
       });
-      return false;
+
+      // Don't disconnect on failure - stay in channel and report error
+      throw error;
     }
   }
 
@@ -279,37 +310,100 @@ class AudioPlayer {
   async createAudioResource(audioUrl) {
     return new Promise((resolve, reject) => {
       try {
-        // Use ffmpeg to convert the audio stream
-        const ffmpegProcess = spawn("ffmpeg", [
-          "-i",
-          audioUrl,
-          "-f",
-          "opus",
-          "-ar",
-          "48000",
-          "-ac",
-          "2",
-          "-b:a",
-          "128k",
-          "-vn",
-          "pipe:1",
-        ]);
-
-        ffmpegProcess.on("error", (error) => {
-          logger.error("FFmpeg process error", { error: error.message });
-          reject(error);
+        logger.info("Creating audio resource", {
+          audioUrl: audioUrl ? "Available" : "Missing",
+          guild: this.currentGuild,
         });
 
-        const audioResource = createAudioResource(ffmpegProcess.stdout, {
-          inputType: StreamType.Opus,
+        // Check if FFmpeg is available
+        const { spawn } = require("child_process");
+        const ffmpegCheck = spawn("ffmpeg", ["-version"]);
+
+        ffmpegCheck.on("error", (error) => {
+          logger.error("FFmpeg not available", { error: error.message });
+          reject(
+            new Error(
+              "FFmpeg is not installed. Please install FFmpeg to enable audio playback."
+            )
+          );
+          return;
         });
 
-        resolve(audioResource);
+        ffmpegCheck.on("close", (code) => {
+          if (code !== 0) {
+            logger.error("FFmpeg check failed", { code });
+            reject(new Error("FFmpeg check failed"));
+            return;
+          }
+
+          // FFmpeg is available, proceed with audio resource creation
+          logger.debug("FFmpeg available, creating audio stream");
+
+          const ffmpegProcess = spawn("ffmpeg", [
+            "-i",
+            audioUrl,
+            "-f",
+            "opus",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            "-b:a",
+            "128k",
+            "-vn",
+            "-loglevel",
+            "error",
+            "pipe:1",
+          ]);
+
+          let stderr = "";
+
+          ffmpegProcess.stderr.on("data", (data) => {
+            stderr += data.toString();
+          });
+
+          ffmpegProcess.on("error", (error) => {
+            logger.error("FFmpeg process error", {
+              error: error.message,
+              stderr: stderr.substring(0, 500),
+            });
+            reject(new Error(`FFmpeg process error: ${error.message}`));
+          });
+
+          ffmpegProcess.on("close", (code) => {
+            if (code !== 0) {
+              logger.error("FFmpeg process exited with error", {
+                code,
+                stderr: stderr.substring(0, 500),
+              });
+              reject(new Error(`FFmpeg failed with code ${code}: ${stderr}`));
+              return;
+            }
+          });
+
+          try {
+            const audioResource = createAudioResource(ffmpegProcess.stdout, {
+              inputType: StreamType.Opus,
+            });
+
+            logger.info("Audio resource created successfully");
+            resolve(audioResource);
+          } catch (createError) {
+            logger.error("Failed to create Discord audio resource", {
+              error: createError.message,
+            });
+            reject(
+              new Error(
+                `Failed to create audio resource: ${createError.message}`
+              )
+            );
+          }
+        });
       } catch (error) {
         logger.error("Failed to create audio resource", {
           error: error.message,
         });
-        resolve(null);
+        reject(new Error(`Audio resource creation failed: ${error.message}`));
       }
     });
   }

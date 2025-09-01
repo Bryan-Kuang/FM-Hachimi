@@ -8,6 +8,7 @@ const EmbedBuilders = require("../../ui/embeds");
 const ButtonBuilders = require("../../ui/buttons");
 const UrlValidator = require("../../utils/validator");
 const AudioManager = require("../../audio/manager");
+const Formatters = require("../../utils/formatters");
 const logger = require("../../utils/logger");
 
 module.exports = {
@@ -75,7 +76,65 @@ module.exports = {
       const result = await AudioManager.playBilibiliVideo(interaction, url);
 
       if (!result.success) {
-        throw new Error(result.error);
+        // Create detailed error embed
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          "Playback Failed",
+          result.error,
+          {
+            suggestion: result.suggestion,
+            errorCode: "PLAYBACK_FAILED",
+          }
+        );
+
+        // If we have track info and should keep connection, show partial success
+        if (result.keepConnection && result.track) {
+          // Create a "partial success" embed showing the track was added but playback failed
+          const partialEmbed = EmbedBuilders.createErrorEmbed(
+            "Track Added but Playback Failed",
+            `Added "${result.track.title}" to queue, but playback failed.`,
+            {
+              suggestion: result.suggestion,
+            }
+          );
+
+          // Add track info
+          partialEmbed.addFields(
+            {
+              name: "🎵 Track Info",
+              value: `**Title:** ${
+                result.track.title
+              }\n**Duration:** ${Formatters.formatTime(
+                result.track.duration
+              )}\n**Uploader:** ${result.track.uploader}`,
+              inline: false,
+            },
+            {
+              name: "🔧 Bot Status",
+              value: `Connected to voice channel\nQueue length: ${result.player.queueLength}`,
+              inline: true,
+            }
+          );
+
+          const retryButton =
+            ButtonBuilders.createRetryButton("retry_playback");
+
+          await interaction.editReply({
+            embeds: [partialEmbed],
+            components: [retryButton],
+          });
+
+          return;
+        }
+
+        // Complete failure
+        const retryButton = ButtonBuilders.createRetryButton("retry_play");
+
+        await interaction.editReply({
+          embeds: [errorEmbed],
+          components: [retryButton],
+        });
+
+        return;
       }
 
       // Create success embed with video information
