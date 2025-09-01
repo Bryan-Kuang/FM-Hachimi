@@ -5,6 +5,10 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "quick": "node src/index.js",
+    "test:all": "node tests/test-runner.js system",
+    "test:playback": "node tests/test-runner.js playback",
+    "tools": "node scripts/tools/bot-tools.js",
     "dev": "nodemon src/index.js",
     "test": "jest",
     "test:watch": "jest --watch",

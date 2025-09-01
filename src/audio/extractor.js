@@ -12,6 +12,7 @@ class BilibiliExtractor {
   constructor() {
     this.userAgent =
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+    this._ytdlpChecked = false; // Lazy check flag
   }
 
   /**
@@ -23,6 +24,18 @@ class BilibiliExtractor {
     logger.info("Starting audio extraction", { url });
 
     try {
+      // Check yt-dlp availability on first use (lazy check)
+      if (!this._ytdlpChecked) {
+        const ytdlpAvailable = await this.checkYtDlpAvailability();
+        if (!ytdlpAvailable) {
+          throw new Error(
+            "yt-dlp is not available. Please install it: pip install yt-dlp"
+          );
+        }
+        this._ytdlpChecked = true;
+        logger.info("yt-dlp availability confirmed");
+      }
+
       // Validate URL first
       if (!UrlValidator.isValidBilibiliUrl(url)) {
         throw new Error("Invalid Bilibili URL format");

@@ -34,22 +34,8 @@ class BilibiliDiscordBot {
       logger.info("Initializing Bilibili audio extractor");
       this.extractor = new BilibiliExtractor();
 
-      // Test extractor availability
-      const extractorTest = await this.extractor.testExtraction();
-      if (!extractorTest.success) {
-        logger.warn("Bilibili extractor test failed", {
-          error: extractorTest.error,
-          ytdlpAvailable: extractorTest.ytdlpAvailable,
-        });
-
-        if (!extractorTest.ytdlpAvailable) {
-          throw new Error(
-            "yt-dlp is not available. Please install it: pip install yt-dlp"
-          );
-        }
-      } else {
-        logger.info("Bilibili extractor is working correctly");
-      }
+      // Skip startup tests for faster boot - check on first use instead
+      logger.info("Bilibili extractor initialized (will test on first use)");
 
       // Initialize Discord bot client
       logger.info("Initializing Discord bot client");

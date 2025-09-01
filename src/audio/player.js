@@ -43,6 +43,8 @@ class AudioPlayer {
       logger.info("Audio player started playing", {
         track: this.currentTrack?.title,
         guild: this.currentGuild,
+        voiceConnectionStatus: this.voiceConnection?.state?.status,
+        subscribed: this.voiceConnection?.state?.subscription !== null,
       });
     });
 
@@ -99,6 +101,11 @@ class AudioPlayer {
       ) {
         logger.info("Already connected to target voice channel");
         this.voiceConnection = existingConnection;
+
+        // 🔧 关键修复：重新订阅音频播放器到现有连接
+        logger.info("Re-subscribing audio player to existing voice connection");
+        this.voiceConnection.subscribe(this.audioPlayer);
+
         return true;
       }
 
@@ -285,6 +292,11 @@ class AudioPlayer {
       logger.info("Track playback initiated successfully", {
         title: this.currentTrack.title,
         playerStatus: this.audioPlayer.state.status,
+        voiceConnectionStatus: this.voiceConnection?.state?.status,
+        subscribed: this.voiceConnection?.state?.subscription !== null,
+        subscriptionPlayerId:
+          this.voiceConnection?.state?.subscription?.player ===
+          this.audioPlayer,
       });
 
       return true;
@@ -340,6 +352,10 @@ class AudioPlayer {
           logger.debug("FFmpeg available, creating audio stream");
 
           const ffmpegProcess = spawn("ffmpeg", [
+            "-user_agent",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "-referer",
+            "https://www.bilibili.com/",
             "-i",
             audioUrl,
             "-f",
