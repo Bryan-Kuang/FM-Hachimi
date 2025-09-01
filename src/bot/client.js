@@ -3,7 +3,12 @@
  * Initializes the Discord bot with proper intents and event handling
  */
 
-const { Client, GatewayIntentBits, Collection } = require("discord.js");
+const {
+  Client,
+  GatewayIntentBits,
+  Collection,
+  ActivityType,
+} = require("discord.js");
 const logger = require("../utils/logger");
 const config = require("../config/config");
 
@@ -75,7 +80,7 @@ class BotClient {
 
       // Set bot activity status
       this.client.user.setActivity("寻找蜂蜜饮料中...", {
-        type: "PLAYING",
+        type: ActivityType.Custom,
       });
     });
 

@@ -67,6 +67,9 @@ class AudioPlayer {
     this.audioPlayer.on(AudioPlayerStatus.Idle, () => {
       this.isPlaying = false;
 
+      // 🔧 修复：清理FFmpeg进程避免"Broken pipe"错误
+      this.cleanupFFmpegProcess();
+
       // Calculate actual playback duration using startTime
       const actualPlaybackDuration = this.startTime
         ? Date.now() - this.startTime
@@ -115,6 +118,9 @@ class AudioPlayer {
         track: this.currentTrack?.title,
         guild: this.currentGuild,
       });
+
+      // 🔧 修复：清理FFmpeg进程避免"Broken pipe"错误
+      this.cleanupFFmpegProcess();
 
       // Try to recover by skipping to next track
       this.handleTrackEnd();
@@ -639,6 +645,10 @@ class AudioPlayer {
    */
   stop() {
     this.audioPlayer.stop();
+    
+    // 🔧 修复：清理FFmpeg进程避免"Broken pipe"错误
+    this.cleanupFFmpegProcess();
+    
     this.currentTrack = null;
     this.currentIndex = -1;
     this.isPlaying = false;
@@ -844,12 +854,8 @@ class AudioPlayer {
   leaveVoiceChannel() {
     logger.info("Leaving voice channel");
     
-    // 🔧 添加：清理FFmpeg进程
-    if (this.ffmpegProcess && !this.ffmpegProcess.killed) {
-      logger.debug("Terminating FFmpeg process on voice channel leave");
-      this.ffmpegProcess.kill('SIGTERM');
-      this.ffmpegProcess = null;
-    }
+    // 🔧 修复：使用完善的FFmpeg进程清理方法
+    this.cleanupFFmpegProcess();
     
     if (this.voiceConnection) {
       this.voiceConnection.destroy();
@@ -909,6 +915,46 @@ class AudioPlayer {
       duration: Formatters.formatTime(track.duration),
       addedAt: Formatters.formatTime(Date.now() - track.addedAt.getTime()),
     }));
+  }
+
+  /**
+   * 清理FFmpeg进程避免"Broken pipe"错误
+   */
+  cleanupFFmpegProcess() {
+    if (this.ffmpegProcess && !this.ffmpegProcess.killed) {
+      logger.info("Cleaning up FFmpeg process", {
+        pid: this.ffmpegProcess.pid,
+        guild: this.currentGuild,
+      });
+      
+      try {
+        // 先尝试优雅地关闭stdin
+        if (this.ffmpegProcess.stdin && !this.ffmpegProcess.stdin.destroyed) {
+          this.ffmpegProcess.stdin.end();
+        }
+        
+        // 然后终止进程
+        this.ffmpegProcess.kill('SIGTERM');
+        
+        // 如果进程没有在合理时间内退出，强制杀死
+        setTimeout(() => {
+          if (this.ffmpegProcess && !this.ffmpegProcess.killed) {
+            logger.warn("Force killing FFmpeg process", {
+              pid: this.ffmpegProcess.pid,
+            });
+            this.ffmpegProcess.kill('SIGKILL');
+          }
+        }, 1000);
+        
+      } catch (error) {
+        logger.warn("Error cleaning up FFmpeg process", {
+          error: error.message,
+          pid: this.ffmpegProcess.pid,
+        });
+      }
+      
+      this.ffmpegProcess = null;
+    }
   }
 }
 
