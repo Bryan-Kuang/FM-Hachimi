@@ -1,0 +1,55 @@
+{
+  "name": "bilibili-discord-bot",
+  "version": "1.0.0",
+  "description": "Discord bot for streaming Bilibili video audio",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:audio": "node tests/manual/audio-test.js",
+    "test:extractor": "node tests/manual/extractor-test.js",
+    "test:ui": "node tests/manual/ui-test.js",
+    "test:discord": "node tests/manual/discord-test.js",
+    "test:player": "node tests/manual/audio-player-test.js",
+    "test:system": "node tests/manual/full-system-test.js",
+    "deploy:commands": "node scripts/deploy-commands.js",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "bilibili",
+    "audio",
+    "music"
+  ],
+  "author": "Individual Developer",
+  "license": "MIT",
+  "dependencies": {
+    "@discordjs/voice": "^0.19.0",
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "moment": "^2.29.4",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "discord.js": "^14.22.1",
+    "eslint": "^8.55.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/bilibili-discord-bot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/bilibili-discord-bot/issues"
+  },
+  "homepage": "https://github.com/yourusername/bilibili-discord-bot#readme"
+}
