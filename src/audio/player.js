@@ -130,14 +130,19 @@ class AudioPlayer {
   /**
    * Join a voice channel
    * @param {VoiceChannel} voiceChannel - Discord voice channel
+   * @param {number} retryCount - Current retry attempt
    * @returns {Promise<boolean>} - Success status
    */
-  async joinVoiceChannel(voiceChannel) {
+  async joinVoiceChannel(voiceChannel, retryCount = 0) {
+    const maxRetries = 3;
+    
     try {
       logger.info("Attempting to join voice channel", {
         channelId: voiceChannel.id,
         channelName: voiceChannel.name,
         guildId: voiceChannel.guild.id,
+        attempt: retryCount + 1,
+        maxRetries: maxRetries,
       });
 
       // Check if already connected to this channel
@@ -181,7 +186,25 @@ class AudioPlayer {
       logger.error("Failed to join voice channel", {
         error: error.message,
         channelId: voiceChannel?.id,
+        attempt: retryCount + 1,
+        maxRetries: maxRetries,
       });
+      
+      // 如果是连接超时且还有重试次数，则重试
+      if (retryCount < maxRetries && 
+          (error.message.includes("timeout") || 
+           error.message.includes("connection"))) {
+        logger.info("Retrying voice connection", {
+          channelId: voiceChannel.id,
+          nextAttempt: retryCount + 2,
+          delay: (retryCount + 1) * 2000,
+        });
+        
+        // 等待递增延迟后重试
+        await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 2000));
+        return await this.joinVoiceChannel(voiceChannel, retryCount + 1);
+      }
+      
       return false;
     }
   }
@@ -202,14 +225,14 @@ class AudioPlayer {
         return;
       }
 
-      // 🔧 修复：减少超时时间，添加更多状态监听
+      // 🔧 修复：增加超时时间，改进连接稳定性
       const timeout = setTimeout(() => {
         logger.error("Voice connection timeout", {
           currentStatus: this.voiceConnection?.state?.status,
           guild: this.currentGuild,
         });
         reject(new Error("Voice connection timeout"));
-      }, 5000); // 减少到5秒
+      }, 15000); // 增加到15秒
 
       const cleanup = () => {
         clearTimeout(timeout);
@@ -338,7 +361,7 @@ class AudioPlayer {
 
     try {
       logger.info("Starting to play track", {
-        title: this.currentTrack.title,
+        title: this.currentTrack?.title || "Unknown",
         audioUrl: this.currentTrack.audioUrl ? "Available" : "Missing",
         guild: this.currentGuild,
         voiceConnectionStatus: this.voiceConnection.state.status,
@@ -377,7 +400,7 @@ class AudioPlayer {
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
       logger.info("Track playback initiated successfully", {
-        title: this.currentTrack.title,
+        title: this.currentTrack?.title || "Unknown",
         playerStatus: this.audioPlayer.state.status,
         voiceConnectionStatus: this.voiceConnection?.state?.status,
         subscribed: this.voiceConnection?.state?.subscription !== null,
@@ -389,7 +412,7 @@ class AudioPlayer {
       return true;
     } catch (error) {
       logger.error("Failed to play track", {
-        title: this.currentTrack.title,
+        title: this.currentTrack?.title || "Unknown",
         error: error.message,
         stack: error.stack,
         voiceConnectionStatus: this.voiceConnection?.state?.status,
@@ -460,23 +483,46 @@ class AudioPlayer {
 
           let stderr = "";
 
+          // 添加超时处理
+          const ffmpegTimeout = setTimeout(() => {
+            logger.error("FFmpeg process timeout", {
+              audioUrl: audioUrl ? "Available" : "Missing",
+              guild: this.currentGuild,
+            });
+            ffmpegProcess.kill('SIGKILL');
+            reject(new Error("FFmpeg process timeout after 30 seconds"));
+          }, 30000);
+
           ffmpegProcess.stderr.on("data", (data) => {
             stderr += data.toString();
           });
 
           ffmpegProcess.on("error", (error) => {
+            clearTimeout(ffmpegTimeout);
             logger.error("FFmpeg process error", {
               error: error.message,
               stderr: stderr.substring(0, 500),
+              guild: this.currentGuild,
             });
             reject(new Error(`FFmpeg process error: ${error.message}`));
           });
 
           ffmpegProcess.on("close", (code) => {
-            if (code !== 0) {
+            clearTimeout(ffmpegTimeout);
+            if (code !== 0 && code !== null) {
+              // 忽略SIGKILL导致的退出码
+              if (code === 137 || code === 143) {
+                logger.warn("FFmpeg process was terminated", {
+                  code,
+                  guild: this.currentGuild,
+                });
+                return;
+              }
+              
               logger.error("FFmpeg process exited with error", {
                 code,
                 stderr: stderr.substring(0, 500),
+                guild: this.currentGuild,
               });
               reject(new Error(`FFmpeg failed with code ${code}: ${stderr}`));
               return;
@@ -568,7 +614,7 @@ class AudioPlayer {
     } else if (this.loopMode === "track" && this.currentTrack) {
       // Restart current track
       logger.info("Track loop: replaying current track", {
-        title: this.currentTrack.title,
+        title: this.currentTrack?.title || "Unknown",
         guild: this.currentGuild,
       });
       // Only attempt to play if we have a voice connection
@@ -788,14 +834,14 @@ class AudioPlayer {
       // Repeat current track - reset retry count for loop
       this.currentTrack.retryCount = 0;
       logger.info("Track ended, looping current track", {
-        title: this.currentTrack.title,
+        title: this.currentTrack?.title || "Unknown",
         guild: this.currentGuild,
       });
       await this.playCurrentTrack();
     } else {
       // Try to play next track
       logger.info("Track ended, attempting to skip to next", {
-        title: this.currentTrack.title,
+        title: this.currentTrack?.title || "Unknown",
         currentIndex: this.currentIndex,
         queueLength: this.queue.length,
         loopMode: this.loopMode,
@@ -877,7 +923,7 @@ class AudioPlayer {
     }
 
     logger.info("Retrying current track", {
-      title: this.currentTrack.title,
+      title: this.currentTrack?.title || "Unknown",
       attempt: (this.currentTrack.retryCount || 0) + 1,
     });
 
@@ -885,7 +931,7 @@ class AudioPlayer {
     this.currentTrack.retryCount = (this.currentTrack.retryCount || 0) + 1;
     if (this.currentTrack.retryCount > 2) {
       logger.error("Max retry attempts reached, skipping track", {
-        title: this.currentTrack.title,
+        title: this.currentTrack?.title || "Unknown",
       });
       this.handleTrackEnd();
       return;

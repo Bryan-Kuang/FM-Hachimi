@@ -18,10 +18,12 @@ class BilibiliExtractor {
   /**
    * Extract audio stream URL and metadata from Bilibili video
    * @param {string} url - Bilibili video URL
+   * @param {number} retryCount - Current retry attempt
+   * @param {number} maxRetries - Maximum retry attempts
    * @returns {Promise<Object>} - Video metadata and audio stream info
    */
-  async extractAudio(url) {
-    logger.info("Starting audio extraction", { url });
+  async extractAudio(url, retryCount = 0, maxRetries = 2) {
+    logger.info("Starting audio extraction", { url, attempt: retryCount + 1 });
 
     try {
       // Check yt-dlp availability on first use (lazy check)
@@ -72,8 +74,23 @@ class BilibiliExtractor {
       logger.error("Audio extraction failed", {
         url,
         error: error.message,
-        stack: error.stack,
+        attempt: retryCount + 1,
+        maxRetries: maxRetries,
       });
+      
+      // 如果是网络相关错误且还有重试次数，则重试
+      if (retryCount < maxRetries && this.isRetryableError(error)) {
+        logger.info("Retrying audio extraction", {
+          url,
+          nextAttempt: retryCount + 2,
+          delay: (retryCount + 1) * 3000,
+        });
+        
+        // 等待递增延迟后重试
+        await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 3000));
+        return await this.extractAudio(url, retryCount + 1, maxRetries);
+      }
+      
       throw new Error(`Audio extraction failed: ${error.message}`);
     }
   }
@@ -109,13 +126,36 @@ class BilibiliExtractor {
       });
 
       ytdlp.on("close", (code) => {
-        if (code !== 0) {
+        if (code !== 0 && code !== null) {
+          // 忽略进程被终止的情况
+          if (code === 137 || code === 143) {
+            logger.warn("yt-dlp process was terminated", {
+              code,
+              url,
+            });
+            reject(new Error("Video info extraction timeout"));
+            return;
+          }
+          
           logger.error("yt-dlp failed to get video info", {
             code,
             stderr,
             url,
           });
-          reject(new Error(`yt-dlp exited with code ${code}: ${stderr}`));
+          
+          // 提供更具体的错误信息
+          let errorMessage = `yt-dlp exited with code ${code}`;
+          if (stderr.includes('Video unavailable')) {
+            errorMessage = 'Video is unavailable or private';
+          } else if (stderr.includes('network') || stderr.includes('timeout')) {
+            errorMessage = 'Network connection error';
+          } else if (stderr.includes('certificate') || stderr.includes('SSL')) {
+            errorMessage = 'SSL certificate error';
+          } else if (stderr) {
+            errorMessage += `: ${stderr}`;
+          }
+          
+          reject(new Error(errorMessage));
           return;
         }
 
@@ -136,14 +176,34 @@ class BilibiliExtractor {
 
       ytdlp.on("error", (error) => {
         logger.error("yt-dlp process error", { error: error.message });
-        reject(new Error(`yt-dlp process error: ${error.message}`));
+        
+        // 提供更具体的错误信息
+        let errorMessage = 'yt-dlp process error';
+        if (error.code === 'ENOENT') {
+          errorMessage = 'yt-dlp is not installed or not found in PATH';
+        } else if (error.message) {
+          errorMessage += `: ${error.message}`;
+        }
+        
+        reject(new Error(errorMessage));
       });
 
       // Set timeout for the operation
-      setTimeout(() => {
-        ytdlp.kill();
+      const timeoutId = setTimeout(() => {
+        ytdlp.kill('SIGTERM');
+        // Force kill after 2 seconds if still running
+        setTimeout(() => {
+          if (!ytdlp.killed) {
+            ytdlp.kill('SIGKILL');
+          }
+        }, 2000);
         reject(new Error("Video info extraction timeout"));
       }, 30000); // 30 seconds timeout
+      
+      // Clear timeout when process ends
+      ytdlp.on('close', () => {
+        clearTimeout(timeoutId);
+      });
     });
   }
 
@@ -179,13 +239,38 @@ class BilibiliExtractor {
       });
 
       ytdlp.on("close", (code) => {
-        if (code !== 0) {
+        if (code !== 0 && code !== null) {
+          // 忽略进程被终止的情况
+          if (code === 137 || code === 143) {
+            logger.warn("yt-dlp process was terminated", {
+              code,
+              url,
+            });
+            reject(new Error("Audio stream URL extraction timeout"));
+            return;
+          }
+          
           logger.error("yt-dlp failed to get audio stream URL", {
             code,
             stderr,
             url,
           });
-          reject(new Error(`yt-dlp exited with code ${code}: ${stderr}`));
+          
+          // 提供更具体的错误信息
+          let errorMessage = `yt-dlp exited with code ${code}`;
+          if (stderr.includes('Video unavailable')) {
+            errorMessage = 'Video is unavailable or private';
+          } else if (stderr.includes('network') || stderr.includes('timeout')) {
+            errorMessage = 'Network connection error';
+          } else if (stderr.includes('certificate') || stderr.includes('SSL')) {
+            errorMessage = 'SSL certificate error';
+          } else if (stderr.includes('No audio stream')) {
+            errorMessage = 'No audio stream available for this video';
+          } else if (stderr) {
+            errorMessage += `: ${stderr}`;
+          }
+          
+          reject(new Error(errorMessage));
           return;
         }
 
@@ -202,14 +287,34 @@ class BilibiliExtractor {
         logger.error("yt-dlp process error for audio stream", {
           error: error.message,
         });
-        reject(new Error(`yt-dlp process error: ${error.message}`));
+        
+        // 提供更具体的错误信息
+        let errorMessage = 'yt-dlp process error';
+        if (error.code === 'ENOENT') {
+          errorMessage = 'yt-dlp is not installed or not found in PATH';
+        } else if (error.message) {
+          errorMessage += `: ${error.message}`;
+        }
+        
+        reject(new Error(errorMessage));
       });
 
       // Set timeout for the operation
-      setTimeout(() => {
-        ytdlp.kill();
+      const timeoutId = setTimeout(() => {
+        ytdlp.kill('SIGTERM');
+        // Force kill after 2 seconds if still running
+        setTimeout(() => {
+          if (!ytdlp.killed) {
+            ytdlp.kill('SIGKILL');
+          }
+        }, 2000);
         reject(new Error("Audio stream URL extraction timeout"));
       }, 30000); // 30 seconds timeout
+      
+      // Clear timeout when process ends
+      ytdlp.on('close', () => {
+        clearTimeout(timeoutId);
+      });
     });
   }
 
@@ -285,6 +390,37 @@ class BilibiliExtractor {
 
     const videoInfo = UrlValidator.extractVideoId(url);
     return videoInfo ? videoInfo.id : null;
+  }
+
+  /**
+   * Check if an error is retryable (network-related)
+   * @param {Error} error - The error to check
+   * @returns {boolean} - True if the error is retryable
+   */
+  isRetryableError(error) {
+    const message = error.message.toLowerCase();
+    
+    // Network-related errors that can be retried
+    const retryableErrors = [
+      'timeout',
+      'network',
+      'connection',
+      'econnreset',
+      'enotfound',
+      'econnrefused',
+      'etimedout',
+      'socket hang up',
+      'certificate',
+      'ssl',
+      'tls',
+      'temporary failure',
+      'service unavailable',
+      '502',
+      '503',
+      '504'
+    ];
+    
+    return retryableErrors.some(errorType => message.includes(errorType));
   }
 
   /**
