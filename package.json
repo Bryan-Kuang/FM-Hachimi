@@ -51,6 +51,14 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "!src/index.js"
+    ],
+    "setupFilesAfterEnv": ["<rootDir>/tests/setup.js"]
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/yourusername/bilibili-discord-bot.git"
