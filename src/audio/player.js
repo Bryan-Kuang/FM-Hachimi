@@ -548,8 +548,8 @@ class AudioPlayer {
             lastDataTime = Date.now(); // 更新最后数据时间
           });
           
-          ffmpegProcess.stdout.on("data", () => {
-            lastDataTime = Date.now(); // 更新最后数据时间
+          ffmpegProcess.stdout.on("data", (data) => {
+            lastDataTime = Date.now(); // 更新最后数据时间 - 修复：确保stdout数据也更新活跃时间
           });
 
           ffmpegProcess.on("error", (error) => {
