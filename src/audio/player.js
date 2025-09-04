@@ -1031,38 +1031,42 @@ class AudioPlayer {
    */
   cleanupFFmpegProcess() {
     if (this.ffmpegProcess && !this.ffmpegProcess.killed) {
+      const processToCleanup = this.ffmpegProcess;
+      const pidToCleanup = processToCleanup.pid;
+      
       logger.info("Cleaning up FFmpeg process", {
-        pid: this.ffmpegProcess.pid,
+        pid: pidToCleanup,
         guild: this.currentGuild,
       });
       
+      // 立即清空引用，防止新进程被误杀
+      this.ffmpegProcess = null;
+      
       try {
         // 先尝试优雅地关闭stdin
-        if (this.ffmpegProcess.stdin && !this.ffmpegProcess.stdin.destroyed) {
-          this.ffmpegProcess.stdin.end();
+        if (processToCleanup.stdin && !processToCleanup.stdin.destroyed) {
+          processToCleanup.stdin.end();
         }
         
         // 然后终止进程
-        this.ffmpegProcess.kill('SIGTERM');
+        processToCleanup.kill('SIGTERM');
         
         // 如果进程没有在合理时间内退出，强制杀死
         setTimeout(() => {
-          if (this.ffmpegProcess && !this.ffmpegProcess.killed) {
+          if (processToCleanup && !processToCleanup.killed) {
             logger.warn("Force killing FFmpeg process", {
-              pid: this.ffmpegProcess.pid,
+              pid: pidToCleanup,
             });
-            this.ffmpegProcess.kill('SIGKILL');
+            processToCleanup.kill('SIGKILL');
           }
         }, 1000);
         
       } catch (error) {
         logger.warn("Error cleaning up FFmpeg process", {
           error: error.message,
-          pid: this.ffmpegProcess.pid,
+          pid: pidToCleanup,
         });
       }
-      
-      this.ffmpegProcess = null;
     }
   }
 }
