@@ -4,6 +4,59 @@
 
 ## 🔧 已修复问题
 
+#### 1. FFmpeg进程超时导致播放中断 & 无限长度视频支持
+
+**问题描述**：
+- 视频播放到一半(约31秒)就重新开始
+- FFmpeg进程30秒超时，无法播放长视频
+- 需要支持任意长度的视频播放
+
+**根本原因**：
+- FFmpeg使用固定超时时间(30秒→5分钟)仍然有限制
+- 网络不稳定时容易触发超时
+- 进程清理机制不完善
+
+**最终解决方案**：
+```javascript
+// 完全移除固定超时，改为动态活跃监控
+let lastDataTime = Date.now();
+let isProcessActive = true;
+
+// 基于数据流活跃状态的智能监控
+const activityMonitor = setInterval(() => {
+  const timeSinceLastData = Date.now() - lastDataTime;
+  const warningThreshold = config.audio.ffmpegInactiveWarningThreshold; // 30秒
+  const killThreshold = config.audio.ffmpegInactiveKillThreshold; // 60秒
+  
+  if (timeSinceLastData > killThreshold) {
+    // 只有在进程真正卡死时才终止
+    terminateProcess();
+  }
+}, config.audio.ffmpegActivityCheckInterval); // 10秒检查间隔
+
+// 增强的FFmpeg参数
+const ffmpegArgs = [
+  '-reconnect', '1',
+  '-reconnect_streamed', '1', 
+  '-reconnect_at_eof', '1',
+  '-rw_timeout', '60000000', // 60秒网络超时
+  '-timeout', '60000000',
+  '-analyzeduration', '10000000',
+  '-probesize', '50000000',
+  '-fflags', '+genpts+discardcorrupt',
+  '-bufsize', '2048k',
+  // ... 其他参数
+];
+```
+
+**新增配置选项**：
+- `FFMPEG_ACTIVITY_CHECK_INTERVAL=10000` - 活跃检查间隔
+- `FFMPEG_INACTIVE_WARNING_THRESHOLD=30000` - 警告阈值
+- `FFMPEG_INACTIVE_KILL_THRESHOLD=60000` - 终止阈值
+- `ENABLE_UNLIMITED_LENGTH=true` - 启用无限长度支持
+
+**状态**：✅ 已修复 - 现在支持任意长度视频播放
+
 ### 🔍 调试工具和方法
 
 #### 检查错误日志

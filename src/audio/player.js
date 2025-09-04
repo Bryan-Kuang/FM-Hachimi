@@ -15,6 +15,7 @@ const {
 const { spawn } = require("child_process");
 const logger = require("../utils/logger");
 const Formatters = require("../utils/formatters");
+const config = require("../config/config");
 
 class AudioPlayer {
   constructor() {
@@ -470,7 +471,13 @@ class AudioPlayer {
             "-reconnect", "1",           // 启用重连
             "-reconnect_streamed", "1", // 对流媒体启用重连
             "-reconnect_delay_max", "5", // 最大重连延迟5秒
-            "-rw_timeout", "10000000",   // 读写超时10秒
+            "-reconnect_at_eof", "1",   // 在EOF时重连
+            "-rw_timeout", "60000000",   // 读写超时60秒
+            "-timeout", "60000000",     // 连接超时60秒
+            "-headers", "Connection: keep-alive",
+            "-analyzeduration", "10000000", // 10秒分析时间
+            "-probesize", "50000000",   // 50MB探测大小
+            "-fflags", "+genpts+discardcorrupt", // 生成PTS并丢弃损坏帧
             "-i",
             audioUrl,
             "-f",
@@ -482,6 +489,7 @@ class AudioPlayer {
             "-vn",
             "-loglevel",
             "warning", // 改为warning级别以获取更多调试信息
+            "-bufsize", "2048k", // 增加缓冲区大小
             "pipe:1",
           ]);
           
@@ -490,39 +498,59 @@ class AudioPlayer {
 
           let stderr = "";
 
-          // 🔧 修复：增加超时时间并改进超时处理逻辑
-          // 对于长视频，30秒超时太短，增加到5分钟
-          const ffmpegTimeout = setTimeout(() => {
-            logger.warn("FFmpeg process timeout, attempting graceful shutdown", {
-              audioUrl: audioUrl ? "Available" : "Missing",
-              guild: this.currentGuild,
-              timeoutDuration: "5 minutes",
-            });
+          // 动态监控FFmpeg进程状态，无固定超时限制
+          let lastDataTime = Date.now();
+          let isProcessActive = true;
+          
+          // 监控进程活跃状态 - 使用配置的阈值检测进程是否卡死
+          const activityMonitor = setInterval(() => {
+            const timeSinceLastData = Date.now() - lastDataTime;
+            const warningThreshold = config.audio.ffmpegInactiveWarningThreshold;
+            const killThreshold = config.audio.ffmpegInactiveKillThreshold;
             
-            // 先尝试优雅关闭
-            if (ffmpegProcess.stdin && !ffmpegProcess.stdin.destroyed) {
-              ffmpegProcess.stdin.end();
-            }
-            
-            // 给进程2秒时间优雅退出
-            setTimeout(() => {
-              if (!ffmpegProcess.killed) {
-                logger.error("FFmpeg process force killed after timeout", {
+            if (timeSinceLastData > warningThreshold && isProcessActive) {
+              logger.warn("FFmpeg process appears inactive, checking status", {
+                timeSinceLastData,
+                warningThreshold,
+                killThreshold,
+                guild: this.currentGuild,
+              });
+              
+              // 如果进程真的卡死了，尝试优雅关闭
+              if (timeSinceLastData > killThreshold) {
+                logger.error(`FFmpeg process inactive for over ${killThreshold/1000} seconds, terminating`, {
                   guild: this.currentGuild,
+                  timeSinceLastData,
                 });
-                ffmpegProcess.kill('SIGKILL');
+                clearInterval(activityMonitor);
+                
+                if (ffmpegProcess.stdin && !ffmpegProcess.stdin.destroyed) {
+                  ffmpegProcess.stdin.end();
+                }
+                
+                setTimeout(() => {
+                  if (!ffmpegProcess.killed) {
+                    ffmpegProcess.kill('SIGKILL');
+                  }
+                }, 2000);
+                
+                reject(new Error(`FFmpeg process became inactive for ${timeSinceLastData/1000} seconds`));
               }
-            }, 2000);
-            
-            reject(new Error("FFmpeg process timeout after 5 minutes"));
-          }, 300000); // 增加到5分钟 (300秒)
+            }
+          }, config.audio.ffmpegActivityCheckInterval);
 
           ffmpegProcess.stderr.on("data", (data) => {
             stderr += data.toString();
+            lastDataTime = Date.now(); // 更新最后数据时间
+          });
+          
+          ffmpegProcess.stdout.on("data", () => {
+            lastDataTime = Date.now(); // 更新最后数据时间
           });
 
           ffmpegProcess.on("error", (error) => {
-            clearTimeout(ffmpegTimeout);
+            clearInterval(activityMonitor);
+            isProcessActive = false;
             logger.error("FFmpeg process error", {
               error: error.message,
               stderr: stderr.substring(0, 500),
@@ -532,7 +560,8 @@ class AudioPlayer {
           });
 
           ffmpegProcess.on("close", (code) => {
-            clearTimeout(ffmpegTimeout);
+            clearInterval(activityMonitor);
+            isProcessActive = false;
             
             // 清理进程引用
             if (this.ffmpegProcess === ffmpegProcess) {
