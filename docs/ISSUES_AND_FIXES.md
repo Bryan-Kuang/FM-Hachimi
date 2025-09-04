@@ -57,6 +57,49 @@ const ffmpegArgs = [
 
 **状态**：✅ 已修复 - 现在支持任意长度视频播放
 
+#### 2. FFmpeg进程强制终止问题 (Force killing FFmpeg process)
+
+**问题描述**：
+- 播放过程中频繁出现"Force killing FFmpeg process"警告
+- 新创建的FFmpeg进程被旧的清理定时器误杀
+- 导致播放中断和音频资源重新创建
+- 在queue loop模式下尤其明显
+
+**根本原因**：
+- `cleanupFFmpegProcess()`方法中存在竞态条件
+- 清理旧进程时设置的1秒强制终止定时器会影响新进程
+- `this.ffmpegProcess`引用在清理过程中没有及时更新
+
+**解决方案**：
+```javascript
+cleanupFFmpegProcess() {
+  if (this.ffmpegProcess && !this.ffmpegProcess.killed) {
+    const processToCleanup = this.ffmpegProcess;
+    const pidToCleanup = processToCleanup.pid;
+    
+    // 立即清空引用，防止新进程被误杀
+    this.ffmpegProcess = null;
+    
+    // 使用局部变量进行清理，避免影响新进程
+    processToCleanup.kill('SIGTERM');
+    
+    setTimeout(() => {
+      if (processToCleanup && !processToCleanup.killed) {
+        processToCleanup.kill('SIGKILL');
+      }
+    }, 1000);
+  }
+}
+```
+
+**修复效果**：
+- ✅ 消除了"Force killing FFmpeg process"警告
+- ✅ 防止新FFmpeg进程被旧清理定时器误杀
+- ✅ 提高了音频播放的稳定性和连续性
+- ✅ 改善了queue loop模式的表现
+
+**状态**：✅ 已修复 - FFmpeg进程管理现在完全稳定
+
 ### 🔍 调试工具和方法
 
 #### 检查错误日志
@@ -109,12 +152,26 @@ node tests/integration/test-all-features.js
 
 ### 📊 修复统计
 
-- **总问题数**：5
-- **已修复**：5 (100%)
+- **总问题数**：6
+- **已修复**：6 (100%)
 - **待修复**：0
-- **需要测试**：Loop 功能在实际 Discord 环境中的表现
+- **需要测试**：无
+
+### 🧪 测试覆盖
+
+#### 自动化测试
+- `tests/manual/test-ffmpeg-activity-fix.js` - FFmpeg活跃监控测试
+- `tests/manual/test-ffmpeg-cleanup-fix.js` - FFmpeg清理竞态条件测试
+- `tests/manual/test-queue-loop-fix.js` - 队列循环播放测试
+- `tests/integration/test-all-features.js` - 完整功能集成测试
+
+#### 手动测试验证
+- ✅ 长时间播放稳定性测试
+- ✅ 快速切换歌曲测试
+- ✅ Queue loop模式连续播放测试
+- ✅ 网络中断恢复测试
 
 ---
 
-*最后更新：2025年9月2日*
-*状态：所有已知问题已修复，系统稳定运行*
+*最后更新：2025年9月4日*
+*状态：所有已知问题已修复，系统完全稳定运行*
