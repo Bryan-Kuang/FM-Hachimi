@@ -461,12 +461,16 @@ class AudioPlayer {
           // FFmpeg is available, proceed with audio resource creation
           logger.debug("FFmpeg available, creating audio stream");
 
-          // 🔧 修复：输出Raw PCM格式而不是Opus，避免管道问题
+          // 🔧 修复：改进FFmpeg参数，增加网络重试和缓冲设置
           const ffmpegProcess = spawn("ffmpeg", [
             "-user_agent",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "-referer",
             "https://www.bilibili.com/",
+            "-reconnect", "1",           // 启用重连
+            "-reconnect_streamed", "1", // 对流媒体启用重连
+            "-reconnect_delay_max", "5", // 最大重连延迟5秒
+            "-rw_timeout", "10000000",   // 读写超时10秒
             "-i",
             audioUrl,
             "-f",
@@ -477,21 +481,41 @@ class AudioPlayer {
             "2",
             "-vn",
             "-loglevel",
-            "error",
+            "warning", // 改为warning级别以获取更多调试信息
             "pipe:1",
           ]);
+          
+          // 保存FFmpeg进程引用以便清理
+          this.ffmpegProcess = ffmpegProcess;
 
           let stderr = "";
 
-          // 添加超时处理
+          // 🔧 修复：增加超时时间并改进超时处理逻辑
+          // 对于长视频，30秒超时太短，增加到5分钟
           const ffmpegTimeout = setTimeout(() => {
-            logger.error("FFmpeg process timeout", {
+            logger.warn("FFmpeg process timeout, attempting graceful shutdown", {
               audioUrl: audioUrl ? "Available" : "Missing",
               guild: this.currentGuild,
+              timeoutDuration: "5 minutes",
             });
-            ffmpegProcess.kill('SIGKILL');
-            reject(new Error("FFmpeg process timeout after 30 seconds"));
-          }, 30000);
+            
+            // 先尝试优雅关闭
+            if (ffmpegProcess.stdin && !ffmpegProcess.stdin.destroyed) {
+              ffmpegProcess.stdin.end();
+            }
+            
+            // 给进程2秒时间优雅退出
+            setTimeout(() => {
+              if (!ffmpegProcess.killed) {
+                logger.error("FFmpeg process force killed after timeout", {
+                  guild: this.currentGuild,
+                });
+                ffmpegProcess.kill('SIGKILL');
+              }
+            }, 2000);
+            
+            reject(new Error("FFmpeg process timeout after 5 minutes"));
+          }, 300000); // 增加到5分钟 (300秒)
 
           ffmpegProcess.stderr.on("data", (data) => {
             stderr += data.toString();
@@ -509,10 +533,16 @@ class AudioPlayer {
 
           ffmpegProcess.on("close", (code) => {
             clearTimeout(ffmpegTimeout);
+            
+            // 清理进程引用
+            if (this.ffmpegProcess === ffmpegProcess) {
+              this.ffmpegProcess = null;
+            }
+            
             if (code !== 0 && code !== null) {
-              // 忽略SIGKILL导致的退出码
-              if (code === 137 || code === 143) {
-                logger.warn("FFmpeg process was terminated", {
+              // 忽略SIGKILL和SIGTERM导致的退出码
+              if (code === 137 || code === 143 || code === 15) {
+                logger.info("FFmpeg process was gracefully terminated", {
                   code,
                   guild: this.currentGuild,
                 });
