@@ -33,11 +33,13 @@ module.exports = {
       const queueButtons = ButtonBuilders.createQueueControls({
         hasQueue: queueInfo.state.queueLength > 0,
         queueLength: queueInfo.state.queueLength,
+        queue: queueInfo.queue,
+        currentIndex: queueInfo.state.currentIndex,
       });
 
       await interaction.reply({
         embeds: [queueEmbed],
-        components: [queueButtons],
+        components: queueButtons,
       });
 
       logger.info("Queue command executed successfully", {

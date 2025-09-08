@@ -201,6 +201,8 @@ async function handleButtonInteraction(interaction) {
         responseButtons = ButtonBuilders.createQueueControls({
           hasQueue: queueInfo.state.queueLength > 0,
           queueLength: queueInfo.state.queueLength,
+          queue: queueInfo.queue,
+          currentIndex: queueInfo.state.currentIndex,
         });
         break;
       }
@@ -211,9 +213,12 @@ async function handleButtonInteraction(interaction) {
           "🗑️ The queue has been cleared"
         );
 
+        const queueInfo = AudioManager.getQueue(interaction.guild.id);
         responseButtons = ButtonBuilders.createQueueControls({
           hasQueue: result.player.queueLength > 0,
           queueLength: result.player.queueLength,
+          queue: queueInfo.queue,
+          currentIndex: queueInfo.state.currentIndex,
         });
         break;
       }
@@ -224,9 +229,12 @@ async function handleButtonInteraction(interaction) {
           "🔀 The queue has been shuffled"
         );
 
+        const queueInfoShuffle = AudioManager.getQueue(interaction.guild.id);
         responseButtons = ButtonBuilders.createQueueControls({
           hasQueue: result.player.queueLength > 0,
           queueLength: result.player.queueLength,
+          queue: queueInfoShuffle.queue,
+          currentIndex: queueInfoShuffle.state.currentIndex,
         });
         break;
       }
@@ -247,9 +255,12 @@ async function handleButtonInteraction(interaction) {
           `${loopEmoji} Loop mode ${loopText}`
         );
 
+        const queueInfoLoop = AudioManager.getQueue(interaction.guild.id);
         responseButtons = ButtonBuilders.createQueueControls({
           hasQueue: result.player.queueLength > 0,
           queueLength: result.player.queueLength,
+          queue: queueInfoLoop.queue,
+          currentIndex: queueInfoLoop.state.currentIndex,
         });
         break;
       }
@@ -268,10 +279,27 @@ async function handleButtonInteraction(interaction) {
       }
 
       default: {
-        responseEmbed = EmbedBuilders.createSuccessEmbed(
-          "Action Completed",
-          "✅ Action completed successfully"
-        );
+        // Handle queue delete buttons (format: queue_delete_<index>)
+        if (customId.startsWith("queue_delete_")) {
+          const index = parseInt(customId.split("_")[2]);
+          responseEmbed = EmbedBuilders.createSuccessEmbed(
+            "Track Removed",
+            `🗑️ Track ${index + 1} has been removed from the queue`
+          );
+
+          const queueInfoDelete = AudioManager.getQueue(interaction.guild.id);
+          responseButtons = ButtonBuilders.createQueueControls({
+            hasQueue: result.player.queueLength > 0,
+            queueLength: result.player.queueLength,
+            queue: queueInfoDelete.queue,
+            currentIndex: queueInfoDelete.state.currentIndex,
+          });
+        } else {
+          responseEmbed = EmbedBuilders.createSuccessEmbed(
+            "Action Completed",
+            "✅ Action completed successfully"
+          );
+        }
         break;
       }
     }

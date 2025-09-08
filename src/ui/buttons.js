@@ -78,15 +78,18 @@ class ButtonBuilders {
   /**
    * Create queue management buttons
    * @param {Object} options - Queue options
-   * @returns {ActionRowBuilder} - Discord action row with buttons
+   * @returns {Array<ActionRowBuilder>} - Array of Discord action rows with buttons
    */
   static createQueueControls(options = {}) {
-    const { hasQueue = false, queueLength = 0 } = options;
+    const { hasQueue = false, queueLength = 0, queue = [], currentIndex = -1 } = options;
 
-    const row = new ActionRowBuilder();
+    const rows = [];
+
+    // First row: General queue controls
+    const controlRow = new ActionRowBuilder();
 
     // Clear queue button
-    row.addComponents(
+    controlRow.addComponents(
       new ButtonBuilder()
         .setCustomId("queue_clear")
         .setLabel("🗑️ Clear")
@@ -95,7 +98,7 @@ class ButtonBuilders {
     );
 
     // Shuffle queue button
-    row.addComponents(
+    controlRow.addComponents(
       new ButtonBuilder()
         .setCustomId("queue_shuffle")
         .setLabel("🔀 Shuffle")
@@ -104,7 +107,7 @@ class ButtonBuilders {
     );
 
     // Loop toggle button
-    row.addComponents(
+    controlRow.addComponents(
       new ButtonBuilder()
         .setCustomId("queue_loop")
         .setLabel("🔁 Loop")
@@ -112,7 +115,44 @@ class ButtonBuilders {
         .setDisabled(!hasQueue)
     );
 
-    return row;
+    rows.push(controlRow);
+
+    // Add delete buttons for individual tracks (up to 10 tracks, max 4 buttons per row)
+    if (queue && queue.length > 0) {
+      const displayQueue = queue.slice(0, 10); // Show up to 10 tracks
+      let currentRow = null;
+      let buttonsInRow = 0;
+
+      displayQueue.forEach((item, index) => {
+        // Skip currently playing track
+        if (index === currentIndex) return;
+
+        // Create new row if needed (max 4 buttons per row)
+        if (!currentRow || buttonsInRow >= 4) {
+          if (currentRow) rows.push(currentRow);
+          currentRow = new ActionRowBuilder();
+          buttonsInRow = 0;
+        }
+
+        // Add delete button for this track
+        const trackTitle = item.title.length > 15 ? item.title.substring(0, 15) + "..." : item.title;
+        currentRow.addComponents(
+          new ButtonBuilder()
+            .setCustomId(`queue_delete_${index}`)
+            .setLabel(`🗑️ ${index + 1}`)
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(false)
+        );
+        buttonsInRow++;
+      });
+
+      // Add the last row if it has buttons
+      if (currentRow && buttonsInRow > 0) {
+        rows.push(currentRow);
+      }
+    }
+
+    return rows;
   }
 
   /**

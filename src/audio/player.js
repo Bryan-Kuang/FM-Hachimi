@@ -781,6 +781,50 @@ class AudioPlayer {
   }
 
   /**
+   * Remove a track from the queue by index
+   * @param {number} index - Index of the track to remove
+   * @returns {boolean} - Success status
+   */
+  removeFromQueue(index) {
+    if (index < 0 || index >= this.queue.length) {
+      logger.warn("Invalid queue index for removal", {
+        index,
+        queueLength: this.queue.length,
+        guild: this.currentGuild,
+      });
+      return false;
+    }
+
+    // Cannot remove currently playing track
+    if (index === this.currentIndex) {
+      logger.warn("Cannot remove currently playing track", {
+        index,
+        currentIndex: this.currentIndex,
+        guild: this.currentGuild,
+      });
+      return false;
+    }
+
+    const removedTrack = this.queue[index];
+    this.queue.splice(index, 1);
+
+    // Adjust current index if necessary
+    if (index < this.currentIndex) {
+      this.currentIndex--;
+    }
+
+    logger.info("Track removed from queue", {
+      removedTrack: removedTrack.title,
+      index,
+      newQueueLength: this.queue.length,
+      newCurrentIndex: this.currentIndex,
+      guild: this.currentGuild,
+    });
+
+    return true;
+  }
+
+  /**
    * Shuffle the queue
    */
   shuffleQueue() {

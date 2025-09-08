@@ -342,6 +342,39 @@ class AudioManager {
   }
 
   /**
+   * Remove a track from queue by index
+   * @param {string} guildId - Discord guild ID
+   * @param {number} index - Index of track to remove
+   * @returns {Object} - Result object
+   */
+  removeFromQueue(guildId, index) {
+    const player = this.getPlayer(guildId);
+
+    if (player.queue.length === 0) {
+      return {
+        success: false,
+        error: "Queue is empty",
+        suggestion: "Add tracks to the queue first.",
+      };
+    }
+
+    const success = player.removeFromQueue(index);
+
+    if (!success) {
+      return {
+        success: false,
+        error: "Failed to remove track",
+        suggestion: "Check the track index and try again.",
+      };
+    }
+
+    return {
+      success: true,
+      player: player.getState(),
+    };
+  }
+
+  /**
    * Set loop mode for a guild
    * @param {string} guildId - Discord guild ID
    * @param {string} mode - Loop mode
@@ -509,6 +542,13 @@ class AudioManager {
       }
 
       default:
+        // Handle queue delete buttons (format: queue_delete_<index>)
+        if (customId.startsWith("queue_delete_")) {
+          const index = parseInt(customId.split("_")[2]);
+          if (!isNaN(index)) {
+            return this.removeFromQueue(guildId, index);
+          }
+        }
         return { success: false, error: "Unknown button interaction" };
     }
   }
