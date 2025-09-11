@@ -278,28 +278,37 @@ async function handleButtonInteraction(interaction) {
         return;
       }
 
-      default: {
-        // Handle queue delete buttons (format: queue_delete_<index>)
-        if (customId.startsWith("queue_delete_")) {
-          const index = parseInt(customId.split("_")[2]);
-          responseEmbed = EmbedBuilders.createSuccessEmbed(
-            "Track Removed",
-            `🗑️ Track ${index + 1} has been removed from the queue`
+      case "queue_remove": {
+        const queueInfo = AudioManager.getQueue(interaction.guild.id);
+        
+        if (!queueInfo.queue || queueInfo.queue.length === 0) {
+          responseEmbed = EmbedBuilders.createErrorEmbed(
+            "Queue Empty",
+            "There are no tracks in the queue to remove."
           );
-
-          const queueInfoDelete = AudioManager.getQueue(interaction.guild.id);
-          responseButtons = ButtonBuilders.createQueueControls({
-            hasQueue: result.player.queueLength > 0,
-            queueLength: result.player.queueLength,
-            queue: queueInfoDelete.queue,
-            currentIndex: queueInfoDelete.state.currentIndex,
-          });
-        } else {
-          responseEmbed = EmbedBuilders.createSuccessEmbed(
-            "Action Completed",
-            "✅ Action completed successfully"
-          );
+          break;
         }
+
+        // Create and send select menu
+        const selectMenu = ButtonBuilders.createQueueRemoveMenu({
+          queue: queueInfo.queue,
+          currentIndex: queueInfo.state.currentIndex,
+        });
+
+        responseEmbed = EmbedBuilders.createSuccessEmbed(
+          "Select Track to Remove",
+          "Choose a track from the dropdown menu below to remove it from the queue."
+        );
+
+        responseButtons = [selectMenu];
+        break;
+      }
+
+      default: {
+        responseEmbed = EmbedBuilders.createSuccessEmbed(
+          "Action Completed",
+          "✅ Action completed successfully"
+        );
         break;
       }
     }
@@ -365,7 +374,130 @@ async function handleSelectMenuInteraction(interaction) {
     const customId = interaction.customId;
     const user = interaction.user;
 
-    if (customId === "loop_select") {
+    if (customId === "queue_remove_select") {
+      const selectedValue = interaction.values[0];
+
+      logger.debug("Queue remove select menu interaction received", {
+        selectedValue,
+        user: user.username,
+        guild: interaction.guild?.name,
+      });
+
+      // Defer the reply immediately to avoid timeout
+      await interaction.deferReply();
+
+      let result;
+      let responseEmbed;
+      let responseButtons;
+
+      if (selectedValue === "clear_all" || selectedValue === "remove_all") {
+        // Clear all tracks from queue
+        result = AudioManager.clearQueue(interaction.guild.id);
+        
+        if (!result.success) {
+          const errorEmbed = EmbedBuilders.createErrorEmbed(
+            "Clear Queue Failed",
+            result.error || "Failed to clear the queue",
+            {
+              suggestion: result.suggestion || "Please try again.",
+            }
+          );
+
+          return await interaction.editReply({
+            embeds: [errorEmbed],
+          });
+        }
+
+        responseEmbed = EmbedBuilders.createSuccessEmbed(
+          "Queue Cleared",
+          "🗑️ All tracks have been removed from the queue"
+        );
+
+        responseButtons = ButtonBuilders.createQueueControls({
+          hasQueue: false,
+          queueLength: 0,
+          queue: [],
+          currentIndex: -1,
+        });
+      } else {
+        // Remove specific track by index
+        // Extract index from "remove_X" format
+        const indexMatch = selectedValue.match(/^remove_(\d+)$/);
+        if (!indexMatch) {
+          const errorEmbed = EmbedBuilders.createErrorEmbed(
+            "Invalid Selection",
+            "Invalid track selection format",
+            {
+              suggestion: "Please try selecting a track again.",
+            }
+          );
+
+          return await interaction.editReply({
+            embeds: [errorEmbed],
+          });
+        }
+        
+        const index = parseInt(indexMatch[1]);
+        result = AudioManager.removeFromQueue(interaction.guild.id, index);
+        
+        if (!result.success) {
+          const errorEmbed = EmbedBuilders.createErrorEmbed(
+            "Remove Track Failed",
+            result.error || "Failed to remove the track",
+            {
+              suggestion: result.suggestion || "Please try again.",
+            }
+          );
+
+          return await interaction.editReply({
+            embeds: [errorEmbed],
+          });
+        }
+
+        responseEmbed = EmbedBuilders.createSuccessEmbed(
+          "Track Removed",
+          `🗑️ Track has been removed from the queue`
+        );
+
+        const queueInfo = AudioManager.getQueue(interaction.guild.id);
+        responseButtons = ButtonBuilders.createQueueControls({
+          hasQueue: queueInfo.queue.length > 0,
+          queueLength: queueInfo.queue.length,
+          queue: queueInfo.queue,
+          currentIndex: queueInfo.state.currentIndex,
+        });
+      }
+
+      // Update the original message with new queue info
+      const queueInfo = AudioManager.getQueue(interaction.guild.id);
+      const queueEmbed = EmbedBuilders.createQueueEmbed(
+        queueInfo.queue,
+        queueInfo.state.currentIndex
+      );
+
+      const response = {
+        embeds: [queueEmbed],
+      };
+
+      if (responseButtons) {
+        response.components = responseButtons;
+      }
+
+      // Update the original queue message
+      await interaction.message.edit(response);
+
+      // Send confirmation as ephemeral reply
+      await interaction.editReply({
+        embeds: [responseEmbed],
+        ephemeral: true,
+      });
+
+      logger.info("Track removed via select menu", {
+        selectedValue,
+        user: user.username,
+        guild: interaction.guild?.name,
+      });
+    } else if (customId === "loop_select") {
       const selectedMode = interaction.values[0];
 
       logger.debug("Loop select menu interaction received", {

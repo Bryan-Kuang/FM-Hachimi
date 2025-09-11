@@ -3,7 +3,7 @@
  * Creates interactive button components for bot controls
  */
 
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require("discord.js");
 
 class ButtonBuilders {
   /**
@@ -81,21 +81,9 @@ class ButtonBuilders {
    * @returns {Array<ActionRowBuilder>} - Array of Discord action rows with buttons
    */
   static createQueueControls(options = {}) {
-    const { hasQueue = false, queueLength = 0, queue = [], currentIndex = -1 } = options;
+    const { hasQueue = false, queueLength = 0 } = options;
 
-    const rows = [];
-
-    // First row: General queue controls
     const controlRow = new ActionRowBuilder();
-
-    // Clear queue button
-    controlRow.addComponents(
-      new ButtonBuilder()
-        .setCustomId("queue_clear")
-        .setLabel("🗑️ Clear")
-        .setStyle(ButtonStyle.Danger)
-        .setDisabled(!hasQueue)
-    );
 
     // Shuffle queue button
     controlRow.addComponents(
@@ -115,44 +103,56 @@ class ButtonBuilders {
         .setDisabled(!hasQueue)
     );
 
-    rows.push(controlRow);
+    // Remove track button (opens select menu)
+    controlRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId("queue_remove")
+        .setLabel("🗑️ Remove")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!hasQueue)
+    );
 
-    // Add delete buttons for individual tracks (up to 10 tracks, max 4 buttons per row)
-    if (queue && queue.length > 0) {
-      const displayQueue = queue.slice(0, 10); // Show up to 10 tracks
-      let currentRow = null;
-      let buttonsInRow = 0;
+    return [controlRow];
+  }
 
-      displayQueue.forEach((item, index) => {
-        // Skip currently playing track
-        if (index === currentIndex) return;
+  /**
+   * Create queue remove select menu
+   * @param {Object} options - Queue options
+   * @returns {ActionRowBuilder} - Discord action row with select menu
+   */
+  static createQueueRemoveMenu(options = {}) {
+    const { queue = [], currentIndex = -1 } = options;
 
-        // Create new row if needed (max 4 buttons per row)
-        if (!currentRow || buttonsInRow >= 4) {
-          if (currentRow) rows.push(currentRow);
-          currentRow = new ActionRowBuilder();
-          buttonsInRow = 0;
-        }
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId("queue_remove_select")
+      .setPlaceholder("Select a track to remove...")
+      .setMinValues(1)
+      .setMaxValues(1);
 
-        // Add delete button for this track
-        const trackTitle = item.title.length > 15 ? item.title.substring(0, 15) + "..." : item.title;
-        currentRow.addComponents(
-          new ButtonBuilder()
-            .setCustomId(`queue_delete_${index}`)
-            .setLabel(`🗑️ ${index + 1}`)
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(false)
-        );
-        buttonsInRow++;
+    // Add "Remove All" option
+    selectMenu.addOptions({
+      label: "🗑️ Remove All Tracks",
+      description: "Clear the entire queue",
+      value: "remove_all",
+      emoji: "🗑️"
+    });
+
+    // Add individual tracks (excluding currently playing track)
+    queue.forEach((item, index) => {
+      if (index === currentIndex) return; // Skip currently playing track
+      
+      const trackTitle = item.title.length > 80 ? item.title.substring(0, 80) + "..." : item.title;
+      const trackDescription = item.uploader ? `by ${item.uploader}` : "Unknown uploader";
+      
+      selectMenu.addOptions({
+        label: `${index + 1}. ${trackTitle}`,
+        description: trackDescription.length > 100 ? trackDescription.substring(0, 100) + "..." : trackDescription,
+        value: `remove_${index}`,
+        emoji: "🎵"
       });
+    });
 
-      // Add the last row if it has buttons
-      if (currentRow && buttonsInRow > 0) {
-        rows.push(currentRow);
-      }
-    }
-
-    return rows;
+    return new ActionRowBuilder().addComponents(selectMenu);
   }
 
   /**

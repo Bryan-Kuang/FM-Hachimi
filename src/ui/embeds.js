@@ -139,10 +139,7 @@ class EmbedBuilders {
         15
       );
 
-      // Add delete button indicator for non-playing tracks
-      const deleteIndicator = isCurrentlyPlaying ? "" : " 🗑️";
-
-      queueText += `${statusIcon} **${title}**${deleteIndicator}\n`;
+      queueText += `${statusIcon} **${title}**\n`;
       queueText += `   Duration: \`${duration}\` • Requested by: ${requestedBy}\n\n`;
     });
 

@@ -806,6 +806,17 @@ class AudioPlayer {
     }
 
     const removedTrack = this.queue[index];
+    
+    // Safety check for track data
+    if (!removedTrack) {
+      logger.warn("Track at index is undefined", {
+        index,
+        queueLength: this.queue.length,
+        guild: this.currentGuild,
+      });
+      return false;
+    }
+    
     this.queue.splice(index, 1);
 
     // Adjust current index if necessary
@@ -814,7 +825,7 @@ class AudioPlayer {
     }
 
     logger.info("Track removed from queue", {
-      removedTrack: removedTrack.title,
+      removedTrack: removedTrack.title || 'Unknown Track',
       index,
       newQueueLength: this.queue.length,
       newCurrentIndex: this.currentIndex,

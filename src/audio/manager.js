@@ -541,6 +541,11 @@ class AudioManager {
         return this.setLoopMode(guildId, nextMode);
       }
 
+      case "queue_remove": {
+        // Queue remove button shows selection menu, handled in interactionCreate
+        return { success: true, showMenu: true };
+      }
+
       default:
         // Handle queue delete buttons (format: queue_delete_<index>)
         if (customId.startsWith("queue_delete_")) {
