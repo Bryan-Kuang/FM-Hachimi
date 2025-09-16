@@ -217,6 +217,7 @@ class BotClient {
       require("./commands/queue"),
       require("./commands/nowplaying"),
       require("./commands/help"),
+      require("./commands/search"),
     ];
 
     for (const command of commands) {

@@ -22,6 +22,14 @@ class AudioManager {
   }
 
   /**
+   * Get the Bilibili extractor instance
+   * @returns {BilibiliExtractor} - Bilibili extractor
+   */
+  getExtractor() {
+    return this.extractor;
+  }
+
+  /**
    * Get or create audio player for a guild
    * @param {string} guildId - Discord guild ID
    * @returns {AudioPlayer} - Audio player instance

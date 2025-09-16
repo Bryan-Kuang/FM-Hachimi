@@ -552,6 +552,145 @@ async function handleSelectMenuInteraction(interaction) {
         user: user.username,
         guild: interaction.guild?.name,
       });
+    } else if (customId.startsWith("search_select_")) {
+      const selectedValue = interaction.values[0];
+      
+      logger.debug("Search result select menu interaction received", {
+        selectedValue,
+        user: user.username,
+        guild: interaction.guild?.name,
+      });
+
+      // Defer the reply immediately to avoid timeout
+      await interaction.deferReply();
+
+      // Extract the search results from the original message
+      const originalEmbed = interaction.message.embeds[0];
+      if (!originalEmbed || !originalEmbed.description) {
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          "Search Results Not Found",
+          "Could not find the original search results.",
+          {
+            suggestion: "Please perform a new search.",
+          }
+        );
+
+        return await interaction.editReply({
+          embeds: [errorEmbed],
+        });
+      }
+
+      // Extract index from "search_result_X" format
+      const indexMatch = selectedValue.match(/^search_result_(\d+)$/);
+      if (!indexMatch) {
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          "Invalid Selection",
+          "Invalid search result selection format",
+          {
+            suggestion: "Please try selecting a result again.",
+          }
+        );
+
+        return await interaction.editReply({
+          embeds: [errorEmbed],
+        });
+      }
+
+      const resultIndex = parseInt(indexMatch[1]);
+      
+      // Get the search keyword from custom ID
+      const keyword = customId.replace("search_select_", "").replace(/_/g, " ");
+      
+      try {
+        // Get the extractor and perform search again to get the selected video URL
+        const extractor = AudioManager.getExtractor();
+        if (!extractor) {
+          const errorEmbed = EmbedBuilders.createErrorEmbed(
+            "Extractor Not Available",
+            "Bilibili extractor is not available.",
+            {
+              suggestion: "Please try again later.",
+            }
+          );
+
+          return await interaction.editReply({
+            embeds: [errorEmbed],
+          });
+        }
+
+        // Search again to get the video data
+        const searchResults = await extractor.searchVideos(keyword, 25);
+        
+        if (!searchResults.success || !searchResults.videos || resultIndex >= searchResults.videos.length) {
+          const errorEmbed = EmbedBuilders.createErrorEmbed(
+            "Video Not Found",
+            "The selected video is no longer available.",
+            {
+              suggestion: "Please perform a new search.",
+            }
+          );
+
+          return await interaction.editReply({
+            embeds: [errorEmbed],
+          });
+        }
+
+        const selectedVideo = searchResults.videos[resultIndex];
+        const videoUrl = `https://www.bilibili.com/video/${selectedVideo.id}`;
+        
+        // Add the video to the queue using AudioManager
+        const result = await AudioManager.playBilibiliVideo(interaction, videoUrl);
+        
+        if (!result.success) {
+          const errorEmbed = EmbedBuilders.createErrorEmbed(
+            "Failed to Add Video",
+            result.error || "Failed to add the selected video to queue.",
+            {
+              suggestion: result.suggestion || "Please try again.",
+            }
+          );
+
+          return await interaction.editReply({
+            embeds: [errorEmbed],
+          });
+        }
+
+        const successEmbed = EmbedBuilders.createSuccessEmbed(
+          "Video Added to Queue",
+          `🎵 **${selectedVideo.title}** has been added to the queue`
+        );
+
+        await interaction.editReply({
+          embeds: [successEmbed],
+        });
+
+        logger.info("Video added to queue from search results", {
+          videoTitle: selectedVideo.title,
+          videoId: selectedVideo.id,
+          user: user.username,
+          guild: interaction.guild?.name,
+        });
+        
+      } catch (error) {
+        logger.error("Failed to add video from search results", {
+          error: error.message,
+          stack: error.stack,
+          user: user.username,
+          guild: interaction.guild?.name,
+        });
+
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          "Error Adding Video",
+          "An error occurred while adding the video to queue.",
+          {
+            suggestion: "Please try again.",
+          }
+        );
+
+        await interaction.editReply({
+          embeds: [errorEmbed],
+        });
+      }
     }
   } catch (error) {
     logger.error("Select menu interaction failed", {

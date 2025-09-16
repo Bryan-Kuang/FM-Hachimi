@@ -8,9 +8,8 @@
 
 已完成（ai agent 可添加）：
 
-- 支持删除 queue 中的单个歌曲 (Easy)
-
 已验收（只能人工添加）：
 
+- 支持删除 queue 中的单个歌曲 (Easy)
 - 点击 stop 键会清空 queue
 - 将 loop 默认模式改为 queue loop

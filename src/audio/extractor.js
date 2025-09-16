@@ -487,6 +487,209 @@ class BilibiliExtractor {
       };
     }
   }
+
+  /**
+   * Search for Bilibili videos by keyword
+   * @param {string} keyword - Search keyword
+   * @param {number} maxResults - Maximum number of results (default: 10)
+   * @returns {Promise<Object>} - Search results with video info
+   */
+  async searchVideos(keyword, maxResults = 10) {
+    logger.info("Starting Bilibili video search", { keyword, maxResults });
+
+    try {
+      // Check yt-dlp availability
+      if (!this._ytdlpChecked) {
+        const ytdlpAvailable = await this.checkYtDlpAvailability();
+        if (!ytdlpAvailable) {
+          throw new Error(
+            "yt-dlp is not available. Please install it: pip install yt-dlp"
+          );
+        }
+        this._ytdlpChecked = true;
+      }
+
+      // Step 1: Get video IDs using bilisearch
+      const searchQuery = `bilisearch${maxResults}:${keyword}`;
+      const videoIds = await this.getSearchVideoIds(searchQuery);
+      
+      if (!videoIds || videoIds.length === 0) {
+        return {
+          success: true,
+          results: [],
+          keyword,
+          timestamp: new Date().toISOString()
+        };
+      }
+
+      // Step 2: Get detailed info for each video
+      const results = await this.getVideoDetailsForSearch(videoIds);
+      
+      logger.info("Search completed successfully", { 
+        keyword, 
+        resultCount: results.length 
+      });
+      
+      return {
+        success: true,
+        results,
+        keyword,
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      logger.error("Search error", { error: error.message, keyword });
+      return {
+        success: false,
+        error: error.message,
+        keyword,
+        timestamp: new Date().toISOString()
+      };
+    }
+  }
+
+  /**
+   * Get video IDs from bilisearch
+   * @param {string} searchQuery - Search query for bilisearch
+   * @returns {Promise<Array>} - Array of video IDs
+   */
+  async getSearchVideoIds(searchQuery) {
+    return new Promise((resolve, reject) => {
+      const ytdlpProcess = spawn("yt-dlp", [
+        searchQuery,
+        "--get-id",
+        "--no-download",
+        "--flat-playlist"
+      ]);
+
+      let stdout = "";
+      let stderr = "";
+
+      ytdlpProcess.stdout.on("data", (data) => {
+        stdout += data.toString();
+      });
+
+      ytdlpProcess.stderr.on("data", (data) => {
+        stderr += data.toString();
+      });
+
+      ytdlpProcess.on("close", (code) => {
+        if (code !== 0) {
+          logger.error("yt-dlp search failed", { code, stderr, searchQuery });
+          reject(new Error(`Search failed: ${stderr}`));
+          return;
+        }
+
+        const videoIds = stdout.trim().split('\n').filter(id => id.trim());
+        resolve(videoIds);
+      });
+
+      ytdlpProcess.on("error", (error) => {
+        logger.error("yt-dlp process error during search", { 
+          error: error.message,
+          searchQuery 
+        });
+        reject(error);
+      });
+    });
+  }
+
+  /**
+   * Get detailed video information for search results
+   * @param {Array} videoIds - Array of video IDs
+   * @returns {Promise<Array>} - Array of video details
+   */
+  async getVideoDetailsForSearch(videoIds) {
+    const results = [];
+    const maxConcurrent = 3; // Limit concurrent requests
+    
+    // Process videos in batches to avoid overwhelming the system
+    for (let i = 0; i < videoIds.length; i += maxConcurrent) {
+      const batch = videoIds.slice(i, i + maxConcurrent);
+      
+      const batchPromises = batch.map(async (videoId) => {
+        try {
+          // Convert numeric ID to BV format URL
+          const videoUrl = `https://www.bilibili.com/video/av${videoId}`;
+          
+          // Add timeout for individual video info requests
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => {
+              reject(new Error(`Video info timeout for ${videoId}`));
+            }, 10000); // 10 seconds per video
+          });
+          
+          const videoInfo = await Promise.race([
+            this.getVideoInfo(videoUrl),
+            timeoutPromise
+          ]);
+          
+          if (videoInfo.success) {
+            return {
+              title: videoInfo.title,
+              id: videoInfo.id,
+              url: videoInfo.url,
+              duration: videoInfo.duration || 'Unknown',
+              uploader: videoInfo.uploader || 'Unknown',
+              viewCount: videoInfo.viewCount || '0',
+              thumbnail: videoInfo.thumbnail || null
+            };
+          }
+        } catch (error) {
+          logger.warn("Failed to get video details", { 
+            videoId, 
+            error: error.message 
+          });
+          // Continue with other videos even if one fails
+        }
+        return null;
+      });
+      
+      const batchResults = await Promise.allSettled(batchPromises);
+      
+      // Add successful results to the final array
+      batchResults.forEach(result => {
+        if (result.status === 'fulfilled' && result.value) {
+          results.push(result.value);
+        }
+      });
+      
+      // Add a small delay between batches to be respectful
+      if (i + maxConcurrent < videoIds.length) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    
+    return results;
+  }
+
+  /**
+   * Parse search results from yt-dlp output
+   * @param {string} output - Raw yt-dlp output
+   * @returns {Array} - Parsed search results
+   */
+  parseSearchResults(output) {
+    const lines = output.trim().split('\n').filter(line => line.trim());
+    const results = [];
+
+    for (const line of lines) {
+      const parts = line.split('|||');
+      if (parts.length >= 6) {
+        const [title, id, duration, uploader, viewCount, thumbnail] = parts;
+        
+        results.push({
+          title: title.trim(),
+          id: id.trim(),
+          url: `https://www.bilibili.com/video/${id.trim()}`,
+          duration: duration.trim() || 'Unknown',
+          uploader: uploader.trim() || 'Unknown',
+          viewCount: viewCount.trim() || '0',
+          thumbnail: thumbnail.trim() || null
+        });
+      }
+    }
+
+    return results;
+  }
 }
 
 module.exports = BilibiliExtractor;

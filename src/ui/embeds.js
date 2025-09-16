@@ -322,6 +322,40 @@ class EmbedBuilders {
 
     return embed;
   }
+
+  /**
+   * Create a search results embed
+   * @param {Array} results - Search results array
+   * @param {string} keyword - Search keyword
+   * @returns {EmbedBuilder} - Discord embed
+   */
+  static createSearchResultsEmbed(results, keyword) {
+    const embed = new EmbedBuilder()
+      .setTitle("🔍 Search Results")
+      .setDescription(`Found ${results.length} results for "**${Formatters.escapeMarkdown(keyword)}**"`)
+      .setColor(0x00ae86)
+      .setTimestamp();
+
+    // Add up to 10 results as fields
+    results.slice(0, 10).forEach((result, index) => {
+      const title = result.title.length > 80 ? result.title.substring(0, 80) + "..." : result.title;
+      const uploader = result.uploader || "Unknown";
+      const duration = result.duration || "Unknown";
+      const viewCount = result.viewCount ? Formatters.formatNumber(parseInt(result.viewCount)) : "Unknown";
+      
+      embed.addFields({
+        name: `${index + 1}. ${Formatters.escapeMarkdown(title)}`,
+        value: `👤 **${Formatters.escapeMarkdown(uploader)}** | ⏱️ **${duration}** | 👁️ **${viewCount} views**`,
+        inline: false,
+      });
+    });
+
+    embed.setFooter({
+      text: "Select a video from the dropdown menu below to add it to the queue",
+    });
+
+    return embed;
+  }
 }
 
 module.exports = EmbedBuilders;

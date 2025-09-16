@@ -354,6 +354,35 @@ class ButtonBuilders {
 
     return handlers[customId] || null;
   }
+
+  /**
+   * Create search results selection menu
+   * @param {Array} results - Search results array
+   * @param {string} keyword - Search keyword for custom ID
+   * @returns {ActionRowBuilder} - Discord action row with select menu
+   */
+  static createSearchResultsMenu(results, keyword) {
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId(`search_select_${keyword.replace(/\s+/g, '_')}`)
+      .setPlaceholder('Choose a video to add to queue...')
+      .setMinValues(1)
+      .setMaxValues(1);
+
+    // Add up to 25 options (Discord limit)
+    results.slice(0, 25).forEach((result, index) => {
+      const title = result.title.length > 90 ? result.title.substring(0, 90) + "..." : result.title;
+      const uploader = result.uploader || "Unknown";
+      const duration = result.duration || "Unknown";
+      
+      selectMenu.addOptions({
+        label: `${index + 1}. ${title}`,
+        description: `${uploader} | ${duration}`,
+        value: `search_result_${index}`,
+      });
+    });
+
+    return new ActionRowBuilder().addComponents(selectMenu);
+  }
 }
 
 module.exports = ButtonBuilders;

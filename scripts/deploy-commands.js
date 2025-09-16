@@ -18,6 +18,7 @@ const commands = [
   require("../src/bot/commands/queue"),
   require("../src/bot/commands/nowplaying"),
   require("../src/bot/commands/help"),
+  require("../src/bot/commands/search"),
 ];
 
 async function deployCommands() {
