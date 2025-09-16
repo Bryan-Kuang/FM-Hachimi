@@ -13,6 +13,70 @@ class BilibiliExtractor {
     this.userAgent =
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     this._ytdlpChecked = false; // Lazy check flag
+    
+    // Video info cache to avoid repeated yt-dlp calls
+    this.videoInfoCache = new Map();
+    this.cacheExpiry = 30 * 60 * 1000; // 30 minutes cache expiry
+    this.maxCacheSize = 100; // Maximum number of cached entries
+    
+    // Start cache cleanup interval
+    this.cacheCleanupInterval = setInterval(() => {
+      this.cleanupExpiredCache();
+    }, 10 * 60 * 1000); // Cleanup every 10 minutes
+  }
+
+  /**
+   * Clean up expired cache entries and enforce size limit
+   */
+  cleanupExpiredCache() {
+    const now = Date.now();
+    let removedCount = 0;
+    
+    // Remove expired entries
+    for (const [key, entry] of this.videoInfoCache) {
+      if (now - entry.timestamp > this.cacheExpiry) {
+        this.videoInfoCache.delete(key);
+        removedCount++;
+      }
+    }
+    
+    // Enforce size limit by removing oldest entries
+    if (this.videoInfoCache.size > this.maxCacheSize) {
+      const entries = Array.from(this.videoInfoCache.entries());
+      entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+      
+      const toRemove = entries.slice(0, this.videoInfoCache.size - this.maxCacheSize);
+      toRemove.forEach(([key]) => {
+        this.videoInfoCache.delete(key);
+        removedCount++;
+      });
+    }
+    
+    if (removedCount > 0) {
+      logger.debug("Cache cleanup completed", { 
+        removedEntries: removedCount, 
+        remainingEntries: this.videoInfoCache.size 
+      });
+    }
+  }
+
+  /**
+   * Clear all cache entries
+   */
+  clearCache() {
+    this.videoInfoCache.clear();
+    logger.info("Video info cache cleared");
+  }
+
+  /**
+   * Cleanup resources when extractor is destroyed
+   */
+  destroy() {
+    if (this.cacheCleanupInterval) {
+      clearInterval(this.cacheCleanupInterval);
+      this.cacheCleanupInterval = null;
+    }
+    this.clearCache();
   }
 
   /**
@@ -100,7 +164,26 @@ class BilibiliExtractor {
    * @param {string} url - Normalized Bilibili URL
    * @returns {Promise<Object>} - Video metadata
    */
+  /**
+   * Get video information with caching support
+   * @param {string} url - Bilibili video URL
+   * @returns {Promise<Object>} - Video metadata
+   */
   async getVideoInfo(url) {
+    // Create cache key from normalized URL
+    const normalizedUrl = UrlValidator.normalizeUrl(url);
+    const cacheKey = normalizedUrl || url;
+    
+    // Check cache first
+    const cached = this.videoInfoCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < this.cacheExpiry) {
+      logger.debug("Video info retrieved from cache", { url: cacheKey });
+      return cached.data;
+    }
+    
+    // If not in cache or expired, fetch from yt-dlp
+    logger.debug("Fetching video info from yt-dlp", { url: cacheKey });
+    
     return new Promise((resolve, reject) => {
       const args = [
         "--dump-json",
@@ -162,6 +245,18 @@ class BilibiliExtractor {
         try {
           const videoData = JSON.parse(stdout);
           const metadata = this.parseVideoMetadata(videoData);
+          
+          // Cache the result
+          this.videoInfoCache.set(cacheKey, {
+            data: metadata,
+            timestamp: Date.now()
+          });
+          
+          logger.debug("Video info cached", { 
+            url: cacheKey, 
+            cacheSize: this.videoInfoCache.size 
+          });
+          
           resolve(metadata);
         } catch (parseError) {
           logger.error("Failed to parse video metadata", {
@@ -603,68 +698,85 @@ class BilibiliExtractor {
    * @param {Array} videoIds - Array of video IDs
    * @returns {Promise<Array>} - Array of video details
    */
+  /**
+   * Get detailed video information for search results with optimized batch processing
+   * @param {Array} videoIds - Array of video IDs
+   * @returns {Promise<Array>} - Array of video details
+   */
   async getVideoDetailsForSearch(videoIds) {
     const results = [];
-    const maxConcurrent = 3; // Limit concurrent requests
     
-    // Process videos in batches to avoid overwhelming the system
-    for (let i = 0; i < videoIds.length; i += maxConcurrent) {
-      const batch = videoIds.slice(i, i + maxConcurrent);
-      
-      const batchPromises = batch.map(async (videoId) => {
-        try {
-          // Convert numeric ID to BV format URL
-          const videoUrl = `https://www.bilibili.com/video/av${videoId}`;
-          
-          // Add timeout for individual video info requests
-          const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => {
-              reject(new Error(`Video info timeout for ${videoId}`));
-            }, 10000); // 10 seconds per video
-          });
-          
-          const videoInfo = await Promise.race([
-            this.getVideoInfo(videoUrl),
-            timeoutPromise
-          ]);
-          
-          if (videoInfo.success) {
-            return {
-              title: videoInfo.title,
-              id: videoInfo.id,
-              url: videoInfo.url,
-              duration: videoInfo.duration || 'Unknown',
-              uploader: videoInfo.uploader || 'Unknown',
-              viewCount: videoInfo.viewCount || '0',
-              thumbnail: videoInfo.thumbnail || null
-            };
-          }
-        } catch (error) {
-          logger.warn("Failed to get video details", { 
-            videoId, 
-            error: error.message 
-          });
-          // Continue with other videos even if one fails
+    // Dynamic concurrent limit based on number of videos
+    const maxConcurrent = Math.min(5, Math.max(2, Math.ceil(videoIds.length / 3)));
+    
+    logger.debug("Starting batch video details extraction", {
+      totalVideos: videoIds.length,
+      concurrentLimit: maxConcurrent
+    });
+    
+    // Process all videos concurrently with Promise.allSettled for better performance
+    const allPromises = videoIds.map(async (videoId, index) => {
+      try {
+        // Add staggered delay to avoid overwhelming the server
+        const delay = Math.floor(index / maxConcurrent) * 100; // 100ms delay per batch
+        if (delay > 0) {
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
-        return null;
-      });
-      
-      const batchResults = await Promise.allSettled(batchPromises);
-      
-      // Add successful results to the final array
-      batchResults.forEach(result => {
-        if (result.status === 'fulfilled' && result.value) {
-          results.push(result.value);
+        
+        // Convert numeric ID to BV format URL
+        const videoUrl = `https://www.bilibili.com/video/av${videoId}`;
+        
+        // Reduced timeout for faster processing
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => {
+            reject(new Error(`Video info timeout for ${videoId}`));
+          }, 8000); // Reduced to 8 seconds per video
+        });
+        
+        const videoInfo = await Promise.race([
+          this.getVideoInfo(videoUrl),
+          timeoutPromise
+        ]);
+        
+        if (videoInfo.success) {
+          return {
+            title: videoInfo.title,
+            id: videoInfo.id,
+            url: videoInfo.url,
+            duration: videoInfo.duration || 'Unknown',
+            uploader: videoInfo.uploader || 'Unknown',
+            viewCount: videoInfo.viewCount || '0',
+            thumbnail: videoInfo.thumbnail || null,
+            index // Keep original order for sorting
+          };
         }
-      });
-      
-      // Add a small delay between batches to be respectful
-      if (i + maxConcurrent < videoIds.length) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (error) {
+        logger.warn("Failed to get video details", { 
+          videoId, 
+          error: error.message 
+        });
+        // Continue with other videos even if one fails
       }
-    }
+      return null;
+    });
     
-    return results;
+    // Wait for all requests to complete
+    const allResults = await Promise.allSettled(allPromises);
+    
+    // Filter successful results and maintain original order
+    const successfulResults = allResults
+      .filter(result => result.status === 'fulfilled' && result.value)
+      .map(result => result.value)
+      .sort((a, b) => a.index - b.index) // Maintain original order
+      .map(({ index, ...rest }) => rest); // Remove index field
+    
+    logger.debug("Batch video details extraction completed", {
+      totalRequested: videoIds.length,
+      successfulResults: successfulResults.length,
+      failedResults: videoIds.length - successfulResults.length
+    });
+    
+    return successfulResults;
   }
 
   /**

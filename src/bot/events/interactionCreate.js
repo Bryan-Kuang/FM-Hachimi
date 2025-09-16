@@ -25,7 +25,7 @@ module.exports = {
 };
 
 /**
- * Handle button interactions
+ * Handle button interactions with immediate defer reply to avoid timeout
  * @param {ButtonInteraction} interaction - Discord button interaction
  */
 async function handleButtonInteraction(interaction) {
@@ -39,6 +39,10 @@ async function handleButtonInteraction(interaction) {
       guild: interaction.guild?.name,
     });
 
+    // Immediately defer reply for all button interactions to avoid 3-second timeout
+    const shouldBeEphemeral = ["pause_resume", "skip", "prev", "stop"].includes(customId);
+    await interaction.deferReply({ ephemeral: shouldBeEphemeral });
+
     // Check if user is in a voice channel for control buttons
     const controlButtons = ["pause_resume", "skip", "prev", "stop"];
     if (controlButtons.includes(customId)) {
@@ -51,9 +55,8 @@ async function handleButtonInteraction(interaction) {
           }
         );
 
-        return await interaction.reply({
+        return await interaction.editReply({
           embeds: [errorEmbed],
-          ephemeral: true,
         });
       }
     }
@@ -70,9 +73,8 @@ async function handleButtonInteraction(interaction) {
         }
       );
 
-      return await interaction.reply({
+      return await interaction.editReply({
         embeds: [errorEmbed],
-        ephemeral: true,
       });
     }
 
@@ -114,10 +116,9 @@ async function handleButtonInteraction(interaction) {
 
       const selectRow = new ActionRowBuilder().addComponents(selectMenu);
 
-      return await interaction.reply({
+      return await interaction.editReply({
         content: "🔁 **Choose Loop Mode:**",
         components: [selectRow],
-        ephemeral: true,
       });
     }
 
@@ -322,7 +323,7 @@ async function handleButtonInteraction(interaction) {
       response.components = responseButtons;
     }
 
-    await interaction.reply(response);
+    await interaction.editReply(response);
 
     logger.info("Button interaction handled successfully", {
       customId,
@@ -347,9 +348,8 @@ async function handleButtonInteraction(interaction) {
 
     try {
       if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({
+        await interaction.editReply({
           embeds: [errorEmbed],
-          ephemeral: true,
         });
       } else {
         await interaction.reply({
