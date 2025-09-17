@@ -8,7 +8,7 @@ const Formatters = require("../utils/formatters");
 
 class EmbedBuilders {
   /**
-   * Create a now playing embed
+   * Create a modern now playing embed with enhanced visual design
    * @param {Object} videoData - Video metadata
    * @param {Object} options - Additional options
    * @returns {EmbedBuilder} - Discord embed
@@ -19,181 +19,304 @@ class EmbedBuilders {
       requestedBy = "Unknown",
       queuePosition = 0,
       totalQueue = 0,
+      isPlaying = true,
+      loopMode = "none",
+      volume = 50,
     } = options;
 
+    // Modern gradient colors for different states
+    const colors = {
+      playing: 0x1DB954,    // Spotify green
+      paused: 0xFF6B35,     // Orange
+      stopped: 0x6C757D,    // Gray
+    };
+
+    const statusEmoji = isPlaying ? "▶️" : "⏸️";
+    const statusText = isPlaying ? "Now Playing" : "Paused";
+    
     const embed = new EmbedBuilder()
-      .setTitle("🎵 Now Playing")
-      .setDescription(`**${Formatters.escapeMarkdown(videoData.title)}**`)
-      .setColor(0x00ae86)
+      .setTitle(`${statusEmoji} ${statusText}`)
+      .setColor(isPlaying ? colors.playing : colors.paused)
       .setTimestamp();
 
-    // Add thumbnail if available
+    // Enhanced title with better formatting
+    const titleText = `**${Formatters.escapeMarkdown(videoData.title)}**`;
+    const uploaderText = videoData.uploader ? `*by ${Formatters.escapeMarkdown(videoData.uploader)}*` : "";
+    
+    embed.setDescription(`${titleText}\n${uploaderText}`);
+
+    // Add high-quality thumbnail
     if (videoData.thumbnail) {
       embed.setThumbnail(videoData.thumbnail);
     }
 
-    // Add main fields
-    embed.addFields(
-      {
-        name: "⏱️ Duration",
-        value: Formatters.formatDuration(videoData.duration),
-        inline: true,
-      },
-      {
-        name: "👤 Requested by",
-        value: Formatters.escapeMarkdown(requestedBy),
-        inline: true,
-      },
-      {
-        name: "📺 Uploader",
-        value: Formatters.escapeMarkdown(videoData.uploader || "Unknown"),
-        inline: true,
-      }
-    );
-
-    // Add progress bar with time display
+    // Enhanced progress bar with better visual design
     if (videoData.duration > 0) {
       const progressBar = Formatters.generateProgressBar(
         currentTime,
-        videoData.duration
+        videoData.duration,
+        20 // Longer progress bar for better visual
       );
       const currentTimeStr = Formatters.formatTime(currentTime);
       const totalTimeStr = Formatters.formatTime(videoData.duration);
-
-      // Use embed description for better visual progress bar
-      const progressDesc = `${progressBar} \`[${currentTimeStr}/${totalTimeStr}]\``;
+      const percentage = Math.round((currentTime / videoData.duration) * 100);
 
       embed.addFields({
-        name: "📊 Progress",
-        value: progressDesc,
+        name: "⏱️ Progress",
+        value: `${progressBar}\n\`${currentTimeStr}\` ━━━━━━━━━━━━━━━━━━━━ \`${totalTimeStr}\`\n**${percentage}%** completed`,
         inline: false,
       });
     }
 
-    // Add queue info if available
-    if (totalQueue > 1) {
-      embed.addFields({
-        name: "📋 Queue",
-        value: `${queuePosition}/${totalQueue} tracks`,
+    // Compact info row with emojis
+    const infoFields = [];
+    
+    if (videoData.duration) {
+      infoFields.push({
+        name: "⏱️ Duration",
+        value: `\`${Formatters.formatDuration(videoData.duration)}\``,
         inline: true,
       });
     }
 
-    // Add video info in footer
-    if (videoData.videoId) {
-      embed.setFooter({
-        text: `Video ID: ${videoData.videoId}${
-          videoData.uploadDateFormatted
-            ? ` • Uploaded: ${videoData.uploadDateFormatted}`
-            : ""
-        }`,
+    infoFields.push({
+      name: "👤 Requested by",
+      value: Formatters.escapeMarkdown(requestedBy),
+      inline: true,
+    });
+
+    infoFields.push({
+      name: "🔊 Volume",
+      value: `\`${volume}%\``,
+      inline: true,
+    });
+
+    embed.addFields(...infoFields);
+
+    // Enhanced queue and loop info
+    const statusFields = [];
+    
+    if (totalQueue > 1) {
+      statusFields.push({
+        name: "📋 Queue",
+        value: `\`${queuePosition}/${totalQueue}\` tracks`,
+        inline: true,
       });
     }
+
+    // Loop mode indicator
+    const loopEmojis = {
+      none: "➡️ Off",
+      track: "🔂 Track",
+      queue: "🔁 Queue"
+    };
+    
+    statusFields.push({
+      name: "🔄 Loop",
+      value: `\`${loopEmojis[loopMode] || loopEmojis.none}\``,
+      inline: true,
+    });
+
+    if (statusFields.length > 0) {
+      embed.addFields(...statusFields);
+    }
+
+    // Modern footer with platform info
+    const footerParts = [];
+    if (videoData.videoId) {
+      footerParts.push(`🆔 ${videoData.videoId}`);
+    }
+    if (videoData.uploadDateFormatted) {
+      footerParts.push(`📅 ${videoData.uploadDateFormatted}`);
+    }
+    footerParts.push("🎵 Bilibili Player");
+
+    embed.setFooter({
+      text: footerParts.join(" • "),
+      iconURL: "https://cdn.discordapp.com/emojis/741605543046807626.png" // Music note icon
+    });
 
     return embed;
   }
 
   /**
-   * Create a queue display embed
-   * @param {Array} queue - Array of queue items
-   * @param {number} currentIndex - Current playing index
+   * Create a modern queue embed with enhanced visual design
+   * @param {Array} queue - Array of video objects
+   * @param {Object} options - Additional options
    * @returns {EmbedBuilder} - Discord embed
    */
-  static createQueueEmbed(queue, currentIndex = -1) {
+  static createQueueEmbed(queue, options = {}) {
+    const { page = 1, itemsPerPage = 10, totalPages = 1, currentTrack = null } = options;
+
     const embed = new EmbedBuilder()
-      .setTitle("📋 Queue")
-      .setColor(0x0099ff)
+      .setTitle("📋 Music Queue")
+      .setColor(0x5865F2) // Discord blurple
       .setTimestamp();
 
-    if (!queue || queue.length === 0) {
-      embed.setDescription("The queue is empty. Use `/play` to add songs!");
+    if (queue.length === 0) {
+      embed.setDescription("🎵 **Queue is empty**\nAdd some tracks to get started!");
+      embed.setColor(0x6C757D); // Gray for empty state
       return embed;
     }
 
-    const totalDuration = queue.reduce(
-      (total, item) => total + (item.duration || 0),
-      0
-    );
+    // Calculate display range
+    const startIndex = (page - 1) * itemsPerPage;
+    const endIndex = Math.min(startIndex + itemsPerPage, queue.length);
+    const displayQueue = queue.slice(startIndex, endIndex);
 
-    embed.setDescription(
-      `**${
-        queue.length
-      } song(s) in queue** • Total duration: ${Formatters.formatDuration(
-        totalDuration
-      )}`
-    );
+    // Enhanced queue description with current track info
+    let description = "";
+    if (currentTrack) {
+      description += `🎵 **Now Playing:**\n\`▶️\` ${Formatters.escapeMarkdown(currentTrack.title)}\n\n`;
+    }
 
-    // Show up to 10 songs in the queue
-    const displayQueue = queue.slice(0, 10);
-    let queueText = "";
+    description += `📊 **Queue Overview:**\n`;
+    description += `• **${queue.length}** tracks total\n`;
+    description += `• **${Formatters.formatDuration(queue.reduce((total, track) => total + (track.duration || 0), 0))}** total duration\n`;
+    description += `• Page **${page}** of **${totalPages}**\n\n`;
 
-    displayQueue.forEach((item, index) => {
-      const isCurrentlyPlaying = index === currentIndex;
-      const position = index + 1;
-      const statusIcon = isCurrentlyPlaying ? "▶️" : `${position}.`;
-
-      const title = Formatters.truncateText(item.title, 40);
-      const duration = Formatters.formatTime(item.duration);
-      const requestedBy = Formatters.truncateText(
-        item.requestedBy || "Unknown",
-        15
-      );
-
-      queueText += `${statusIcon} **${title}**\n`;
-      queueText += `   Duration: \`${duration}\` • Requested by: ${requestedBy}\n\n`;
+    // Enhanced track listing with better formatting
+    description += "🎶 **Up Next:**\n";
+    
+    displayQueue.forEach((video, index) => {
+      const globalIndex = startIndex + index + 1;
+      const position = globalIndex.toString().padStart(2, '0');
+      const title = Formatters.escapeMarkdown(video.title);
+      const duration = video.duration ? Formatters.formatDuration(video.duration) : "Unknown";
+      const uploader = video.uploader ? Formatters.escapeMarkdown(video.uploader) : "Unknown";
+      
+      // Use different formatting for different positions
+      if (globalIndex <= 3) {
+        // Highlight top 3 tracks
+        description += `\`${position}.\` **${title}**\n`;
+        description += `     ⏱️ \`${duration}\` • 👤 ${uploader}\n\n`;
+      } else {
+        // Compact format for other tracks
+        description += `\`${position}.\` ${title} • \`${duration}\`\n`;
+      }
     });
 
-    if (queueText) {
-      embed.addFields({
-        name: "🎵 Tracks",
-        value: queueText,
-        inline: false,
+    // Add pagination info if needed
+    if (totalPages > 1) {
+      description += `\n📄 **Navigation:**\n`;
+      description += `Use queue controls to navigate between pages\n`;
+      if (page < totalPages) {
+        description += `${queue.length - endIndex} more tracks...`;
+      }
+    }
+
+    embed.setDescription(description);
+
+    // Add queue statistics as fields
+    const stats = [];
+    
+    // Calculate average duration
+    const validDurations = queue.filter(track => track.duration > 0);
+    if (validDurations.length > 0) {
+      const avgDuration = validDurations.reduce((sum, track) => sum + track.duration, 0) / validDurations.length;
+      stats.push({
+        name: "📊 Average Duration",
+        value: `\`${Formatters.formatDuration(Math.round(avgDuration))}\``,
+        inline: true,
       });
     }
 
-    // Add "and more" if queue is longer than 10
-    if (queue.length > 10) {
-      embed.addFields({
-        name: "➕ And more...",
-        value: `${queue.length - 10} more song(s) in queue`,
-        inline: false,
+    // Show unique uploaders count
+    const uniqueUploaders = new Set(queue.filter(track => track.uploader).map(track => track.uploader));
+    if (uniqueUploaders.size > 0) {
+      stats.push({
+        name: "👥 Unique Creators",
+        value: `\`${uniqueUploaders.size}\``,
+        inline: true,
       });
     }
+
+    // Show page info
+    stats.push({
+      name: "📄 Page Info",
+      value: `\`${page}/${totalPages}\``,
+      inline: true,
+    });
+
+    if (stats.length > 0) {
+      embed.addFields(...stats);
+    }
+
+    // Enhanced footer
+    embed.setFooter({
+      text: `🎵 Bilibili Player • Showing ${startIndex + 1}-${endIndex} of ${queue.length} tracks`,
+      iconURL: "https://cdn.discordapp.com/emojis/741605543046807626.png"
+    });
 
     return embed;
   }
 
   /**
-   * Create an error embed
+   * Create a modern error embed with enhanced visual design
    * @param {string} title - Error title
    * @param {string} description - Error description
    * @param {Object} options - Additional options
    * @returns {EmbedBuilder} - Discord embed
    */
   static createErrorEmbed(title, description, options = {}) {
-    const { suggestion = null, errorCode = null } = options;
+    const { 
+      errorCode = null, 
+      suggestion = null, 
+      timestamp = true,
+      color = 0xE74C3C // Modern red color
+    } = options;
 
     const embed = new EmbedBuilder()
       .setTitle(`❌ ${title}`)
-      .setDescription(description)
-      .setColor(0xff0000)
-      .setTimestamp();
+      .setDescription(`**${description}**`)
+      .setColor(color);
 
+    if (timestamp) {
+      embed.setTimestamp();
+    }
+
+    // Add error details if provided
+    const fields = [];
+    
     if (errorCode) {
-      embed.addFields({
-        name: "Error Code",
+      fields.push({
+        name: "🔍 Error Code",
         value: `\`${errorCode}\``,
         inline: true,
       });
     }
 
     if (suggestion) {
-      embed.addFields({
+      fields.push({
         name: "💡 Suggestion",
         value: suggestion,
         inline: false,
       });
     }
+
+    // Add common troubleshooting tips
+    const troubleshootingTips = [
+      "• Check if the video URL is valid and accessible",
+      "• Ensure the bot has proper permissions in this channel",
+      "• Try again in a few moments if this is a temporary issue",
+      "• Contact support if the problem persists"
+    ];
+
+    fields.push({
+      name: "🛠️ Troubleshooting",
+      value: troubleshootingTips.join("\n"),
+      inline: false,
+    });
+
+    if (fields.length > 0) {
+      embed.addFields(...fields);
+    }
+
+    // Enhanced footer with support info
+    embed.setFooter({
+      text: "🎵 Bilibili Player • Need help? Check our documentation",
+      iconURL: "https://cdn.discordapp.com/emojis/741605543046807626.png"
+    });
 
     return embed;
   }

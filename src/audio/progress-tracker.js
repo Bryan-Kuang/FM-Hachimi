@@ -94,7 +94,7 @@ class ProgressTracker {
       // Update message
       await message.edit({
         embeds: [updatedEmbed],
-        components: controlButtons,
+        components: [controlButtons], // Wrap single ActionRowBuilder in array
       });
 
       logger.debug("Progress updated", {

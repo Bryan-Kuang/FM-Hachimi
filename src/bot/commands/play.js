@@ -168,7 +168,7 @@ module.exports = {
       // Update the message with success
       const reply = await interaction.editReply({
         embeds: [playingEmbed],
-        components: controlButtons, // Now returns array of rows
+        components: [controlButtons], // Wrap single ActionRowBuilder in array
       });
 
       // Start progress tracking for real-time updates

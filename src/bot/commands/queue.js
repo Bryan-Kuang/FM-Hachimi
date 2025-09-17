@@ -39,7 +39,7 @@ module.exports = {
 
       await interaction.reply({
         embeds: [queueEmbed],
-        components: queueButtons,
+        components: [queueButtons], // Wrap single ActionRowBuilder in array
       });
 
       logger.info("Queue command executed successfully", {

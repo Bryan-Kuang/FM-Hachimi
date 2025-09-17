@@ -49,29 +49,88 @@ class Formatters {
   }
 
   /**
-   * Generate Unicode progress bar
+   * Generate modern Unicode progress bar with enhanced visual design
    * @param {number} current - Current position
    * @param {number} total - Total duration
    * @param {number} length - Progress bar length (default: 20)
-   * @returns {string} - Unicode progress bar
+   * @returns {string} - Modern Unicode progress bar
    */
   static generateProgressBar(current, total, length = 20) {
     if (!current || !total || current < 0 || total <= 0) {
-      const emptyBar = "░".repeat(length);
-      return `${emptyBar} 0% | 0:00 / 0:00`;
+      const emptyBar = "▱".repeat(length);
+      return `${emptyBar}`;
     }
 
     const progress = Math.min(Math.round((current / total) * length), length);
     const emptyProgress = length - progress;
 
-    const progressText = "█".repeat(progress);
-    const emptyProgressText = "░".repeat(emptyProgress);
+    // Use modern progress bar characters for better visual appeal
+    const progressText = "▰".repeat(progress);
+    const emptyProgressText = "▱".repeat(emptyProgress);
+
+    return `${progressText}${emptyProgressText}`;
+  }
+
+  /**
+   * Generate detailed progress bar with percentage and time info
+   * @param {number} current - Current position
+   * @param {number} total - Total duration
+   * @param {number} length - Progress bar length (default: 15)
+   * @returns {Object} - Progress bar components
+   */
+  static generateDetailedProgressBar(current, total, length = 15) {
+    if (!current || !total || current < 0 || total <= 0) {
+      return {
+        bar: "▱".repeat(length),
+        percentage: 0,
+        currentTime: "0:00",
+        totalTime: "0:00",
+        remainingTime: "0:00"
+      };
+    }
+
+    const progress = Math.min(Math.round((current / total) * length), length);
+    const emptyProgress = length - progress;
+
+    const progressText = "▰".repeat(progress);
+    const emptyProgressText = "▱".repeat(emptyProgress);
+    const bar = `${progressText}${emptyProgressText}`;
 
     const percentage = Math.min(Math.round((current / total) * 100), 100);
-    const currentFormatted = this.formatTime(current);
-    const totalFormatted = this.formatTime(total);
+    const currentTime = this.formatTime(current);
+    const totalTime = this.formatTime(total);
+    const remainingTime = this.formatTime(total - current);
 
-    return `${progressText}${emptyProgressText} ${percentage}% | ${currentFormatted} / ${totalFormatted}`;
+    return {
+      bar,
+      percentage,
+      currentTime,
+      totalTime,
+      remainingTime
+    };
+  }
+
+  /**
+   * Generate circular progress indicator for compact displays
+   * @param {number} current - Current position
+   * @param {number} total - Total duration
+   * @returns {string} - Circular progress indicator
+   */
+  static generateCircularProgress(current, total) {
+    if (!current || !total || current < 0 || total <= 0) {
+      return "⚪";
+    }
+
+    const percentage = (current / total) * 100;
+    
+    if (percentage < 12.5) return "🕐";
+    if (percentage < 25) return "🕑";
+    if (percentage < 37.5) return "🕒";
+    if (percentage < 50) return "🕓";
+    if (percentage < 62.5) return "🕔";
+    if (percentage < 75) return "🕕";
+    if (percentage < 87.5) return "🕖";
+    return "🕗";
   }
 
   /**

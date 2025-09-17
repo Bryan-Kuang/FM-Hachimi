@@ -7,112 +7,263 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } 
 
 class ButtonBuilders {
   /**
-   * Create playback control buttons
-   * @param {Object} state - Current playback state
+   * Create modern playback control buttons with enhanced visual design
+   * @param {Object} options - Button configuration options
    * @returns {ActionRowBuilder} - Discord action row with buttons
    */
-  static createPlaybackControls(state = {}) {
+  static createPlaybackControls(options = {}) {
     const {
       isPlaying = false,
+      canSkip = true,
+      canPrevious = false,
       hasQueue = false,
-      canGoBack = false,
-      canSkip = false,
       loopMode = "none",
-    } = state;
+      volume = 50,
+      isShuffled = false,
+    } = options;
 
-    // First row: prev, play/pause, next, stop
-    const row1 = new ActionRowBuilder();
+    const row = new ActionRowBuilder();
 
-    // Previous button
-    row1.addComponents(
-      new ButtonBuilder()
-        .setCustomId("prev")
-        .setLabel("⏮️")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!canGoBack)
-    );
+    // Previous track button with enhanced styling
+    const previousButton = new ButtonBuilder()
+      .setCustomId("previous")
+      .setLabel("Previous")
+      .setEmoji("⏮️")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!canPrevious);
 
-    // Play/Pause button
-    row1.addComponents(
-      new ButtonBuilder()
-        .setCustomId("pause_resume")
-        .setLabel(isPlaying ? "⏸️" : "▶️")
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(!hasQueue)
-    );
+    // Play/Pause button with dynamic styling
+    const playPauseButton = new ButtonBuilder()
+      .setCustomId(isPlaying ? "pause" : "play")
+      .setLabel(isPlaying ? "Pause" : "Play")
+      .setEmoji(isPlaying ? "⏸️" : "▶️")
+      .setStyle(isPlaying ? ButtonStyle.Success : ButtonStyle.Primary);
 
-    // Next button (same as skip)
-    row1.addComponents(
-      new ButtonBuilder()
-        .setCustomId("skip")
-        .setLabel("⏭️")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!canSkip)
-    );
+    // Stop button with warning style
+    const stopButton = new ButtonBuilder()
+      .setCustomId("stop")
+      .setLabel("Stop")
+      .setEmoji("⏹️")
+      .setStyle(ButtonStyle.Danger);
 
-    // Stop button
-    row1.addComponents(
-      new ButtonBuilder()
-        .setCustomId("stop")
-        .setLabel("⏹️")
-        .setStyle(ButtonStyle.Danger)
-        .setDisabled(!hasQueue)
-    );
+    // Skip button with enhanced styling
+    const skipButton = new ButtonBuilder()
+      .setCustomId("skip")
+      .setLabel("Skip")
+      .setEmoji("⏭️")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!canSkip);
 
-    // Second row: loop button
-    const row2 = new ActionRowBuilder();
+    // Loop button with dynamic emoji and style based on mode
+    const loopEmojis = {
+      none: "🔁",
+      track: "🔂", 
+      queue: "🔁"
+    };
+    
+    const loopButton = new ButtonBuilder()
+      .setCustomId("loop")
+      .setLabel(`Loop: ${loopMode === "none" ? "Off" : loopMode === "track" ? "Track" : "Queue"}`)
+      .setEmoji(loopEmojis[loopMode])
+      .setStyle(loopMode === "none" ? ButtonStyle.Secondary : ButtonStyle.Success);
 
-    const loopEmoji =
-      loopMode === "none" ? "➡️" : loopMode === "queue" ? "🔁" : "🔂";
-    row2.addComponents(
-      new ButtonBuilder()
-        .setCustomId("loop")
-        .setLabel(`${loopEmoji} Loop`)
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!hasQueue)
-    );
+    row.addComponents(previousButton, playPauseButton, stopButton, skipButton, loopButton);
 
-    return [row1, row2];
+    return row;
   }
 
   /**
-   * Create queue management buttons
-   * @param {Object} options - Queue options
-   * @returns {Array<ActionRowBuilder>} - Array of Discord action rows with buttons
+   * Create modern queue control buttons with enhanced visual design
+   * @param {Object} options - Button configuration options
+   * @returns {ActionRowBuilder} - Discord action row with buttons
    */
   static createQueueControls(options = {}) {
-    const { hasQueue = false, queueLength = 0 } = options;
+    const {
+      hasQueue = false,
+      canShuffle = false,
+      isShuffled = false,
+      canClear = false,
+      currentPage = 1,
+      totalPages = 1,
+    } = options;
 
-    const controlRow = new ActionRowBuilder();
+    const row = new ActionRowBuilder();
 
-    // Shuffle queue button
-    controlRow.addComponents(
-      new ButtonBuilder()
-        .setCustomId("queue_shuffle")
-        .setLabel("🔀 Shuffle")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(queueLength < 2)
-    );
+    // View queue button with enhanced styling
+    const queueButton = new ButtonBuilder()
+      .setCustomId("view_queue")
+      .setLabel("View Queue")
+      .setEmoji("📋")
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(!hasQueue);
 
-    // Loop toggle button
-    controlRow.addComponents(
-      new ButtonBuilder()
-        .setCustomId("queue_loop")
-        .setLabel("🔁 Loop")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!hasQueue)
-    );
+    // Shuffle button with dynamic styling
+    const shuffleButton = new ButtonBuilder()
+      .setCustomId("shuffle")
+      .setLabel(isShuffled ? "Unshuffle" : "Shuffle")
+      .setEmoji(isShuffled ? "🔀" : "🔀")
+      .setStyle(isShuffled ? ButtonStyle.Success : ButtonStyle.Secondary)
+      .setDisabled(!canShuffle);
 
-    // Remove track button (opens select menu)
-    controlRow.addComponents(
-      new ButtonBuilder()
-        .setCustomId("queue_remove")
-        .setLabel("🗑️ Remove")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!hasQueue)
-    );
+    // Clear queue button with warning style
+    const clearButton = new ButtonBuilder()
+      .setCustomId("clear_queue")
+      .setLabel("Clear Queue")
+      .setEmoji("🗑️")
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(!canClear);
 
-    return [controlRow];
+    // Previous page button
+    const prevPageButton = new ButtonBuilder()
+      .setCustomId("queue_prev_page")
+      .setLabel("◀️")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(currentPage <= 1 || totalPages <= 1);
+
+    // Next page button
+    const nextPageButton = new ButtonBuilder()
+      .setCustomId("queue_next_page")
+      .setLabel("▶️")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(currentPage >= totalPages || totalPages <= 1);
+
+    row.addComponents(queueButton, shuffleButton, clearButton, prevPageButton, nextPageButton);
+
+    return row;
+  }
+
+  /**
+   * Create modern volume control buttons with enhanced visual design
+   * @param {Object} options - Button configuration options
+   * @returns {ActionRowBuilder} - Discord action row with buttons
+   */
+  static createVolumeControls(options = {}) {
+    const {
+      currentVolume = 50,
+      isMuted = false,
+      canAdjustVolume = true,
+    } = options;
+
+    const row = new ActionRowBuilder();
+
+    // Volume down button
+    const volumeDownButton = new ButtonBuilder()
+      .setCustomId("volume_down")
+      .setLabel("🔉")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!canAdjustVolume || currentVolume <= 0);
+
+    // Mute/Unmute button with dynamic styling
+    const muteButton = new ButtonBuilder()
+      .setCustomId("mute_toggle")
+      .setLabel(isMuted ? "🔇 Unmute" : "🔇 Mute")
+      .setStyle(isMuted ? ButtonStyle.Danger : ButtonStyle.Secondary)
+      .setDisabled(!canAdjustVolume);
+
+    // Volume up button
+    const volumeUpButton = new ButtonBuilder()
+      .setCustomId("volume_up")
+      .setLabel("🔊")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!canAdjustVolume || currentVolume >= 100);
+
+    // Volume display (non-interactive)
+    const volumeDisplayButton = new ButtonBuilder()
+      .setCustomId("volume_display")
+      .setLabel(`Volume: ${currentVolume}%`)
+      .setEmoji("🎚️")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(true);
+
+    row.addComponents(volumeDownButton, muteButton, volumeDisplayButton, volumeUpButton);
+
+    return row;
+  }
+
+  /**
+   * Create modern help and info buttons with enhanced visual design
+   * @param {Object} options - Button configuration options
+   * @returns {ActionRowBuilder} - Discord action row with buttons
+   */
+  static createHelpButtons(options = {}) {
+    const {
+      showCommands = true,
+      showInfo = true,
+      showSupport = true,
+    } = options;
+
+    const row = new ActionRowBuilder();
+
+    if (showCommands) {
+      // Commands help button
+      const commandsButton = new ButtonBuilder()
+        .setCustomId("help_commands")
+        .setLabel("Commands")
+        .setEmoji("📝")
+        .setStyle(ButtonStyle.Primary);
+
+      row.addComponents(commandsButton);
+    }
+
+    if (showInfo) {
+      // Bot info button
+      const infoButton = new ButtonBuilder()
+        .setCustomId("bot_info")
+        .setLabel("Bot Info")
+        .setEmoji("ℹ️")
+        .setStyle(ButtonStyle.Secondary);
+
+      row.addComponents(infoButton);
+    }
+
+    if (showSupport) {
+      // Support button (link style)
+      const supportButton = new ButtonBuilder()
+        .setURL("https://github.com/your-repo/bilibili-player")
+        .setLabel("Support")
+        .setEmoji("💬")
+        .setStyle(ButtonStyle.Link);
+
+      row.addComponents(supportButton);
+    }
+
+    return row;
+  }
+
+  /**
+   * Create modern confirmation buttons with enhanced visual design
+   * @param {Object} options - Button configuration options
+   * @returns {ActionRowBuilder} - Discord action row with buttons
+   */
+  static createConfirmationButtons(options = {}) {
+    const {
+      confirmLabel = "Confirm",
+      cancelLabel = "Cancel",
+      confirmEmoji = "✅",
+      cancelEmoji = "❌",
+      confirmId = "confirm",
+      cancelId = "cancel",
+    } = options;
+
+    const row = new ActionRowBuilder();
+
+    // Confirm button with success style
+    const confirmButton = new ButtonBuilder()
+      .setCustomId(confirmId)
+      .setLabel(confirmLabel)
+      .setEmoji(confirmEmoji)
+      .setStyle(ButtonStyle.Success);
+
+    // Cancel button with danger style
+    const cancelButton = new ButtonBuilder()
+      .setCustomId(cancelId)
+      .setLabel(cancelLabel)
+      .setEmoji(cancelEmoji)
+      .setStyle(ButtonStyle.Danger);
+
+    row.addComponents(confirmButton, cancelButton);
+
+    return row;
   }
 
   /**
@@ -153,50 +304,6 @@ class ButtonBuilders {
     });
 
     return new ActionRowBuilder().addComponents(selectMenu);
-  }
-
-  /**
-   * Create confirmation buttons
-   * @param {string} confirmId - Custom ID for confirm button
-   * @param {string} cancelId - Custom ID for cancel button
-   * @returns {ActionRowBuilder} - Discord action row with buttons
-   */
-  static createConfirmationButtons(confirmId = "confirm", cancelId = "cancel") {
-    const row = new ActionRowBuilder();
-
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId(confirmId)
-        .setLabel("✅ Yes")
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(cancelId)
-        .setLabel("❌ No")
-        .setStyle(ButtonStyle.Danger)
-    );
-
-    return row;
-  }
-
-  /**
-   * Create help/info buttons
-   * @returns {ActionRowBuilder} - Discord action row with buttons
-   */
-  static createHelpButtons() {
-    const row = new ActionRowBuilder();
-
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId("help")
-        .setLabel("❓ Help")
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId("info")
-        .setLabel("ℹ️ Info")
-        .setStyle(ButtonStyle.Secondary)
-    );
-
-    return row;
   }
 
   /**
