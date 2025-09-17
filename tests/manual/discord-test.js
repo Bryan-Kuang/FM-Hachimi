@@ -35,6 +35,7 @@ function testEmbedGeneration() {
       requestedBy: "TestUser",
       queuePosition: 1,
       totalQueue: 3,
+      loopMode: "queue", // Fix: Add missing loopMode parameter for testing
     });
 
     const embedData = embed.toJSON();

@@ -50,44 +50,29 @@ class EmbedBuilders {
       embed.setThumbnail(videoData.thumbnail);
     }
 
-    // Enhanced progress bar with better visual design
+    // Simplified progress display with arrow indicator
     if (videoData.duration > 0) {
-      const progressBar = Formatters.generateProgressBar(
-        currentTime,
-        videoData.duration,
-        20 // Longer progress bar for better visual
-      );
       const currentTimeStr = Formatters.formatTime(currentTime);
       const totalTimeStr = Formatters.formatTime(videoData.duration);
-      const percentage = Math.round((currentTime / videoData.duration) * 100);
-
+      const progress = Math.min(Math.round((currentTime / videoData.duration) * 20), 20);
+      const emptyProgress = 20 - progress;
+      
+      // Create progress bar with arrow indicator
+      const progressBar = "━".repeat(progress) + ">" + "━".repeat(Math.max(0, emptyProgress - 1));
+      
       embed.addFields({
         name: "⏱️ Progress",
-        value: `${progressBar}\n\`${currentTimeStr}\` ━━━━━━━━━━━━━━━━━━━━ \`${totalTimeStr}\`\n**${percentage}%** completed`,
+        value: `\`${currentTimeStr}\` ${progressBar} \`${totalTimeStr}\``,
         inline: false,
       });
     }
 
-    // Compact info row with emojis
+    // Compact info row with only essential information
     const infoFields = [];
-    
-    if (videoData.duration) {
-      infoFields.push({
-        name: "⏱️ Duration",
-        value: `\`${Formatters.formatDuration(videoData.duration)}\``,
-        inline: true,
-      });
-    }
 
     infoFields.push({
       name: "👤 Requested by",
       value: Formatters.escapeMarkdown(requestedBy),
-      inline: true,
-    });
-
-    infoFields.push({
-      name: "🔊 Volume",
-      value: `\`${volume}%\``,
       inline: true,
     });
 
@@ -104,16 +89,16 @@ class EmbedBuilders {
       });
     }
 
-    // Loop mode indicator
+    // Loop mode indicator (fix display issue)
     const loopEmojis = {
       none: "➡️ Off",
-      track: "🔂 Track",
+      track: "🔂 Track", 
       queue: "🔁 Queue"
     };
     
     statusFields.push({
       name: "🔄 Loop",
-      value: `\`${loopEmojis[loopMode] || loopEmojis.none}\``,
+      value: loopEmojis[loopMode] || loopEmojis.none,
       inline: true,
     });
 

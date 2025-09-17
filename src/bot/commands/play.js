@@ -154,6 +154,7 @@ module.exports = {
         requestedBy: user.displayName || user.username,
         queuePosition: result.player.currentIndex + 1,
         totalQueue: result.player.queueLength,
+        loopMode: result.player.loopMode, // Fix: Add missing loopMode parameter
       });
 
       // Create control buttons based on current state

@@ -78,6 +78,7 @@ class ProgressTracker {
           requestedBy: player.currentTrack.requestedBy,
           queuePosition: player.currentIndex + 1,
           totalQueue: player.queue.length,
+          loopMode: player.loopMode, // Fix: Add missing loopMode parameter
         }
       );
 

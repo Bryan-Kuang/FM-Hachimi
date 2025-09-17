@@ -150,6 +150,7 @@ async function handleButtonInteraction(interaction) {
             requestedBy: result.newTrack.requestedBy,
             queuePosition: result.player.currentIndex + 1,
             totalQueue: result.player.queueLength,
+            loopMode: result.player.loopMode, // Fix: Add missing loopMode parameter
           });
         } else {
           responseEmbed = EmbedBuilders.createSuccessEmbed(
@@ -174,6 +175,7 @@ async function handleButtonInteraction(interaction) {
             requestedBy: result.newTrack.requestedBy,
             queuePosition: result.player.currentIndex + 1,
             totalQueue: result.player.queueLength,
+            loopMode: result.player.loopMode, // Fix: Add missing loopMode parameter
           });
         } else {
           responseEmbed = EmbedBuilders.createSuccessEmbed(

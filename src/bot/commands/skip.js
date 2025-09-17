@@ -77,6 +77,7 @@ module.exports = {
           requestedBy: user.displayName || user.username,
           queuePosition: 2,
           totalQueue: 3,
+          loopMode: "queue", // Fix: Add missing loopMode parameter (simulated for now)
         }
       );
 
