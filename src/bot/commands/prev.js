@@ -89,7 +89,7 @@ module.exports = {
 
       await interaction.reply({
         embeds: [nowPlayingEmbed],
-        components: [controlButtons],
+        components: controlButtons, // Now returns array of ActionRowBuilders
       });
 
       logger.info("Previous command executed successfully", {

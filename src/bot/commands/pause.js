@@ -66,11 +66,12 @@ module.exports = {
         hasQueue: result.player.queueLength > 0,
         canGoBack: result.player.hasPrevious,
         canSkip: result.player.hasNext,
+        loopMode: result.player.loopMode,
       });
 
       await interaction.reply({
-        embeds: [successEmbed],
-        components: [controlButtons],
+        embeds: [pauseEmbed],
+        components: controlButtons, // Now returns array of ActionRowBuilders
       });
 
       logger.info("Pause command executed successfully", {

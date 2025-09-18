@@ -322,7 +322,7 @@ async function handleButtonInteraction(interaction) {
     };
 
     if (responseButtons) {
-      response.components = responseButtons;
+      response.components = responseButtons; // Now returns array of ActionRowBuilders
     }
 
     await interaction.editReply(response);

@@ -67,16 +67,17 @@ module.exports = {
 
       // Create control buttons
       const controlButtons = ButtonBuilders.createPlaybackControls({
-        isPlaying: true,
-        hasQueue: true,
-        canGoBack: false,
-        canSkip: true,
-      });
+      isPlaying: true,
+      hasQueue: true,
+      canGoBack: false,
+      canSkip: true,
+      loopMode: "queue",
+    });
 
-      await interaction.reply({
-        embeds: [nowPlayingEmbed],
-        components: [controlButtons],
-      });
+    await interaction.reply({
+      embeds: [nowPlayingEmbed],
+      components: controlButtons, // Now returns array of ActionRowBuilders
+    });
 
       logger.info("Now playing command executed successfully", {
         user: user.username,

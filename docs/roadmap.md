@@ -1,6 +1,5 @@
 未开始：
 
-- 关键词搜索功能 (Easy-Medium)
 - 支持播放列表 (Medium)
 - 支持 youtube 等视频源等 url 播放 (Medium-Hard)
 - 推荐下一个视频 (Hard)
@@ -10,6 +9,8 @@
 
 已验收（只能人工添加）：
 
+- 关键词搜索功能 (Easy-Medium)
 - 支持删除 queue 中的单个歌曲 (Easy)
 - 点击 stop 键会清空 queue
 - 将 loop 默认模式改为 queue loop
+- ui 更新

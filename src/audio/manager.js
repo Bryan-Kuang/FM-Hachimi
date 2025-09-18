@@ -554,6 +554,11 @@ class AudioManager {
         return { success: true, showMenu: true };
       }
 
+      case "queue": {
+        // Queue button shows queue information, handled in interactionCreate
+        return { success: true, showQueue: true };
+      }
+
       default:
         // Handle queue delete buttons (format: queue_delete_<index>)
         if (customId.startsWith("queue_delete_")) {

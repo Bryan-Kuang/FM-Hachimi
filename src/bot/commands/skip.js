@@ -90,7 +90,7 @@ module.exports = {
 
       await interaction.reply({
         embeds: [nowPlayingEmbed],
-        components: [controlButtons],
+        components: controlButtons,
       });
 
       logger.info("Skip command executed successfully", {

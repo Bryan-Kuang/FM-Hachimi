@@ -9,7 +9,7 @@ class ButtonBuilders {
   /**
    * Create modern playback control buttons with enhanced visual design
    * @param {Object} options - Button configuration options
-   * @returns {ActionRowBuilder} - Discord action row with buttons
+   * @returns {Array<ActionRowBuilder>} - Array of Discord action rows with buttons
    */
   static createPlaybackControls(options = {}) {
     const {
@@ -22,7 +22,8 @@ class ButtonBuilders {
       isShuffled = false,
     } = options;
 
-    const row = new ActionRowBuilder();
+    const row1 = new ActionRowBuilder();
+    const row2 = new ActionRowBuilder();
 
     // Previous track button with enhanced styling
     const previousButton = new ButtonBuilder()
@@ -67,9 +68,21 @@ class ButtonBuilders {
       .setEmoji(loopEmojis[loopMode])
       .setStyle(loopMode === "none" ? ButtonStyle.Secondary : ButtonStyle.Success);
 
-    row.addComponents(previousButton, playPauseButton, stopButton, skipButton, loopButton);
+    // Queue button for easy access to queue management
+    const queueButton = new ButtonBuilder()
+      .setCustomId("queue")
+      .setLabel("Queue")
+      .setEmoji("📋")
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(!hasQueue);
 
-    return row;
+    // First row: main playback controls
+    row1.addComponents(previousButton, playPauseButton, stopButton, skipButton, loopButton);
+    
+    // Second row: queue management
+    row2.addComponents(queueButton);
+
+    return [row1, row2];
   }
 
   /**
@@ -89,29 +102,13 @@ class ButtonBuilders {
 
     const row = new ActionRowBuilder();
 
-    // View queue button with enhanced styling
-    const queueButton = new ButtonBuilder()
-      .setCustomId("view_queue")
-      .setLabel("View Queue")
-      .setEmoji("📋")
-      .setStyle(ButtonStyle.Primary)
-      .setDisabled(!hasQueue);
-
-    // Shuffle button with dynamic styling
-    const shuffleButton = new ButtonBuilder()
-      .setCustomId("shuffle")
-      .setLabel(isShuffled ? "Unshuffle" : "Shuffle")
-      .setEmoji(isShuffled ? "🔀" : "🔀")
-      .setStyle(isShuffled ? ButtonStyle.Success : ButtonStyle.Secondary)
-      .setDisabled(!canShuffle);
-
-    // Clear queue button with warning style
-    const clearButton = new ButtonBuilder()
-      .setCustomId("clear_queue")
-      .setLabel("Clear Queue")
+    // Remove from queue button with warning style
+    const removeButton = new ButtonBuilder()
+      .setCustomId("queue_remove")
+      .setLabel("Remove")
       .setEmoji("🗑️")
       .setStyle(ButtonStyle.Danger)
-      .setDisabled(!canClear);
+      .setDisabled(!hasQueue);
 
     // Previous page button
     const prevPageButton = new ButtonBuilder()
@@ -127,9 +124,9 @@ class ButtonBuilders {
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(currentPage >= totalPages || totalPages <= 1);
 
-    row.addComponents(queueButton, shuffleButton, clearButton, prevPageButton, nextPageButton);
+    row.addComponents(removeButton, prevPageButton, nextPageButton);
 
-    return row;
+    return [row]; // Return array of ActionRowBuilders
   }
 
   /**
