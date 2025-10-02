@@ -5,9 +5,10 @@
 
 const { SlashCommandBuilder } = require("discord.js");
 const EmbedBuilders = require("../../ui/embeds");
-const _ButtonBuilders = require("../../ui/buttons");
+const ButtonBuilders = require("../../ui/buttons");
 const AudioManager = require("../../audio/manager");
 const logger = require("../../utils/logger");
+const ProgressTracker = require("../../audio/progress-tracker");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -116,6 +117,19 @@ module.exports = {
       // Search for qualified Hachimi videos
       const qualifiedVideos = await bilibiliApi.searchHachimiVideos(10);
 
+      // Ensure extractor is available for audio URL resolution
+      const extractor = typeof audioManager.getExtractor === "function"
+        ? audioManager.getExtractor()
+        : audioManager.extractor;
+      if (!extractor) {
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          "Extractor Not Ready",
+          "Audio extractor is not initialized. Please wait a moment and try again.",
+          { suggestion: "Restart the bot or try again later." }
+        );
+        return await interaction.editReply({ embeds: [errorEmbed] });
+      }
+
       if (qualifiedVideos.length === 0) {
         const noResultsEmbed = EmbedBuilders.createErrorEmbed(
           "No Qualified Videos Found",
@@ -158,21 +172,9 @@ module.exports = {
 
        for (const video of qualifiedVideos) {
          try {
-           player.addToQueue({
-             url: video.url,
-             title: video.title,
-             uploader: video.author, // Fix: unify field name to 'uploader'
-             duration: video.duration,
-             thumbnail: video.pic,
-             source: "bilibili",
-             metadata: {
-               bvid: video.bvid,
-               views: video.view,
-               likes: video.like,
-               likeRate: video.likeRate,
-               qualificationReason: video.qualificationReason,
-             },
-           }, username);
+           // Resolve audioUrl and normalized metadata via extractor
+           const videoData = await extractor.extractAudio(video.url);
+           player.addToQueue(videoData, username);
            addedCount++;
          } catch (error) {
            logger.warn("Failed to add Hachimi video to queue", {
@@ -217,6 +219,34 @@ module.exports = {
       // Start playing if not already playing
       if (!player.isPlaying && !player.isPaused) { // Fix: isPlaying is a property, and use playNext()
         await player.playNext();
+      }
+
+      // Post Now Playing UI and start progress tracking
+      if (player.currentTrack) {
+        const nowPlayingEmbed = EmbedBuilders.createNowPlayingEmbed(
+          player.currentTrack,
+          {
+            requestedBy: username,
+            queuePosition: player.currentIndex + 1,
+            totalQueue: player.queue.length,
+            loopMode: player.loopMode,
+          }
+        );
+
+        const controlButtons = ButtonBuilders.createPlaybackControls({
+          isPlaying: player.isPlaying,
+          hasQueue: player.queue.length > 0,
+          canGoBack: player.hasPrevious,
+          canSkip: player.hasNext,
+          loopMode: player.loopMode,
+        });
+
+        const nowPlayingMessage = await interaction.followUp({
+          embeds: [nowPlayingEmbed],
+          components: controlButtons,
+        });
+
+        ProgressTracker.startTracking(interaction.guild.id, nowPlayingMessage);
       }
 
       logger.info("Hachimi playlist created successfully", {

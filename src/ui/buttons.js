@@ -15,7 +15,7 @@ class ButtonBuilders {
     const {
       isPlaying = false,
       canSkip = true,
-      canPrevious = false,
+      canGoBack = false,
       hasQueue = false,
       loopMode = "none",
       _volume = 50,
@@ -27,15 +27,15 @@ class ButtonBuilders {
 
     // Previous track button with enhanced styling
     const previousButton = new ButtonBuilder()
-      .setCustomId("previous")
+      .setCustomId("prev")
       .setLabel("Previous")
       .setEmoji("⏮️")
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(!canPrevious);
+      .setDisabled(!canGoBack);
 
     // Play/Pause button with dynamic styling
     const playPauseButton = new ButtonBuilder()
-      .setCustomId(isPlaying ? "pause" : "play")
+      .setCustomId("pause_resume")
       .setLabel(isPlaying ? "Pause" : "Play")
       .setEmoji(isPlaying ? "⏸️" : "▶️")
       .setStyle(isPlaying ? ButtonStyle.Success : ButtonStyle.Primary);

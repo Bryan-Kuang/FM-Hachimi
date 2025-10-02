@@ -57,13 +57,15 @@ class BilibiliAPI {
       );
 
       if (response.data && response.data.code === 0) {
-        return this.parseSearchResults(response.data.data);
+        const parsed = this.parseSearchResults(response.data.data);
+        return parsed.videos; // 返回数组，便于调用方直接使用
       } else {
         logger.warn("Bilibili API returned error", {
           code: response.data?.code,
           message: response.data?.message,
         });
-        return [];
+        // 回退到 extractor 搜索
+        return await this._fallbackSearch(keyword, pageSize);
       }
     } catch (error) {
       logger.error("Error searching Bilibili videos", {
@@ -71,7 +73,8 @@ class BilibiliAPI {
         keyword,
         page,
       });
-      return [];
+      // 出错（例如 412）时回退到 extractor 搜索
+      return await this._fallbackSearch(keyword, pageSize);
     }
   }
 
@@ -84,13 +87,11 @@ class BilibiliAPI {
     const videos = [];
 
     // Extract video results from the response
-    if (data.result && Array.isArray(data.result)) {
-      for (const item of data.result) {
-        if (item.result_type === "video" && Array.isArray(item.data)) {
-          for (const video of item.data) {
-            videos.push(this.parseVideoInfo(video));
-          }
-        }
+    // For endpoint: /x/web-interface/search/type?search_type=video
+    // The response structure is: data.result: Array<Video>
+    if (Array.isArray(data.result)) {
+      for (const video of data.result) {
+        videos.push(this.parseVideoInfo(video));
       }
     }
 
@@ -118,8 +119,9 @@ class BilibiliAPI {
       pic: video.pic,
       duration: this.parseDuration(video.duration),
       pubdate: video.pubdate,
+      // Note: search API often doesn't include like count; default to 0
       view: video.play || 0,
-      like: video.like || 0,
+      like: typeof video.like === "number" ? video.like : 0,
       danmaku: video.danmaku || 0,
       tag: video.tag || "",
       url: `https://www.bilibili.com/video/${video.bvid}`,
@@ -144,6 +146,66 @@ class BilibiliAPI {
   }
 
   /**
+   * 当官方接口失败时，使用音频 extractor 的搜索作为回退
+   * @param {string} keyword
+   * @param {number} maxResults
+   * @returns {Promise<Array>} 与 parseVideoInfo 结构一致的数组
+   */
+  async _fallbackSearch(keyword, maxResults = 10) {
+    try {
+      const Extractor = require("../audio/extractor");
+      const extractor = new Extractor();
+      const res = await extractor.searchVideos(keyword, maxResults);
+      if (!res || res.success !== true || !Array.isArray(res.results)) return [];
+
+      // 将 extractor 的结果映射为 BilibiliAPI 的视频结构
+      return res.results.map((item) => ({
+        bvid: item.id || undefined,
+        aid: undefined,
+        title: item.title || "",
+        author: item.uploader || "",
+        mid: undefined,
+        description: "",
+        pic: item.thumbnail || "",
+        duration: typeof item.duration === "number" ? item.duration : 0,
+        pubdate: undefined,
+        view: (typeof item.viewCount === "number" ? item.viewCount : parseInt(item.viewCount || 0, 10)) || 0,
+        like: 0,
+        danmaku: 0,
+        tag: "",
+        url: item.url,
+      }));
+    } catch (err) {
+      logger.warn("Fallback search via extractor failed", { error: err.message, keyword });
+      return [];
+    }
+  }
+
+  /**
+   * 质量过滤：点赞率>5%且播放>10k，或播放>200k
+   * @param {Array} videos
+   * @returns {Array}
+   */
+  filterQualityVideos(videos) {
+    if (!Array.isArray(videos)) return [];
+    const qualified = [];
+    for (const v of videos) {
+      const views = Number(v.view || 0);
+      const likes = Number(v.like || 0);
+      const likeRate = views > 0 ? likes / views : 0;
+      const pass = (views >= 10000 && likeRate >= 0.05) || views >= 200000;
+      if (pass) {
+        v.likeRate = likeRate;
+        v.qualificationReason = views >= 200000 ? 
+          "Views ≥ 200k" : 
+          "Views ≥ 10k & Like rate ≥ 5%";
+        qualified.push(v);
+      }
+    }
+    return qualified;
+  }
+
+  /**
    * Search for Hachimi videos with quality filtering
    * @param {number} maxResults - Maximum number of results to return (default: 10)
    * @returns {Promise<Array>} Array of qualified video objects
@@ -153,7 +215,7 @@ class BilibiliAPI {
       logger.info("Searching for Hachimi videos", { maxResults });
 
       // Search for videos with "哈基米" keyword
-      const searchResults = await this.searchVideos("哈基米", 1, 50);
+      const searchResults = await this.searchVideos("哈基米", 1, 50); // 返回数组
 
       // Handle case where search returns empty array
       if (!searchResults || searchResults.length === 0) {
