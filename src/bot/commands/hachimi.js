@@ -168,14 +168,54 @@ module.exports = {
 
        // Add qualified videos to queue
        let addedCount = 0;
-       const failedVideos = [];
-
+      const failedVideos = [];
+      let nowPlayingSent = false;
+ 
        for (const video of qualifiedVideos) {
          try {
            // Resolve audioUrl and normalized metadata via extractor
            const videoData = await extractor.extractAudio(video.url);
            player.addToQueue(videoData, username);
            addedCount++;
+ 
+          // Immediately start playback once the first track is queued
+          if (addedCount === 1 && !player.isPlaying && !player.isPaused) {
+            try {
+              await player.playNext();
+
+              // Send Now Playing UI right away for the first track
+              const nowPlayingEmbed = EmbedBuilders.createNowPlayingEmbed(
+                player.currentTrack || videoData,
+                {
+                  requestedBy: username,
+                  queuePosition: player.currentIndex + 1,
+                  totalQueue: player.queue.length,
+                  loopMode: player.loopMode,
+                }
+              );
+
+              const controlButtons = ButtonBuilders.createPlaybackControls({
+                isPlaying: player.isPlaying,
+                hasQueue: player.queue.length > 0,
+                canGoBack: player.hasPrevious,
+                canSkip: player.hasNext,
+                loopMode: player.loopMode,
+              });
+
+              const nowPlayingMessage = await interaction.followUp({
+                embeds: [nowPlayingEmbed],
+                components: controlButtons,
+              });
+
+              ProgressTracker.startTracking(interaction.guild.id, nowPlayingMessage);
+              nowPlayingSent = true;
+            } catch (err) {
+              logger.warn("Failed to start playback on first Hachimi track", {
+                error: err.message,
+                title: videoData?.title,
+              });
+            }
+          }
          } catch (error) {
            logger.warn("Failed to add Hachimi video to queue", {
              title: video.title,
@@ -220,34 +260,34 @@ module.exports = {
       if (!player.isPlaying && !player.isPaused) { // Fix: isPlaying is a property, and use playNext()
         await player.playNext();
       }
-
-      // Post Now Playing UI and start progress tracking
-      if (player.currentTrack) {
-        const nowPlayingEmbed = EmbedBuilders.createNowPlayingEmbed(
-          player.currentTrack,
-          {
-            requestedBy: username,
-            queuePosition: player.currentIndex + 1,
-            totalQueue: player.queue.length,
-            loopMode: player.loopMode,
-          }
-        );
-
-        const controlButtons = ButtonBuilders.createPlaybackControls({
-          isPlaying: player.isPlaying,
-          hasQueue: player.queue.length > 0,
-          canGoBack: player.hasPrevious,
-          canSkip: player.hasNext,
-          loopMode: player.loopMode,
-        });
-
-        const nowPlayingMessage = await interaction.followUp({
-          embeds: [nowPlayingEmbed],
-          components: controlButtons,
-        });
-
-        ProgressTracker.startTracking(interaction.guild.id, nowPlayingMessage);
-      }
+ 
+       // Post Now Playing UI and start progress tracking
+      if (player.currentTrack && !nowPlayingSent) {
+         const nowPlayingEmbed = EmbedBuilders.createNowPlayingEmbed(
+           player.currentTrack,
+           {
+             requestedBy: username,
+             queuePosition: player.currentIndex + 1,
+             totalQueue: player.queue.length,
+             loopMode: player.loopMode,
+           }
+         );
+ 
+         const controlButtons = ButtonBuilders.createPlaybackControls({
+           isPlaying: player.isPlaying,
+           hasQueue: player.queue.length > 0,
+           canGoBack: player.hasPrevious,
+           canSkip: player.hasNext,
+           loopMode: player.loopMode,
+         });
+ 
+         const nowPlayingMessage = await interaction.followUp({
+           embeds: [nowPlayingEmbed],
+           components: controlButtons,
+         });
+ 
+         ProgressTracker.startTracking(interaction.guild.id, nowPlayingMessage);
+       }
 
       logger.info("Hachimi playlist created successfully", {
         guild: interaction.guild.id,
