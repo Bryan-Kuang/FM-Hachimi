@@ -45,33 +45,43 @@ class BotClient {
   async initialize() {
     try {
       logger.info("Initializing Discord bot client");
+      const Debug = require("../utils/debug");
+      Debug.trace('client.initialize.begin')
 
       // Set up event handlers
       this.setupEventHandlers();
+      Debug.trace('client.events.bound')
 
       // Load commands
       await this.loadCommands();
+      Debug.trace('client.commands.loaded')
 
       // Login to Discord
       await this.login();
+      Debug.trace('client.login.done')
 
       try {
         PlayerControl.initialize(require("../audio/manager"));
         PlaylistManager.initialize(require("../audio/manager"));
         InterfaceUpdater.setClient(this.client);
         InterfaceUpdater.bind(PlayerControl);
+        Debug.trace('client.bind.interface_updater')
       } catch (e) {
         const ls = require("../services/logger_service");
         ls.error("Failed to bind UI updater", { error: e.message });
+        Debug.error('client.bind.failed', e)
       }
 
       logger.info("Discord bot client initialized successfully");
+      Debug.trace('client.initialize.success')
       return true;
     } catch (error) {
       logger.error("Failed to initialize Discord bot client", {
         error: error.message,
         stack: error.stack,
       });
+      const Debug = require("../utils/debug");
+      Debug.error('client.initialize.failed', error)
       throw error;
     }
   }
@@ -81,7 +91,7 @@ class BotClient {
    */
   setupEventHandlers() {
     // Bot ready event
-    this.client.once("clientReady", () => {
+    this.client.once("ready", () => {
       this.isReady = true;
       this.startTime = new Date();
 
@@ -90,6 +100,8 @@ class BotClient {
         id: this.client.user.id,
         guilds: this.client.guilds.cache.size,
       });
+      const Debug = require("../utils/debug");
+      Debug.trace('client.event.ready')
 
       // Set bot activity status
       this.client.user.setActivity("寻找蜂蜜饮料中...", {
@@ -201,10 +213,14 @@ class BotClient {
         error: error.message,
         stack: error.stack,
       });
+      const Debug = require("../utils/debug");
+      Debug.error('client.event.error', error)
     });
 
     this.client.on("warn", (warning) => {
       logger.warn("Discord client warning", { warning });
+      const Debug = require("../utils/debug");
+      Debug.trace('client.event.warn', { warning })
     });
 
     // Voice state updates for tracking user activity
@@ -214,6 +230,8 @@ class BotClient {
         oldChannel: oldState.channelId,
         newChannel: newState.channelId,
       });
+      const Debug = require("../utils/debug");
+      Debug.trace('client.event.voiceStateUpdate', { userId: newState.id, oldChannel: oldState.channelId, newChannel: newState.channelId })
     });
   }
 
@@ -235,17 +253,25 @@ class BotClient {
     ];
 
     for (const command of commands) {
-      if (command.data && command.execute) {
-        this.client.commands.set(command.data.name, command);
-        logger.debug("Loaded command", { name: command.data.name });
-      } else {
-        logger.warn("Invalid command structure", { command });
+      try {
+        if (command.data && command.execute) {
+          this.client.commands.set(command.data.name, command);
+          logger.debug("Loaded command", { name: command.data.name });
+        } else {
+          logger.warn("Invalid command structure", { command });
+        }
+      } catch (e) {
+        const Debug = require("../utils/debug");
+        Debug.error('command.load.failed', e)
+        throw e
       }
     }
 
     logger.info("Commands loaded", {
       count: this.client.commands.size,
     });
+    const Debug = require("../utils/debug");
+    Debug.trace('client.commands.count', { count: this.client.commands.size })
   }
 
   /**
@@ -296,10 +322,15 @@ class BotClient {
     try {
       await this.client.login(config.discord.token);
       logger.info("Successfully logged in to Discord");
+      const Debug = require("../utils/debug");
+      Debug.trace('client.login.success')
     } catch (error) {
       logger.error("Failed to login to Discord", {
         error: error.message,
+        code: error.code,
       });
+      const Debug = require("../utils/debug");
+      Debug.error('client.login.failed', error)
       throw error;
     }
   }

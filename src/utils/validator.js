@@ -1,4 +1,4 @@
-const logger = require("./logger");
+const logger = require("../services/logger_service");
 
 /**
  * Validates and parses Bilibili video URLs

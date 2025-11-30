@@ -7,6 +7,8 @@ const BotClient = require("./bot/client");
 const BilibiliExtractor = require("./audio/extractor");
 const AudioManager = require("./audio/manager");
 const logger = require("./services/logger_service");
+const TokenPrecheck = require("./utils/token_precheck");
+const Debug = require("./utils/debug");
 const config = require("./config/config");
 
 class BilibiliDiscordBot {
@@ -22,13 +24,19 @@ class BilibiliDiscordBot {
   async start() {
     try {
       logger.info("Starting Bilibili Discord Bot");
+      Debug.trace('start.begin')
 
-      // Validate configuration
       if (!config.discord.token) {
-        throw new Error(
-          "Discord token is not configured. Please set DISCORD_TOKEN in your environment."
-        );
+        throw new Error("Discord token is not configured. Please set DISCORD_TOKEN in your environment.");
       }
+
+      const tokenCheck = await TokenPrecheck.validate()
+      if (!tokenCheck.valid) {
+        logger.error("Discord token precheck failed", { reason: tokenCheck.reason })
+        Debug.error('token.precheck', new Error(tokenCheck.reason))
+        throw new Error("Discord token invalid or not usable")
+      }
+      Debug.trace('token.precheck', { reason: tokenCheck.reason || 'OK' })
 
       // Initialize Bilibili extractor
       logger.info("Initializing Bilibili audio extractor");
@@ -39,17 +47,21 @@ class BilibiliDiscordBot {
 
       // Initialize Discord bot client
       logger.info("Initializing Discord bot client");
+      Debug.trace('client.init')
       this.botClient = new BotClient();
 
       // Attach extractor to bot client and audio manager
       this.botClient.setExtractor(this.extractor);
       AudioManager.setExtractor(this.extractor);
+      Debug.trace('inject.extractor')
 
       // Initialize bot client
       await this.botClient.initialize();
+      Debug.trace('client.initialize.done')
 
       this.isRunning = true;
       logger.info("Bilibili Discord Bot started successfully");
+      Debug.trace('start.success')
 
       // Log bot statistics
       const stats = this.botClient.getStats();
@@ -59,6 +71,8 @@ class BilibiliDiscordBot {
         error: error.message,
         stack: error.stack,
       });
+      Debug.error('start.failed', error)
+      Debug.summary()
 
       await this.shutdown();
       process.exit(1);

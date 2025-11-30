@@ -30,12 +30,12 @@ const baseFormat = winston.format.combine(
 )
 
 const logger = winston.createLogger({
-  level: 'info',
+  level: 'debug',
   format: baseFormat,
   transports: [
     new winston.transports.File({ filename: errorFile, level: 'error', maxsize: 10 * 1024 * 1024, maxFiles: 5, tailable: true }),
-    new winston.transports.File({ filename: appFile, level: 'info', maxsize: 10 * 1024 * 1024, maxFiles: 5, tailable: true }),
-    new winston.transports.Console({ level: 'info' })
+    new winston.transports.File({ filename: appFile, level: 'debug', maxsize: 10 * 1024 * 1024, maxFiles: 5, tailable: true }),
+    new winston.transports.Console({ level: 'debug' })
   ]
 })
 
@@ -49,9 +49,9 @@ function log(level, message, context) {
 }
 
 module.exports = {
+  debug: (message, context) => log('debug', message, context),
   info: (message, context) => log('info', message, context),
   warn: (message, context) => log('warn', message, context),
   error: (message, context) => log('error', message, context),
   fatal: (message, context) => log('error', message, context)
 }
-
