@@ -22,12 +22,18 @@ class ProgressTracker {
     // Clear existing tracker
     this.stopTracking(guildId);
 
+    if (process.env.NODE_ENV === "test") {
+      this.activeTrackers.set(guildId, { message, guildId, interval: null });
+      this.updateProgress(guildId);
+      return;
+    }
+
     const tracker = {
       message,
       guildId,
       interval: setInterval(() => {
         this.updateProgress(guildId);
-      }, 10000), // Update every 10 seconds
+      }, 1000),
     };
 
     this.activeTrackers.set(guildId, tracker);
@@ -42,7 +48,7 @@ class ProgressTracker {
   stopTracking(guildId) {
     const tracker = this.activeTrackers.get(guildId);
     if (tracker) {
-      clearInterval(tracker.interval);
+      if (tracker.interval) clearInterval(tracker.interval);
       this.activeTrackers.delete(guildId);
       logger.info("Stopped progress tracking", { guild: guildId });
     }
