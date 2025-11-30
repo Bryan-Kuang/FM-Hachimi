@@ -5,7 +5,7 @@
 
 const { REST, Routes } = require("discord.js");
 const config = require("../src/config/config");
-const logger = require("../src/utils/logger");
+const logger = require("../src/services/logger_service");
 
 // Import all commands
 const commands = [

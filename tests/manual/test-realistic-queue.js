@@ -3,7 +3,7 @@
  */
 
 const AudioManager = require("../../src/audio/manager");
-const logger = require("../../src/utils/logger");
+const logger = require("../../src/services/logger_service");
 
 async function testRealisticQueue() {
   console.log("🧪 Testing Realistic Queue Behavior...\n");
@@ -155,4 +155,3 @@ testRealisticQueue().catch((error) => {
   console.error("❌ Test failed:", error);
   process.exit(1);
 });
-

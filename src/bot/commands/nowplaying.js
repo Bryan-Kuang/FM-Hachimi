@@ -6,7 +6,7 @@
 const { SlashCommandBuilder } = require("discord.js");
 const EmbedBuilders = require("../../ui/embeds");
 const ButtonBuilders = require("../../ui/buttons");
-const logger = require("../../utils/logger");
+const logger = require("../../services/logger_service");
 
 module.exports = {
   data: new SlashCommandBuilder()

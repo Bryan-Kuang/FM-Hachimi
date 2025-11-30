@@ -6,7 +6,7 @@
  */
 
 const AudioPlayer = require('../../src/audio/player');
-const logger = require('../../src/utils/logger');
+const logger = require('../../src/services/logger_service');
 const config = require('../../src/config/config');
 
 console.log('🧪 Testing FFmpeg Activity Monitoring Fix...');

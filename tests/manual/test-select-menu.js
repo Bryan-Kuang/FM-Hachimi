@@ -4,7 +4,7 @@
 
 const { Client, GatewayIntentBits } = require("discord.js");
 const AudioManager = require("../../src/audio/manager");
-const logger = require("../../src/utils/logger");
+const logger = require("../../src/services/logger_service");
 
 async function testSelectMenuInteraction() {
   console.log("🧪 Testing Select Menu Interaction...\n");
@@ -127,4 +127,3 @@ testSelectMenuInteraction().catch((error) => {
   console.error("❌ Test execution failed:", error);
   process.exit(1);
 });
-

@@ -4,7 +4,7 @@
 
 const { Client, GatewayIntentBits } = require("discord.js");
 const ButtonBuilders = require("../../src/ui/buttons");
-const logger = require("../../src/utils/logger");
+const logger = require("../../src/services/logger_service");
 
 async function testLoopButton() {
   console.log("🧪 Testing Loop Button Creation...\n");
@@ -103,4 +103,3 @@ testLoopButton().catch((error) => {
   console.error("❌ Test failed:", error);
   process.exit(1);
 });
-

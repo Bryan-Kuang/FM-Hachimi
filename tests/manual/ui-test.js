@@ -10,7 +10,7 @@ const {
   ButtonStyle,
 } = require("discord.js");
 const Formatters = require("../../src/utils/formatters");
-const logger = require("../../src/utils/logger");
+const logger = require("../../src/services/logger_service");
 
 /**
  * Test embed generation

@@ -9,7 +9,7 @@ const AudioManager = require("../../src/audio/manager");
 const ButtonBuilders = require("../../src/ui/buttons");
 const EmbedBuilders = require("../../src/ui/embeds");
 const ProgressTracker = require("../../src/audio/progress-tracker");
-const logger = require("../../src/utils/logger");
+const logger = require("../../src/services/logger_service");
 require("dotenv").config();
 
 class ComprehensiveTest {
@@ -557,4 +557,3 @@ if (require.main === module) {
 }
 
 module.exports = ComprehensiveTest;
-

@@ -7,7 +7,7 @@ const EmbedBuilders = require("../../src/ui/embeds");
 const ButtonBuilders = require("../../src/ui/buttons");
 const BotClient = require("../../src/bot/client");
 const BilibiliExtractor = require("../../src/audio/extractor");
-const logger = require("../../src/utils/logger");
+const logger = require("../../src/services/logger_service");
 
 /**
  * Test embed generation

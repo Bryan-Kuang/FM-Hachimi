@@ -5,7 +5,7 @@
 
 const _axios = require("axios");
 const { spawn } = require("child_process");
-const logger = require("../utils/logger");
+const logger = require("../services/logger_service");
 const UrlValidator = require("../utils/validator");
 
 class BilibiliExtractor {

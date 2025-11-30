@@ -6,7 +6,7 @@
 const { runExtractorTests } = require("./extractor-test");
 const { runDiscordTests } = require("./discord-test");
 const { runAudioPlayerTests } = require("./audio-player-test");
-const logger = require("../../src/utils/logger");
+const logger = require("../../src/services/logger_service");
 
 /**
  * Test system integration

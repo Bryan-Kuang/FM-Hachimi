@@ -6,7 +6,7 @@
 const path = require("path");
 const UrlValidator = require("../../src/utils/validator");
 const Formatters = require("../../src/utils/formatters");
-const logger = require("../../src/utils/logger");
+const logger = require("../../src/services/logger_service");
 
 // Test data sets
 const testUrls = {

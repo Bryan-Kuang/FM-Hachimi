@@ -8,7 +8,7 @@
 const { Client, GatewayIntentBits } = require("discord.js");
 const BilibiliExtractor = require("../../src/audio/extractor");
 const AudioManager = require("../../src/audio/manager");
-const logger = require("../../src/utils/logger");
+const logger = require("../../src/services/logger_service");
 require("dotenv").config();
 
 class RealisticIntegrationTest {

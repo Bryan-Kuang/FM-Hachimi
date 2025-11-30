@@ -5,7 +5,7 @@
 
 const AudioPlayer = require("../../src/audio/player");
 const AudioManager = require("../../src/audio/manager");
-const logger = require("../../src/utils/logger");
+const logger = require("../../src/services/logger_service");
 
 async function testLoopModes() {
   console.log("🧪 Testing Loop Modes...\n");
@@ -126,4 +126,3 @@ testLoopModes().catch((error) => {
   console.error("❌ Test failed:", error);
   process.exit(1);
 });
-

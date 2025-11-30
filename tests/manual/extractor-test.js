@@ -4,7 +4,7 @@
  */
 
 const BilibiliExtractor = require("../../src/audio/extractor");
-const logger = require("../../src/utils/logger");
+const logger = require("../../src/services/logger_service");
 
 // Test URLs for different scenarios
 const testUrls = {

@@ -4,7 +4,7 @@
  */
 
 const AudioPlayer = require('../../src/audio/player');
-const logger = require('../../src/utils/logger');
+const logger = require('../../src/services/logger_service');
 
 async function testFFmpegCleanupFix() {
   console.log('🧪 Testing FFmpeg cleanup fix...');

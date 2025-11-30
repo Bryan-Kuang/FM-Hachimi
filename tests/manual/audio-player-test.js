@@ -6,7 +6,7 @@
 const AudioPlayer = require("../../src/audio/player");
 const AudioManager = require("../../src/audio/manager");
 const BilibiliExtractor = require("../../src/audio/extractor");
-const logger = require("../../src/utils/logger");
+const logger = require("../../src/services/logger_service");
 
 /**
  * Test audio player initialization

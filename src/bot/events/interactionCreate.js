@@ -9,6 +9,7 @@ const ButtonBuilders = require("../../ui/buttons");
 const PlayerControl = require("../../control/player_control");
 const InterfaceUpdater = require("../../ui/interface_updater");
 const logger = require("../../services/logger_service");
+const Lock = require("../../utils/lock");
 
 module.exports = {
   name: "interactionCreate",
@@ -407,6 +408,14 @@ async function handleSelectMenuInteraction(interaction) {
     const user = interaction.user;
 
     if (customId === "queue_remove_select") {
+      if (Lock.shouldDebounce(interaction.guild.id, customId, 1000)) {
+        await interaction.reply({ content: "操作过于频繁，请稍后重试", ephemeral: true })
+        return
+      }
+      if (!Lock.acquire(interaction.guild.id, customId)) {
+        await interaction.reply({ content: "操作繁忙，请稍后重试", ephemeral: true })
+        return
+      }
       const selectedValue = interaction.values[0];
 
       logger.debug("Queue remove select menu interaction received", {
@@ -415,7 +424,6 @@ async function handleSelectMenuInteraction(interaction) {
         guild: interaction.guild?.name,
       });
 
-      // Defer the reply immediately to avoid timeout
       await interaction.deferReply();
 
       let result;
@@ -502,6 +510,8 @@ async function handleSelectMenuInteraction(interaction) {
         });
       }
 
+      Lock.release(interaction.guild.id, customId)
+
       // Update the original message with new queue info
       const queueInfo = AudioManager.getQueue(interaction.guild.id);
       const queueEmbed = EmbedBuilders.createQueueEmbed(queueInfo.queue, {
@@ -534,6 +544,14 @@ async function handleSelectMenuInteraction(interaction) {
         guild: interaction.guild?.name,
       });
     } else if (customId === "loop_select") {
+      if (Lock.shouldDebounce(interaction.guild.id, customId, 1000)) {
+        await interaction.reply({ content: "操作过于频繁，请稍后重试", ephemeral: true })
+        return
+      }
+      if (!Lock.acquire(interaction.guild.id, customId)) {
+        await interaction.reply({ content: "操作繁忙，请稍后重试", ephemeral: true })
+        return
+      }
       const selectedMode = interaction.values[0];
 
       logger.debug("Loop select menu interaction received", {
@@ -542,7 +560,6 @@ async function handleSelectMenuInteraction(interaction) {
         guild: interaction.guild?.name,
       });
 
-      // Defer the reply immediately to avoid timeout
       await interaction.deferReply({ ephemeral: true });
 
       // Handle loop mode change with audio manager
@@ -582,6 +599,8 @@ async function handleSelectMenuInteraction(interaction) {
       await interaction.editReply({
         embeds: [successEmbed],
       });
+
+      Lock.release(interaction.guild.id, customId)
 
       logger.info("Loop mode changed via select menu", {
         mode: selectedMode,

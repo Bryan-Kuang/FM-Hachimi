@@ -4,7 +4,7 @@
  */
 
 const AudioPlayer = require("../../src/audio/player");
-const logger = require("../../src/utils/logger");
+const logger = require("../../src/services/logger_service");
 
 /**
  * Test queue loop FFmpeg cleanup
