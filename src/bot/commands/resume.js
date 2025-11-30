@@ -4,10 +4,9 @@
  */
 
 const { SlashCommandBuilder } = require("discord.js");
-const EmbedBuilders = require("../../ui/embeds");
-const ButtonBuilders = require("../../ui/buttons");
-const AudioManager = require("../../audio/manager");
-const logger = require("../../utils/logger");
+const PlayerControl = require("../../player_control");
+const InterfaceUpdater = require("../../ui/interface_updater");
+const logger = require("../../logger_service");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -23,57 +22,17 @@ module.exports = {
 
       // Check if user is in a voice channel
       if (!member.voice.channel) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          "Voice Channel Required",
-          "You need to be in a voice channel to control playback!",
-          {
-            suggestion: "Join the voice channel where music is playing.",
-          }
-        );
-
-        return await interaction.reply({
-          embeds: [errorEmbed],
-          ephemeral: true,
-        });
+        return await interaction.reply({ content: "Voice channel required", ephemeral: true })
       }
 
-      // Use audio manager to resume playback
-      const result = AudioManager.resumePlayback(interaction.guild.id);
+      InterfaceUpdater.setPlaybackContext(interaction.guild.id, interaction.channelId)
+      const ok = PlayerControl.resume(interaction.guild.id)
 
-      if (!result.success) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          "Resume Failed",
-          result.error,
-          {
-            suggestion: result.suggestion,
-          }
-        );
-
-        return await interaction.reply({
-          embeds: [errorEmbed],
-          ephemeral: true,
-        });
+      if (!ok) {
+        return await interaction.reply({ content: "Resume failed", ephemeral: true })
       }
 
-      const successEmbed = EmbedBuilders.createSuccessEmbed(
-        "Resumed",
-        "▶️ Audio playback has been resumed."
-      );
-
-      // Update control buttons to show current state
-      const controlButtons = ButtonBuilders.createPlaybackControls({
-        isPlaying: result.player.isPlaying,
-        hasQueue: result.player.queueLength > 0,
-        canGoBack: result.player.hasPrevious,
-        canSkip: result.player.hasNext,
-        loopMode: result.player.loopMode,
-      });
-
-      // Replace undefined embed variables with successEmbed
-      await interaction.reply({
-        embeds: [successEmbed],
-        components: controlButtons, // Now returns array of ActionRowBuilders
-      });
+      await interaction.reply({ content: "▶️ Resumed", ephemeral: true })
 
       logger.info("Resume command executed successfully", {
         user: user.username,
@@ -85,18 +44,7 @@ module.exports = {
         stack: error.stack,
       });
 
-      const errorEmbed = EmbedBuilders.createErrorEmbed(
-        "Resume Failed",
-        "Failed to resume audio playback.",
-        {
-          errorCode: "RESUME_FAILED",
-        }
-      );
-
-      await interaction.reply({
-        embeds: [errorEmbed],
-        ephemeral: true,
-      });
+      await interaction.reply({ content: "Resume failed", ephemeral: true })
     }
   },
 };

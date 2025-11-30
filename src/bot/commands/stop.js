@@ -4,9 +4,9 @@
  */
 
 const { SlashCommandBuilder } = require("discord.js");
-const EmbedBuilders = require("../../ui/embeds");
-const AudioManager = require("../../audio/manager");
-const logger = require("../../utils/logger");
+const PlayerControl = require("../../player_control");
+const InterfaceUpdater = require("../../ui/interface_updater");
+const logger = require("../../logger_service");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -22,66 +22,25 @@ module.exports = {
 
       // Check if user is in a voice channel
       if (!member.voice.channel) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          "Voice Channel Required",
-          "You need to be in a voice channel to stop playback!",
-          {
-            suggestion: "Join the voice channel where music is playing.",
-          }
-        );
-
-        return await interaction.reply({
-          embeds: [errorEmbed],
-          ephemeral: true,
-        });
+        return await interaction.reply({ content: "Voice channel required", ephemeral: true })
       }
 
       // Get audio player for this guild
-      const player = AudioManager.getPlayer(interaction.guild.id);
+      InterfaceUpdater.setPlaybackContext(interaction.guild.id, interaction.channelId)
+      const player = require("../../audio/manager").getPlayer(interaction.guild.id)
 
       // Check if there's anything playing
       if (!player.isPlaying && !player.isPaused && player.queue.length === 0) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          "Nothing to Stop",
-          "There's nothing currently playing or in the queue.",
-          {
-            suggestion: "Use `/play` to start playing music first.",
-          }
-        );
-
-        return await interaction.reply({
-          embeds: [errorEmbed],
-          ephemeral: true,
-        });
+        return await interaction.reply({ content: "Nothing to stop", ephemeral: true })
       }
 
-      // Stop playback
-      const stopped = await player.stop();
+      const stopped = await PlayerControl.stop(interaction.guild.id)
 
       if (!stopped) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          "Stop Failed",
-          "Failed to stop playback. Please try again.",
-          {
-            suggestion: "Check if the bot has proper permissions.",
-          }
-        );
-
-        return await interaction.reply({
-          embeds: [errorEmbed],
-          ephemeral: true,
-        });
+        return await interaction.reply({ content: "Stop failed", ephemeral: true })
       }
 
-      // Create success embed
-      const successEmbed = EmbedBuilders.createSuccessEmbed(
-        "⏹️ Playback Stopped",
-        "Music stopped, queue cleared, and left voice channel."
-      );
-
-      await interaction.reply({
-        embeds: [successEmbed],
-      });
+      await interaction.reply({ content: "⏹️ Stopped", ephemeral: true })
 
       logger.info("Stop command executed successfully", {
         user: user.username,
@@ -95,25 +54,11 @@ module.exports = {
         stack: error.stack,
       });
 
-      const errorEmbed = EmbedBuilders.createErrorEmbed(
-        "Stop Failed",
-        "An error occurred while stopping playback.",
-        {
-          suggestion:
-            "Please try again. If the problem persists, restart the bot.",
-        }
-      );
-
       try {
         if (interaction.replied || interaction.deferred) {
-          await interaction.editReply({
-            embeds: [errorEmbed],
-          });
+          await interaction.editReply({ content: "Stop failed" })
         } else {
-          await interaction.reply({
-            embeds: [errorEmbed],
-            ephemeral: true,
-          });
+          await interaction.reply({ content: "Stop failed", ephemeral: true })
         }
       } catch (replyError) {
         logger.error("Failed to send error response", {
@@ -123,4 +68,3 @@ module.exports = {
     }
   },
 };
-

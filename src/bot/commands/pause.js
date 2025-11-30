@@ -4,10 +4,9 @@
  */
 
 const { SlashCommandBuilder } = require("discord.js");
-const EmbedBuilders = require("../../ui/embeds");
-const ButtonBuilders = require("../../ui/buttons");
-const AudioManager = require("../../audio/manager");
-const logger = require("../../utils/logger");
+const PlayerControl = require("../../player_control");
+const InterfaceUpdater = require("../../ui/interface_updater");
+const logger = require("../../logger_service");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -23,57 +22,26 @@ module.exports = {
 
       // Check if user is in a voice channel
       if (!member.voice.channel) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          "Voice Channel Required",
-          "You need to be in a voice channel to control playback!",
-          {
-            suggestion: "Join the voice channel where music is playing.",
-          }
-        );
-
         return await interaction.reply({
-          embeds: [errorEmbed],
+          content: "Voice channel required",
           ephemeral: true,
         });
       }
 
-      // Use audio manager to pause playback
-      const result = AudioManager.pausePlayback(interaction.guild.id);
-
-      if (!result.success) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          "Pause Failed",
-          result.error,
-          {
-            suggestion: result.suggestion,
-          }
-        );
-
-        return await interaction.reply({
-          embeds: [errorEmbed],
-          ephemeral: true,
-        });
-      }
-
-      const successEmbed = EmbedBuilders.createSuccessEmbed(
-        "Paused",
-        "⏸️ Audio playback has been paused."
+      InterfaceUpdater.setPlaybackContext(
+        interaction.guild.id,
+        interaction.channelId
       );
+      const ok = PlayerControl.pause(interaction.guild.id);
 
-      // Update control buttons to show current state
-      const controlButtons = ButtonBuilders.createPlaybackControls({
-        isPlaying: result.player.isPlaying,
-        hasQueue: result.player.queueLength > 0,
-        canGoBack: result.player.hasPrevious,
-        canSkip: result.player.hasNext,
-        loopMode: result.player.loopMode,
-      });
+      if (!ok) {
+        return await interaction.reply({
+          content: "Pause failed",
+          ephemeral: true,
+        });
+      }
 
-      // Replace undefined embed variables with successEmbed
-      await interaction.reply({
-        embeds: [successEmbed],
-        components: controlButtons, // Now returns array of ActionRowBuilders
-      });
+      await interaction.reply({ content: "⏸️ Paused", ephemeral: true });
 
       logger.info("Pause command executed successfully", {
         user: user.username,
@@ -85,18 +53,7 @@ module.exports = {
         stack: error.stack,
       });
 
-      const errorEmbed = EmbedBuilders.createErrorEmbed(
-        "Pause Failed",
-        "Failed to pause audio playback.",
-        {
-          errorCode: "PAUSE_FAILED",
-        }
-      );
-
-      await interaction.reply({
-        embeds: [errorEmbed],
-        ephemeral: true,
-      });
+      await interaction.reply({ content: "Pause failed", ephemeral: true });
     }
   },
 };

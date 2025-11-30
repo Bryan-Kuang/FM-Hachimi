@@ -11,6 +11,9 @@ const {
 } = require("discord.js");
 const logger = require("../utils/logger");
 const config = require("../config/config");
+const PlayerControl = require("../player_control");
+const PlaylistManager = require("../playlist_manager");
+const InterfaceUpdater = require("../ui/interface_updater");
 
 class BotClient {
   constructor() {
@@ -51,6 +54,16 @@ class BotClient {
 
       // Login to Discord
       await this.login();
+
+      try {
+        PlayerControl.initialize(require("../audio/manager"));
+        PlaylistManager.initialize(require("../audio/manager"));
+        InterfaceUpdater.setClient(this.client);
+        InterfaceUpdater.bind(PlayerControl);
+      } catch (e) {
+        const ls = require("../logger_service");
+        ls.error("Failed to bind UI updater", { error: e.message });
+      }
 
       logger.info("Discord bot client initialized successfully");
       return true;

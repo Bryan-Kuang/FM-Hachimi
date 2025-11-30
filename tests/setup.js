@@ -110,7 +110,7 @@ jest.mock("yt-dlp-wrap", () => {
       thumbnail: "https://example.com/thumb.jpg",
     }),
   }));
-});
+}, { virtual: true });
 
 // Mock axios for HTTP requests
 jest.mock("axios", () => ({
@@ -133,6 +133,8 @@ jest.mock("winston", () => ({
     warn: jest.fn(),
     error: jest.fn(),
     debug: jest.fn(),
+    add: jest.fn(),
+    log: jest.fn(),
   }),
   format: {
     combine: jest.fn(),
@@ -141,6 +143,7 @@ jest.mock("winston", () => ({
     json: jest.fn(),
     colorize: jest.fn(),
     simple: jest.fn(),
+    printf: jest.fn((fn) => fn({ timestamp: 'x', level: 'info', message: 'm', context: {} })),
   },
   transports: {
     File: jest.fn(),

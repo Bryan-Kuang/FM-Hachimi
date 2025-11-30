@@ -4,9 +4,9 @@
  */
 
 const { SlashCommandBuilder } = require("discord.js");
-const EmbedBuilders = require("../../ui/embeds");
-const ButtonBuilders = require("../../ui/buttons");
-const logger = require("../../utils/logger");
+const PlayerControl = require("../../player_control");
+const InterfaceUpdater = require("../../ui/interface_updater");
+const logger = require("../../logger_service");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -22,80 +22,18 @@ module.exports = {
 
       // Check if user is in a voice channel
       if (!member.voice.channel) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          "Voice Channel Required",
-          "You need to be in a voice channel to control playback!",
-          {
-            suggestion: "Join the voice channel where music is playing.",
-          }
-        );
-
-        return await interaction.reply({
-          embeds: [errorEmbed],
-          ephemeral: true,
-        });
+        return await interaction.reply({ content: "Voice channel required", ephemeral: true })
       }
 
-      // TODO: Check if there's a next track in queue
-      const hasNextTrack = false; // This will be replaced with actual queue state
-
-      if (!hasNextTrack) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          "No Next Track",
-          "There are no more tracks in the queue to skip to.",
-          {
-            suggestion:
-              "Add more tracks using `/play` or restart the current track.",
-          }
-        );
-
-        return await interaction.reply({
-          embeds: [errorEmbed],
-          ephemeral: true,
-        });
+      InterfaceUpdater.setPlaybackContext(interaction.guild.id, interaction.channelId)
+      const ok = await PlayerControl.next(interaction.guild.id)
+      if (!ok) {
+        return await interaction.reply({ content: "No next track", ephemeral: true })
       }
-
-      // Skip to next track
-      // TODO: Implement actual skip logic
-      logger.info("Skipping to next track", {
-        user: user.username,
-        guild: interaction.guild?.name,
-      });
-
-      // Simulate getting next track info
-      const nextTrackInfo = {
-        title: "Next Track Title",
-        duration: 180,
-        uploader: "Next Uploader",
-        thumbnail: null,
-        videoId: "BV1234567890",
-      };
-
-      const nowPlayingEmbed = EmbedBuilders.createNowPlayingEmbed(
-        nextTrackInfo,
-        {
-          requestedBy: user.displayName || user.username,
-          queuePosition: 2,
-          totalQueue: 3,
-          loopMode: "queue", // Fix: Add missing loopMode parameter (simulated for now)
-        }
-      );
-
-      const controlButtons = ButtonBuilders.createPlaybackControls({
-        isPlaying: true,
-        hasQueue: true,
-        canGoBack: true,
-        canSkip: true,
-      });
-
-      await interaction.reply({
-        embeds: [nowPlayingEmbed],
-        components: controlButtons,
-      });
+      await interaction.reply({ content: "⏭️ Skipped", ephemeral: true })
 
       logger.info("Skip command executed successfully", {
-        user: user.username,
-        skippedTo: nextTrackInfo.title,
+        user: user.username
       });
     } catch (error) {
       logger.error("Skip command failed", {
@@ -104,18 +42,7 @@ module.exports = {
         stack: error.stack,
       });
 
-      const errorEmbed = EmbedBuilders.createErrorEmbed(
-        "Skip Failed",
-        "Failed to skip to the next track.",
-        {
-          errorCode: "SKIP_FAILED",
-        }
-      );
-
-      await interaction.reply({
-        embeds: [errorEmbed],
-        ephemeral: true,
-      });
+      await interaction.reply({ content: "Skip failed", ephemeral: true })
     }
   },
 };

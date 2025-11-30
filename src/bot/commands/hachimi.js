@@ -5,15 +5,18 @@
 
 const { SlashCommandBuilder } = require("discord.js");
 const EmbedBuilders = require("../../ui/embeds");
-const ButtonBuilders = require("../../ui/buttons");
 const AudioManager = require("../../audio/manager");
-const logger = require("../../utils/logger");
-const ProgressTracker = require("../../audio/progress-tracker");
+const PlaylistManager = require("../../playlist_manager");
+const PlayerControl = require("../../player_control");
+const InterfaceUpdater = require("../../ui/interface_updater");
+const logger = require("../../logger_service");
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("hachimi")
-    .setDescription("Auto-play 10 Bilibili videos with 哈基米 tag that meet quality criteria"),
+    .setDescription(
+      "Auto-play 10 Bilibili videos with 哈基米 tag that meet quality criteria"
+    ),
 
   cooldown: 30, // 30 seconds cooldown to prevent spam
 
@@ -77,9 +80,11 @@ module.exports = {
         });
       }
 
-      // Search and add Hachimi videos
-      await this.searchAndAddHachimiVideos(interaction, audioManager, user.username);
-
+      await this.searchAndAddHachimiVideos(
+        interaction,
+        audioManager,
+        user.username
+      );
     } catch (error) {
       logger.error("Error in hachimi command", {
         error: error.message,
@@ -113,14 +118,15 @@ module.exports = {
   async searchAndAddHachimiVideos(interaction, audioManager, username) {
     try {
       const bilibiliApi = require("../../utils/bilibiliApi");
-      
+
       // Search for qualified Hachimi videos
       const qualifiedVideos = await bilibiliApi.searchHachimiVideos(10);
 
       // Ensure extractor is available for audio URL resolution
-      const extractor = typeof audioManager.getExtractor === "function"
-        ? audioManager.getExtractor()
-        : audioManager.extractor;
+      const extractor =
+        typeof audioManager.getExtractor === "function"
+          ? audioManager.getExtractor()
+          : audioManager.extractor;
       if (!extractor) {
         const errorEmbed = EmbedBuilders.createErrorEmbed(
           "Extractor Not Ready",
@@ -135,7 +141,8 @@ module.exports = {
           "No Qualified Videos Found",
           "No Hachimi videos currently meet the quality criteria.",
           {
-            suggestion: "Quality criteria: Views > 10k with >5% like rate, or Views > 200k",
+            suggestion:
+              "Quality criteria: Views > 10k with >5% like rate, or Views > 200k",
           }
         );
 
@@ -143,88 +150,70 @@ module.exports = {
       }
 
       // Get or create player for this guild
-       let player = audioManager.getPlayer(interaction.guild.id);
-       
-       // Join voice channel if not already connected
-       if (
-         !player.voiceConnection ||
-         player.voiceConnection.joinConfig.channelId !== interaction.member.voice.channel.id
-       ) {
-         const joinSuccess = await player.joinVoiceChannel(interaction.member.voice.channel);
-         if (!joinSuccess) {
-           const errorEmbed = EmbedBuilders.createErrorEmbed(
-             "Voice Channel Error",
-             "Failed to join voice channel.",
-             {
-               suggestion: "Make sure the bot has permission to join and speak in the voice channel.",
-             }
-           );
-           return await interaction.editReply({ embeds: [errorEmbed] });
-         }
-       }
+      let player = audioManager.getPlayer(interaction.guild.id);
 
-       // Clear existing queue
-       player.clearQueue();
+      // Join voice channel if not already connected
+      if (
+        !player.voiceConnection ||
+        player.voiceConnection.joinConfig.channelId !==
+          interaction.member.voice.channel.id
+      ) {
+        const joinSuccess = await player.joinVoiceChannel(
+          interaction.member.voice.channel
+        );
+        if (!joinSuccess) {
+          const errorEmbed = EmbedBuilders.createErrorEmbed(
+            "Voice Channel Error",
+            "Failed to join voice channel.",
+            {
+              suggestion:
+                "Make sure the bot has permission to join and speak in the voice channel.",
+            }
+          );
+          return await interaction.editReply({ embeds: [errorEmbed] });
+        }
+      }
 
-       // Add qualified videos to queue
-       let addedCount = 0;
+      player.clearQueue();
+
+      // Add qualified videos to queue
+      let addedCount = 0;
       const failedVideos = [];
       let nowPlayingSent = false;
- 
-       for (const video of qualifiedVideos) {
-         try {
-           // Resolve audioUrl and normalized metadata via extractor
-           const videoData = await extractor.extractAudio(video.url);
-           player.addToQueue(videoData, username);
-           addedCount++;
- 
-          // Immediately start playback once the first track is queued
+
+      for (const video of qualifiedVideos) {
+        try {
+          const _track = await PlaylistManager.add(
+            interaction.guild.id,
+            video.url,
+            username
+          );
+          addedCount++;
+
           if (addedCount === 1 && !player.isPlaying && !player.isPaused) {
             try {
               await player.playNext();
-
-              // Send Now Playing UI right away for the first track
-              const nowPlayingEmbed = EmbedBuilders.createNowPlayingEmbed(
-                player.currentTrack || videoData,
-                {
-                  requestedBy: username,
-                  queuePosition: player.currentIndex + 1,
-                  totalQueue: player.queue.length,
-                  loopMode: player.loopMode,
-                }
+              InterfaceUpdater.setPlaybackContext(
+                interaction.guild.id,
+                interaction.channelId
               );
-
-              const controlButtons = ButtonBuilders.createPlaybackControls({
-                isPlaying: player.isPlaying,
-                hasQueue: player.queue.length > 0,
-                canGoBack: player.hasPrevious,
-                canSkip: player.hasNext,
-                loopMode: player.loopMode,
-              });
-
-              const nowPlayingMessage = await interaction.followUp({
-                embeds: [nowPlayingEmbed],
-                components: controlButtons,
-              });
-
-              ProgressTracker.startTracking(interaction.guild.id, nowPlayingMessage);
+              PlayerControl.notifyState(interaction.guild.id);
               nowPlayingSent = true;
             } catch (err) {
               logger.warn("Failed to start playback on first Hachimi track", {
                 error: err.message,
-                title: videoData?.title,
               });
             }
           }
-         } catch (error) {
-           logger.warn("Failed to add Hachimi video to queue", {
-             title: video.title,
-             bvid: video.bvid,
-             error: error.message,
-           });
-           failedVideos.push(video.title);
-         }
-       }
+        } catch (error) {
+          logger.warn("Failed to add Hachimi video to queue", {
+            title: video.title,
+            bvid: video.bvid,
+            error: error.message,
+          });
+          failedVideos.push(video.title);
+        }
+      }
 
       // Create success embed
       const successEmbed = EmbedBuilders.createSuccessEmbed(
@@ -241,7 +230,11 @@ module.exports = {
         },
         {
           name: "🎯 Results",
-          value: `✅ Added: ${addedCount} videos\n${failedVideos.length > 0 ? `❌ Failed: ${failedVideos.length} videos` : ""}`,
+          value: `✅ Added: ${addedCount} videos\n${
+            failedVideos.length > 0
+              ? `❌ Failed: ${failedVideos.length} videos`
+              : ""
+          }`,
           inline: true,
         }
       );
@@ -254,40 +247,26 @@ module.exports = {
         });
       }
 
-      await interaction.editReply({ embeds: [successEmbed] });
+      await interaction.editReply({
+        content: `Added ${addedCount} videos${
+          failedVideos.length > 0 ? `, failed ${failedVideos.length}` : ""
+        }`,
+      });
 
       // Start playing if not already playing
-      if (!player.isPlaying && !player.isPaused) { // Fix: isPlaying is a property, and use playNext()
+      if (!player.isPlaying && !player.isPaused) {
+        // Fix: isPlaying is a property, and use playNext()
         await player.playNext();
       }
- 
-       // Post Now Playing UI and start progress tracking
+
+      // Post Now Playing UI and start progress tracking
       if (player.currentTrack && !nowPlayingSent) {
-         const nowPlayingEmbed = EmbedBuilders.createNowPlayingEmbed(
-           player.currentTrack,
-           {
-             requestedBy: username,
-             queuePosition: player.currentIndex + 1,
-             totalQueue: player.queue.length,
-             loopMode: player.loopMode,
-           }
-         );
- 
-         const controlButtons = ButtonBuilders.createPlaybackControls({
-           isPlaying: player.isPlaying,
-           hasQueue: player.queue.length > 0,
-           canGoBack: player.hasPrevious,
-           canSkip: player.hasNext,
-           loopMode: player.loopMode,
-         });
- 
-         const nowPlayingMessage = await interaction.followUp({
-           embeds: [nowPlayingEmbed],
-           components: controlButtons,
-         });
- 
-         ProgressTracker.startTracking(interaction.guild.id, nowPlayingMessage);
-       }
+        InterfaceUpdater.setPlaybackContext(
+          interaction.guild.id,
+          interaction.channelId
+        );
+        PlayerControl.notifyState(interaction.guild.id);
+      }
 
       logger.info("Hachimi playlist created successfully", {
         guild: interaction.guild.id,
@@ -295,7 +274,6 @@ module.exports = {
         addedCount,
         failedCount: failedVideos.length,
       });
-
     } catch (error) {
       logger.error("Error searching Hachimi videos", {
         error: error.message,
