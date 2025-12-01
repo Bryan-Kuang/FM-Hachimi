@@ -4,18 +4,24 @@
  */
 
 const { SlashCommandBuilder } = require("discord.js");
-const EmbedBuilders = require("../../ui/embeds");
 const AudioManager = require("../../audio/manager");
 const PlaylistManager = require("../../playlist/playlist_manager");
-const PlayerControl = require("../../control/player_control");
 const InterfaceUpdater = require("../../ui/interface_updater");
+const EmbedBuilders = require("../../ui/embeds");
 const logger = require("../../services/logger_service");
+
+// Configuration Constants
+/**
+ * Maximum number of videos to add in a single batch
+ * Recommended range: 1-10 to prevent timeouts and rate limits
+ */
+const MAX_VIDEO_BATCH_SIZE = 5;
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("hachimi")
     .setDescription(
-      "Auto-play 10 Bilibili videos with 哈基米 tag that meet quality criteria"
+      `Auto-play ${MAX_VIDEO_BATCH_SIZE} Bilibili videos with 哈基米 tag that meet quality criteria`
     ),
 
   cooldown: 30, // 30 seconds cooldown to prevent spam
@@ -58,14 +64,17 @@ module.exports = {
         });
       }
 
-      // Show loading message
+      // Bind playback UI context to current channel and defer reply to avoid timeout
+      InterfaceUpdater.setPlaybackContext(
+        interaction.guild.id,
+        interaction.channelId
+      );
+      await interaction.deferReply({ ephemeral: true });
+
       const loadingEmbed = EmbedBuilders.createLoadingEmbed(
         "🔍 Searching for Hachimi videos that meet quality criteria..."
       );
-
-      await interaction.reply({
-        embeds: [loadingEmbed],
-      });
+      await interaction.editReply({ embeds: [loadingEmbed] });
 
       // Get audio manager instance
       const audioManager = AudioManager; // Fix: use exported singleton instead of getInstance()
@@ -119,8 +128,20 @@ module.exports = {
     try {
       const bilibiliApi = require("../../utils/bilibiliApi");
 
-      // Search for qualified Hachimi videos
-      const qualifiedVideos = await bilibiliApi.searchHachimiVideos(10);
+      // Validate batch size
+      const safeBatchSize = Math.min(Math.max(1, MAX_VIDEO_BATCH_SIZE), 20); // Clamp between 1 and 20
+
+      if (MAX_VIDEO_BATCH_SIZE > 20) {
+        logger.warn(
+          `Configured MAX_VIDEO_BATCH_SIZE (${MAX_VIDEO_BATCH_SIZE}) exceeds safety limit of 20. Capped to ${safeBatchSize}.`
+        );
+      }
+
+      // Search for qualified Hachimi videos (randomized with history filtering)
+      const qualifiedVideos = await bilibiliApi.searchHachimiVideos(
+        safeBatchSize,
+        interaction.guild.id
+      );
 
       // Ensure extractor is available for audio URL resolution
       const extractor =
@@ -141,8 +162,7 @@ module.exports = {
           "No Qualified Videos Found",
           "No Hachimi videos currently meet the quality criteria.",
           {
-            suggestion:
-              "Quality criteria: Views > 10k with >5% like rate, or Views > 200k",
+            suggestion: "Quality criteria: Like Rate > 5% OR Views > 10,000",
           }
         );
 
@@ -192,11 +212,8 @@ module.exports = {
 
           if (addedCount === 1 && !player.isPlaying && !player.isPaused) {
             try {
-              await player.playNext();
-              InterfaceUpdater.setPlaybackContext(
-                interaction.guild.id,
-                interaction.channelId
-              );
+              const PlayerControl = require("../../control/player_control");
+              await PlayerControl.play(interaction.guild.id);
               nowPlayingSent = true;
             } catch (err) {
               logger.warn("Failed to start playback on first Hachimi track", {
@@ -214,6 +231,16 @@ module.exports = {
         }
       }
 
+      // Ensure UI reflects latest state if no state transition occurred
+      try {
+        const PlayerControl = require("../../control/player_control");
+        PlayerControl.notifyState(interaction.guild.id);
+      } catch (e) {
+        logger.warn("Notify state after hachimi add failed", {
+          error: e.message,
+        });
+      }
+
       // Create success embed
       const successEmbed = EmbedBuilders.createSuccessEmbed(
         "🎵 Hachimi Playlist Ready!",
@@ -224,7 +251,7 @@ module.exports = {
       successEmbed.addFields(
         {
           name: "📊 Quality Criteria Applied",
-          value: "• Views > 10,000 with >5% like rate\n• OR Views > 200,000",
+          value: "• Like Rate > 5%\n• OR Views > 10,000",
           inline: false,
         },
         {
@@ -246,24 +273,42 @@ module.exports = {
         });
       }
 
+      // If candidates exhausted by history and soft fallback applied, append footer hint
+      // Note: actual soft fallback detection occurs in API; here we add UI hint when addedCount > 0 but qualifiedVideos.length < safeBatchSize
+      if (addedCount > 0 && qualifiedVideos.length < safeBatchSize) {
+        successEmbed.setFooter({
+          text: "(候选池已耗尽，随机回溯历史记录)",
+          iconURL: "https://cdn.discordapp.com/emojis/741605543046807626.png",
+        });
+      }
+
+      const capNote =
+        typeof MAX_VIDEO_BATCH_SIZE === "number" &&
+        MAX_VIDEO_BATCH_SIZE > safeBatchSize
+          ? `（已按批量上限 ${safeBatchSize} 截断）`
+          : "";
       await interaction.editReply({
         content: `Added ${addedCount} videos${
           failedVideos.length > 0 ? `, failed ${failedVideos.length}` : ""
-        }`,
+        } ${capNote}`.trim(),
       });
 
       // Start playing if not already playing
       if (!player.isPlaying && !player.isPaused) {
-        // Fix: isPlaying is a property, and use playNext()
-        await player.playNext();
+        const PlayerControl = require("../../control/player_control");
+        await PlayerControl.play(interaction.guild.id);
       }
 
       // Post Now Playing UI and start progress tracking
       if (player.currentTrack && !nowPlayingSent) {
-        InterfaceUpdater.setPlaybackContext(
-          interaction.guild.id,
-          interaction.channelId
-        );
+        try {
+          const PlayerControl = require("../../control/player_control");
+          PlayerControl.notifyState(interaction.guild.id);
+        } catch (e) {
+          logger.warn("Notify state failed after nowPlaying check", {
+            error: e.message,
+          });
+        }
       }
 
       logger.info("Hachimi playlist created successfully", {

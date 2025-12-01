@@ -3,14 +3,15 @@
  */
 
 const axios = require("axios");
-const logger = require("./logger");
+const logger = require("../services/logger_service");
 
 class BilibiliAPI {
   constructor() {
     this.baseURL = "https://api.bilibili.com";
     this.headers = {
-      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Referer": "https://www.bilibili.com/",
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      Referer: "https://www.bilibili.com/",
     };
   }
 
@@ -42,12 +43,13 @@ class BilibiliAPI {
             tids: 0,
           },
           headers: {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": "https://www.bilibili.com/",
-            "Accept": "application/json, text/plain, */*",
+            "User-Agent":
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            Referer: "https://www.bilibili.com/",
+            Accept: "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive",
+            Connection: "keep-alive",
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-site",
@@ -156,7 +158,8 @@ class BilibiliAPI {
       const Extractor = require("../audio/extractor");
       const extractor = new Extractor();
       const res = await extractor.searchVideos(keyword, maxResults);
-      if (!res || res.success !== true || !Array.isArray(res.results)) return [];
+      if (!res || res.success !== true || !Array.isArray(res.results))
+        return [];
 
       // 将 extractor 的结果映射为 BilibiliAPI 的视频结构
       return res.results.map((item) => ({
@@ -169,20 +172,26 @@ class BilibiliAPI {
         pic: item.thumbnail || "",
         duration: typeof item.duration === "number" ? item.duration : 0,
         pubdate: undefined,
-        view: (typeof item.viewCount === "number" ? item.viewCount : parseInt(item.viewCount || 0, 10)) || 0,
+        view:
+          (typeof item.viewCount === "number"
+            ? item.viewCount
+            : parseInt(item.viewCount || 0, 10)) || 0,
         like: 0,
         danmaku: 0,
         tag: "",
         url: item.url,
       }));
     } catch (err) {
-      logger.warn("Fallback search via extractor failed", { error: err.message, keyword });
+      logger.warn("Fallback search via extractor failed", {
+        error: err.message,
+        keyword,
+      });
       return [];
     }
   }
 
   /**
-   * 质量过滤：点赞率>5%且播放>10k，或播放>200k
+   * 质量过滤：点赞率>5%或播放>10k
    * @param {Array} videos
    * @returns {Array}
    */
@@ -193,12 +202,14 @@ class BilibiliAPI {
       const views = Number(v.view || 0);
       const likes = Number(v.like || 0);
       const likeRate = views > 0 ? likes / views : 0;
-      const pass = (views >= 10000 && likeRate >= 0.05) || views >= 200000;
+
+      // New Criteria: Like Rate > 5% OR Views > 10,000
+      const pass = likeRate > 0.05 || views > 10000;
+
       if (pass) {
         v.likeRate = likeRate;
-        v.qualificationReason = views >= 200000 ? 
-          "Views ≥ 200k" : 
-          "Views ≥ 10k & Like rate ≥ 5%";
+        v.qualificationReason =
+          views > 10000 ? "Views > 10,000" : "Like rate > 5%";
         qualified.push(v);
       }
     }
@@ -206,36 +217,138 @@ class BilibiliAPI {
   }
 
   /**
-   * Search for Hachimi videos with quality filtering
-   * @param {number} maxResults - Maximum number of results to return (default: 10)
+   * Search for Hachimi videos with quality filtering (Redesigned)
+   * @param {number} maxResults - Maximum number of results to return (default: 5)
    * @returns {Promise<Array>} Array of qualified video objects
    */
-  async searchHachimiVideos(maxResults = 10) {
+  async fetchRawCandidates(
+    keyword,
+    { maxPages = 3, pageSize = 50, timeoutMs = 8000 } = {}
+  ) {
     try {
-      logger.info("Searching for Hachimi videos", { maxResults });
+      // Always include page 1 for relevance
+      const pages = [1];
+      // Randomly add 1-2 pages from [2,10]
+      const extraCount = Math.floor(Math.random() * 2) + 1; // 1 or 2
+      const candidates = new Set();
+      for (let i = 0; i < extraCount; i++) {
+        const p = 2 + Math.floor(Math.random() * 9); // 2..10
+        candidates.add(p);
+      }
+      const extraPages = Array.from(candidates).slice(
+        0,
+        Math.max(0, maxPages - 1)
+      );
+      const fetchPages = pages.concat(extraPages);
 
-      // Search for videos with "哈基米" keyword
-      const searchResults = await this.searchVideos("哈基米", 1, 50); // 返回数组
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      const requests = fetchPages.map((p) =>
+        axios.get("https://api.bilibili.com/x/web-interface/search/type", {
+          params: {
+            search_type: "video",
+            keyword: keyword,
+            page: p,
+            pagesize: pageSize,
+            order: "totalrank",
+            duration: 0,
+            tids: 0,
+          },
+          headers: this.headers,
+          timeout: timeoutMs,
+          signal: controller.signal,
+        })
+      );
 
-      // Handle case where search returns empty array
-      if (!searchResults || searchResults.length === 0) {
+      const responses = await Promise.allSettled(requests);
+      clearTimeout(timeout);
+
+      const all = [];
+      for (const r of responses) {
+        if (r.status === "fulfilled" && r.value?.data?.code === 0) {
+          const parsed = this.parseSearchResults(r.value.data.data);
+          all.push(...parsed.videos);
+        } else if (r.status === "rejected") {
+          logger.warn("Page fetch rejected", { reason: r.reason?.message });
+        }
+      }
+
+      return all;
+    } catch (error) {
+      logger.warn("fetchRawCandidates failed, using fallback", {
+        error: error.message,
+      });
+      return await this._fallbackSearch(keyword, 50);
+    }
+  }
+
+  processCandidates(rawList, guildId, maxResults = 5) {
+    const HistoryStore = require("../utils/history_store");
+    // Deduplicate by bvid
+    const seen = new Set();
+    const deduped = [];
+    for (const v of Array.isArray(rawList) ? rawList : []) {
+      const id = v.bvid || v.aid || v.url;
+      if (!id) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      deduped.push(v);
+    }
+
+    const qualified = this.filterQualityVideos(deduped);
+    const afterHistory = HistoryStore.filter(guildId, qualified);
+    const softFallback = afterHistory.length === 0 && qualified.length > 0;
+    const pool = softFallback ? qualified : afterHistory;
+
+    // Fisher–Yates shuffle
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = pool[i];
+      pool[i] = pool[j];
+      pool[j] = tmp;
+    }
+
+    const selected = pool.slice(0, maxResults);
+    return {
+      results: selected,
+      meta: {
+        totalRaw: (rawList || []).length,
+        dedupedCount: deduped.length,
+        qualifiedCount: qualified.length,
+        excludedByHistory: qualified.length - afterHistory.length,
+        softFallbackApplied: softFallback,
+        returnedCount: selected.length,
+      },
+    };
+  }
+
+  async searchHachimiVideos(maxResults = 5, guildId = null) {
+    try {
+      logger.info("Searching for Hachimi videos (Randomized)", {
+        maxResults,
+        guildId,
+      });
+
+      const rawCandidates = await this.fetchRawCandidates("哈基米", {
+        maxPages: 3,
+        pageSize: 50,
+        timeoutMs: 8000,
+      });
+
+      if (!rawCandidates || rawCandidates.length === 0) {
         logger.warn("No Hachimi videos found in search results");
         return [];
       }
 
-      // Filter videos based on quality criteria
-      const qualifiedVideos = this.filterQualityVideos(searchResults);
+      const { results, meta } = this.processCandidates(
+        rawCandidates,
+        guildId,
+        maxResults
+      );
 
-      // Limit to maxResults
-      const limitedResults = qualifiedVideos.slice(0, maxResults);
+      logger.info("Hachimi video search completed", meta);
 
-      logger.info("Hachimi video search completed", {
-        totalFound: searchResults.length,
-        qualified: qualifiedVideos.length,
-      });
-
-      return limitedResults;
-
+      return results;
     } catch (error) {
       logger.error("Error searching Hachimi videos", {
         error: error.message,
@@ -262,11 +375,12 @@ class BilibiliAPI {
       });
 
       if (response.data.code !== 0) {
-        throw new Error(`Failed to get video details: ${response.data.message}`);
+        throw new Error(
+          `Failed to get video details: ${response.data.message}`
+        );
       }
 
       return response.data.data;
-
     } catch (error) {
       logger.error("Error getting video details", {
         error: error.message,
