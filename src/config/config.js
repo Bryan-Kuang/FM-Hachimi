@@ -19,6 +19,7 @@ module.exports = {
   logging: {
     level: process.env.LOG_LEVEL || "info",
     file: process.env.LOG_FILE || "bot.log",
+    toFile: process.env.LOG_TO_FILE !== "false",
   },
   test: {
     mode: process.env.TEST_MODE === "true",

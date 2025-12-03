@@ -30,15 +30,22 @@ const baseFormat = winston.format.combine(
 )
 
 const logLevel = process.env.LOG_LEVEL || 'info'
+const logToFile = process.env.LOG_TO_FILE !== 'false'
+
+const transports = [new winston.transports.Console({ level: logLevel })]
+if (logToFile) {
+  transports.unshift(
+    new winston.transports.File({ filename: errorFile, level: 'error', maxsize: 10 * 1024 * 1024, maxFiles: 5, tailable: true })
+  )
+  transports.unshift(
+    new winston.transports.File({ filename: appFile, level: logLevel, maxsize: 10 * 1024 * 1024, maxFiles: 5, tailable: true })
+  )
+}
 
 const logger = winston.createLogger({
   level: logLevel,
   format: baseFormat,
-  transports: [
-    new winston.transports.File({ filename: errorFile, level: 'error', maxsize: 10 * 1024 * 1024, maxFiles: 5, tailable: true }),
-    new winston.transports.File({ filename: appFile, level: logLevel, maxsize: 10 * 1024 * 1024, maxFiles: 5, tailable: true }),
-    new winston.transports.Console({ level: logLevel })
-  ]
+  transports
 })
 
 function log(level, message, context) {
