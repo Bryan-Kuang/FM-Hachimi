@@ -43,7 +43,11 @@ module.exports = {
         stack: error.stack,
       });
 
-      await interaction.reply({ content: "Skip failed", ephemeral: true })
+      if (interaction.replied || interaction.deferred) {
+        await interaction.editReply("Skip failed")
+      } else {
+        await interaction.reply({ content: "Skip failed", ephemeral: true })
+      }
     }
   },
 };

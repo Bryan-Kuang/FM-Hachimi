@@ -36,10 +36,7 @@ module.exports = {
       const ok = PlayerControl.pause(interaction.guild.id);
 
       if (!ok) {
-        return await interaction.reply({
-          content: "Pause failed",
-          ephemeral: true,
-        });
+        return await interaction.editReply("暂停失败");
       }
 
       await interaction.editReply("⏸️ 已暂停");
