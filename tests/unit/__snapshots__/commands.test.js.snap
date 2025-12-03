@@ -1,0 +1,50 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`Bot Commands Coverage Help Command should display help info 1`] = `
+{
+  "description": "以下是所有可用的命令：",
+  "title": "🎵 Bilibili音乐机器人 - 命令帮助",
+}
+`;
+
+exports[`Bot Commands Coverage NowPlaying Command {
+  description: '正在播放',
+  scene: [Object],
+  state: [Object],
+  expectErrorTitle: null
+} 1`] = `
+{
+  "description": "**Test Track**
+",
+  "title": "▶️ Now Playing",
+}
+`;
+
+exports[`Bot Commands Coverage Queue Command { description: '空队列', scene: [Object], queueResult: [Object] } 1`] = `
+{
+  "description": "🎵 **Queue is empty**
+Add some tracks to get started!",
+  "title": "📋 Music Queue",
+}
+`;
+
+exports[`Bot Commands Coverage Queue Command { description: '非空队列', scene: [Object], queueResult: [Object] } 1`] = `
+{
+  "description": "🎵 **Now Playing:**
+\`▶️\` A
+
+📊 **Queue Overview:**
+• **2** tracks total
+• Page **1** of **1**
+
+🎶 **Up Next:**
+\`01.\` **A**
+     👤 U1
+
+\`02.\` **B**
+     👤 U2
+
+",
+  "title": "📋 Music Queue",
+}
+`;
