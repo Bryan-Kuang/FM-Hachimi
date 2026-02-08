@@ -10,15 +10,19 @@ jest.mock('discord.js', () => ({
 jest.mock('../../src/ui/embeds', () => ({
   createSuccessEmbed: () => ({
     addFields: function () { return this },
+    setFooter: function () { return this },
   }),
   createErrorEmbed: () => ({
     addFields: function () { return this },
+    setFooter: function () { return this },
   }),
   createLoadingEmbed: () => ({
     addFields: function () { return this },
+    setFooter: function () { return this },
   }),
   createNowPlayingEmbed: () => ({
     addFields: function () { return this },
+    setFooter: function () { return this },
   }),
 }))
 

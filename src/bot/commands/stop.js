@@ -3,7 +3,7 @@
  * Stops playback, clears queue, and leaves voice channel
  */
 
-const { SlashCommandBuilder } = require("discord.js");
+const { SlashCommandBuilder, MessageFlags } = require("discord.js");
 const PlayerControl = require("../../control/player_control");
 const InterfaceUpdater = require("../../ui/interface_updater");
 const logger = require("../../services/logger_service");
@@ -24,7 +24,7 @@ module.exports = {
       if (!member.voice.channel) {
         return await interaction.reply({
           content: "Voice channel required",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -46,7 +46,7 @@ module.exports = {
       ) {
         return await interaction.reply({
           content: "Nothing to stop",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -55,11 +55,11 @@ module.exports = {
       if (!stopped) {
         return await interaction.reply({
           content: "Stop failed",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
-      await interaction.reply({ content: "⏹️ Stopped", ephemeral: true });
+      await interaction.reply({ content: "⏹️ Stopped", flags: MessageFlags.Ephemeral });
 
       logger.info("Stop command executed successfully", {
         user: user.username,
@@ -77,7 +77,7 @@ module.exports = {
         if (interaction.replied || interaction.deferred) {
           await interaction.editReply({ content: "Stop failed" });
         } else {
-          await interaction.reply({ content: "Stop failed", ephemeral: true });
+          await interaction.reply({ content: "Stop failed", flags: MessageFlags.Ephemeral });
         }
       } catch (replyError) {
         logger.error("Failed to send error response", {

@@ -70,7 +70,8 @@ class ProgressTracker {
       const player = AudioManager.getPlayer(guildId);
 
       // Only update if currently playing
-      if (!player.isPlaying || !player.currentTrack) {
+      const track = player.currentTrack;
+      if (!player.isPlaying || !track) {
         return;
       }
 
@@ -78,13 +79,13 @@ class ProgressTracker {
 
       // Create updated embed
       const updatedEmbed = EmbedBuilders.createNowPlayingEmbed(
-        player.currentTrack,
+        track,
         {
           currentTime,
-          requestedBy: player.currentTrack.requestedBy,
+          requestedBy: track.requestedBy,
           queuePosition: player.currentIndex + 1,
           totalQueue: player.queue.length,
-          loopMode: player.loopMode, // Fix: Add missing loopMode parameter
+          loopMode: player.loopMode,
         }
       );
 
@@ -101,13 +102,13 @@ class ProgressTracker {
       // Update message
       await message.edit({
         embeds: [updatedEmbed],
-        components: controlButtons, // Now returns array of ActionRowBuilders
+        components: controlButtons,
       });
 
       logger.debug("Progress updated", {
         guild: guildId,
         currentTime: Math.floor(currentTime),
-        duration: player.currentTrack.duration,
+        duration: track.duration,
       });
     } catch (error) {
       logger.error("Failed to update progress", {

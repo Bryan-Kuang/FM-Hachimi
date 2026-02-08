@@ -63,6 +63,9 @@ jest.mock("discord.js", () => ({
     Danger: 4,
     Link: 5,
   },
+  MessageFlags: {
+    Ephemeral: 64,
+  },
 }));
 
 // Mock dependencies
@@ -516,7 +519,7 @@ describe("Bot Commands Coverage", () => {
                 data: expect.objectContaining({ title: expectErrorTitle }),
               }),
             ]),
-            ephemeral: true,
+            flags: 64,
           })
         );
       } else {
@@ -543,7 +546,7 @@ describe("Bot Commands Coverage", () => {
       await helpCommand.execute(interaction);
 
       const arg = interaction.reply.mock.calls[0][0];
-      expect(arg.ephemeral).toBe(true);
+      expect(arg.flags).toBe(64);
       expect(arg.embeds).toBeDefined();
       expect(snapshotMinimal(arg.embeds[0])).toMatchSnapshot();
       expect(snapshotMinimal(arg.embeds[0]).title).toBe(
@@ -570,7 +573,7 @@ describe("Bot Commands Coverage", () => {
           userVc: null,
           botVc: "vc-1",
           playerState: "idle",
-          options: { url: "https://bili/1" },
+          options: { query: "https://bili/1" },
         },
         setup: () => {
           UrlValidator.isValidBilibiliUrl.mockReturnValue(true);
@@ -586,7 +589,7 @@ describe("Bot Commands Coverage", () => {
           userVc: "vc-1",
           botVc: "vc-2",
           playerState: "idle",
-          options: { url: "https://bili/1" },
+          options: { query: "https://bili/1" },
         },
         setup: () => {
           UrlValidator.isValidBilibiliUrl.mockReturnValue(true);
@@ -597,17 +600,19 @@ describe("Bot Commands Coverage", () => {
         },
       },
       {
-        description: "URL无效",
+        description: "关键词搜索无结果",
         scene: {
           userVc: "vc-1",
           botVc: null,
           playerState: "idle",
-          options: { url: "bad" },
+          options: { query: "nonexistent" },
         },
         setup: () => {
           UrlValidator.isValidBilibiliUrl.mockReturnValue(false);
+          const bilibiliApi = require("../../src/utils/bilibiliApi");
+          bilibiliApi.searchVideos = jest.fn().mockResolvedValue([]);
         },
-        expected: { replyContains: "Invalid URL", deferCalled: false },
+        expected: { editReplyContains: "未找到", deferCalled: true },
       },
       {
         description: "加入语音失败",
@@ -615,7 +620,7 @@ describe("Bot Commands Coverage", () => {
           userVc: "vc-1",
           botVc: null,
           playerState: "idle",
-          options: { url: "https://bili/1" },
+          options: { query: "https://bili/1" },
         },
         setup: ({ player }) => {
           UrlValidator.isValidBilibiliUrl.mockReturnValue(true);
@@ -632,7 +637,7 @@ describe("Bot Commands Coverage", () => {
           userVc: "vc-1",
           botVc: null,
           playerState: "idle",
-          options: { url: "https://bili/1" },
+          options: { query: "https://bili/1" },
         },
         setup: () => {
           UrlValidator.isValidBilibiliUrl.mockReturnValue(true);
@@ -646,7 +651,7 @@ describe("Bot Commands Coverage", () => {
           userVc: "vc-1",
           botVc: null,
           playerState: "idle",
-          options: { url: "https://bili/1" },
+          options: { query: "https://bili/1" },
         },
         setup: () => {
           UrlValidator.isValidBilibiliUrl.mockReturnValue(true);
@@ -654,7 +659,7 @@ describe("Bot Commands Coverage", () => {
           PlayerControl.play.mockResolvedValue(true);
         },
         expected: {
-          editReplyContains: "🎵 已添加并开始播放",
+          editReplyContains: "🎵 已添加",
           deferCalled: true,
           playCalled: true,
         },

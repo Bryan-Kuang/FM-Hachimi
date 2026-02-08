@@ -49,12 +49,7 @@ const logger = winston.createLogger({
 })
 
 function log(level, message, context) {
-  const fn = logger[level]
-  if (typeof fn === 'function') {
-    fn.call(logger, message, context)
-  } else {
-    logger.log({ level, message, context })
-  }
+  logger.log({ level, message, context })
 }
 
 module.exports = {

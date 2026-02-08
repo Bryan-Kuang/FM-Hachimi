@@ -3,7 +3,7 @@
  * Search for Bilibili videos by keyword
  */
 
-const { SlashCommandBuilder } = require("discord.js");
+const { SlashCommandBuilder, MessageFlags } = require("discord.js");
 const EmbedBuilders = require("../../ui/embeds");
 const ButtonBuilders = require("../../ui/buttons");
 const AudioManager = require("../../audio/manager");
@@ -150,7 +150,7 @@ module.exports = {
       } else {
         await interaction.reply({
           embeds: [errorEmbed],
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
     }

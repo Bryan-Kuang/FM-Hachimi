@@ -10,6 +10,7 @@ const PlayerControl = require("../../control/player_control");
 const InterfaceUpdater = require("../../ui/interface_updater");
 const logger = require("../../services/logger_service");
 const Lock = require("../../utils/lock");
+const { MessageFlags } = require("discord.js");
 
 module.exports = {
   name: "interactionCreate",
@@ -387,7 +388,7 @@ async function handleButtonInteraction(interaction) {
       } else {
         await interaction.reply({
           embeds: [errorEmbed],
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
     } catch (replyError) {
@@ -409,11 +410,11 @@ async function handleSelectMenuInteraction(interaction) {
 
     if (customId === "queue_remove_select") {
       if (Lock.shouldDebounce(interaction.guild.id, customId, 1000)) {
-        await interaction.reply({ content: "操作过于频繁，请稍后重试", ephemeral: true })
+        await interaction.reply({ content: "操作过于频繁，请稍后重试", flags: MessageFlags.Ephemeral })
         return
       }
       if (!Lock.acquire(interaction.guild.id, customId)) {
-        await interaction.reply({ content: "操作繁忙，请稍后重试", ephemeral: true })
+        await interaction.reply({ content: "操作繁忙，请稍后重试", flags: MessageFlags.Ephemeral })
         return
       }
       const selectedValue = interaction.values[0];
@@ -535,7 +536,7 @@ async function handleSelectMenuInteraction(interaction) {
       // Send confirmation as ephemeral reply
       await interaction.editReply({
         embeds: [responseEmbed],
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
 
       logger.info("Track removed via select menu", {
@@ -545,11 +546,11 @@ async function handleSelectMenuInteraction(interaction) {
       });
     } else if (customId === "loop_select") {
       if (Lock.shouldDebounce(interaction.guild.id, customId, 1000)) {
-        await interaction.reply({ content: "操作过于频繁，请稍后重试", ephemeral: true })
+        await interaction.reply({ content: "操作过于频繁，请稍后重试", flags: MessageFlags.Ephemeral })
         return
       }
       if (!Lock.acquire(interaction.guild.id, customId)) {
-        await interaction.reply({ content: "操作繁忙，请稍后重试", ephemeral: true })
+        await interaction.reply({ content: "操作繁忙，请稍后重试", flags: MessageFlags.Ephemeral })
         return
       }
       const selectedMode = interaction.values[0];
@@ -560,7 +561,7 @@ async function handleSelectMenuInteraction(interaction) {
         guild: interaction.guild?.name,
       });
 
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       // Handle loop mode change with audio manager
       const result = AudioManager.setLoopMode(
@@ -782,7 +783,7 @@ async function handleSelectMenuInteraction(interaction) {
       } else if (!interaction.replied) {
         await interaction.reply({
           embeds: [errorEmbed],
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
     } catch (replyError) {

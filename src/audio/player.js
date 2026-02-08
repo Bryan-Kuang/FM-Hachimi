@@ -32,6 +32,7 @@ class AudioPlayer {
     this.startTime = null; // Track start time for progress calculation
     this.progressInterval = null; // Interval for progress updates
     this.ffmpegProcess = null; // 🔧 添加：跟踪当前FFmpeg进程
+    this._ffmpegChecked = false; // Lazy FFmpeg availability check
 
     // Set up audio player event handlers
     this.setupAudioPlayerEvents();
@@ -386,7 +387,26 @@ class AudioPlayer {
       // 🔧 修复：在创建新的音频资源前先清理旧的FFmpeg进程
       // 这可以防止在queue loop模式下播放前几秒旧内容的问题
       this.cleanupFFmpegProcess();
-      
+
+      // Re-extract audio URL if it's stale (Bilibili CDN URLs expire)
+      if (this.currentTrack.extractedAt && this.currentTrack.normalizedUrl) {
+        const age = Date.now() - new Date(this.currentTrack.extractedAt).getTime();
+        if (age > 30 * 60 * 1000) { // older than 30 minutes
+          try {
+            const AudioManager = require("./manager");
+            const extractor = AudioManager.getExtractor();
+            if (extractor) {
+              const freshUrl = await extractor.getAudioStreamUrl(this.currentTrack.normalizedUrl);
+              this.currentTrack.audioUrl = freshUrl;
+              this.currentTrack.extractedAt = new Date().toISOString();
+              logger.info("Refreshed stale audio URL", { title: this.currentTrack.title });
+            }
+          } catch (e) {
+            logger.warn("Failed to refresh audio URL, using cached", { error: e.message });
+          }
+        }
+      }
+
       // Create audio resource from URL
       logger.debug("Creating audio resource for playback");
       const audioResource = await this.createAudioResource(
@@ -435,6 +455,26 @@ class AudioPlayer {
    * @returns {Promise<AudioResource|null>} - Audio resource
    */
   async createAudioResource(audioUrl) {
+    // Lazy FFmpeg availability check - only on first use
+    if (!this._ffmpegChecked) {
+      await new Promise((resolve, reject) => {
+        const ffmpegCheck = spawn("ffmpeg", ["-version"]);
+        ffmpegCheck.on("error", (error) => {
+          logger.error("FFmpeg not available", { error: error.message });
+          reject(new Error("FFmpeg is not installed. Please install FFmpeg to enable audio playback."));
+        });
+        ffmpegCheck.on("close", (code) => {
+          if (code !== 0) {
+            reject(new Error("FFmpeg check failed"));
+          } else {
+            resolve();
+          }
+        });
+      });
+      this._ffmpegChecked = true;
+      logger.info("FFmpeg availability confirmed");
+    }
+
     return new Promise((resolve, reject) => {
       try {
         logger.info("Creating audio resource", {
@@ -442,177 +482,150 @@ class AudioPlayer {
           guild: this.currentGuild,
         });
 
-        // Check if FFmpeg is available
-        const ffmpegCheck = spawn("ffmpeg", ["-version"]);
+        // 🔧 修复：改进FFmpeg参数，增加网络重试和缓冲设置
+        const ffmpegProcess = spawn("ffmpeg", [
+          "-user_agent",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "-referer",
+          "https://www.bilibili.com/",
+          "-reconnect", "1",           // 启用重连
+          "-reconnect_streamed", "1", // 对流媒体启用重连
+          "-reconnect_delay_max", "5", // 最大重连延迟5秒
+          "-reconnect_at_eof", "1",   // 在EOF时重连
+          "-rw_timeout", "60000000",   // 读写超时60秒
+          "-timeout", "60000000",     // 连接超时60秒
+          "-headers", "Connection: keep-alive",
+          "-analyzeduration", "10000000", // 10秒分析时间
+          "-probesize", "50000000",   // 50MB探测大小
+          "-fflags", "+genpts+discardcorrupt", // 生成PTS并丢弃损坏帧
+          "-i",
+          audioUrl,
+          "-f",
+          "s16le", // Raw PCM 16-bit signed little-endian
+          "-ar",
+          "48000",
+          "-ac",
+          "2",
+          "-vn",
+          "-loglevel",
+          "warning", // 改为warning级别以获取更多调试信息
+          "-bufsize", "2048k", // 增加缓冲区大小
+          "pipe:1",
+        ]);
 
-        ffmpegCheck.on("error", (error) => {
-          logger.error("FFmpeg not available", { error: error.message });
-          reject(
-            new Error(
-              "FFmpeg is not installed. Please install FFmpeg to enable audio playback."
-            )
-          );
-          return;
+        // 保存FFmpeg进程引用以便清理
+        this.ffmpegProcess = ffmpegProcess;
+
+        let stderr = "";
+
+        // 动态监控FFmpeg进程状态，无固定超时限制
+        let lastDataTime = Date.now();
+        let isProcessActive = true;
+
+        // 监控进程活跃状态 - 使用配置的阈值检测进程是否卡死
+        const activityMonitor = setInterval(() => {
+          const timeSinceLastData = Date.now() - lastDataTime;
+          const warningThreshold = config.audio.ffmpegInactiveWarningThreshold;
+          const killThreshold = config.audio.ffmpegInactiveKillThreshold;
+
+          if (timeSinceLastData > warningThreshold && isProcessActive) {
+            logger.warn("FFmpeg process appears inactive, checking status", {
+              timeSinceLastData,
+              warningThreshold,
+              killThreshold,
+              guild: this.currentGuild,
+            });
+
+            // 如果进程真的卡死了，尝试优雅关闭
+            if (timeSinceLastData > killThreshold) {
+              logger.error(`FFmpeg process inactive for over ${killThreshold/1000} seconds, terminating`, {
+                guild: this.currentGuild,
+                timeSinceLastData,
+              });
+              clearInterval(activityMonitor);
+
+              if (ffmpegProcess.stdin && !ffmpegProcess.stdin.destroyed) {
+                ffmpegProcess.stdin.end();
+              }
+
+              setTimeout(() => {
+                if (!ffmpegProcess.killed) {
+                  ffmpegProcess.kill('SIGKILL');
+                }
+              }, 2000);
+
+              reject(new Error(`FFmpeg process became inactive for ${timeSinceLastData/1000} seconds`));
+            }
+          }
+        }, config.audio.ffmpegActivityCheckInterval);
+
+        ffmpegProcess.stderr.on("data", (data) => {
+          stderr += data.toString();
+          lastDataTime = Date.now(); // 更新最后数据时间
         });
 
-        ffmpegCheck.on("close", (code) => {
-          if (code !== 0) {
-            logger.error("FFmpeg check failed", { code });
-            reject(new Error("FFmpeg check failed"));
-            return;
+        ffmpegProcess.stdout.on("data", (_data) => {
+          lastDataTime = Date.now(); // 更新最后数据时间 - 修复：确保stdout数据也更新活跃时间
+        });
+
+        ffmpegProcess.on("error", (error) => {
+          clearInterval(activityMonitor);
+          isProcessActive = false;
+          logger.error("FFmpeg process error", {
+            error: error.message,
+            stderr: stderr.substring(0, 500),
+            guild: this.currentGuild,
+          });
+          reject(new Error(`FFmpeg process error: ${error.message}`));
+        });
+
+        ffmpegProcess.on("close", (code) => {
+          clearInterval(activityMonitor);
+          isProcessActive = false;
+
+          // 清理进程引用
+          if (this.ffmpegProcess === ffmpegProcess) {
+            this.ffmpegProcess = null;
           }
 
-          // FFmpeg is available, proceed with audio resource creation
-          logger.debug("FFmpeg available, creating audio stream");
-
-          // 🔧 修复：改进FFmpeg参数，增加网络重试和缓冲设置
-          const ffmpegProcess = spawn("ffmpeg", [
-            "-user_agent",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "-referer",
-            "https://www.bilibili.com/",
-            "-reconnect", "1",           // 启用重连
-            "-reconnect_streamed", "1", // 对流媒体启用重连
-            "-reconnect_delay_max", "5", // 最大重连延迟5秒
-            "-reconnect_at_eof", "1",   // 在EOF时重连
-            "-rw_timeout", "60000000",   // 读写超时60秒
-            "-timeout", "60000000",     // 连接超时60秒
-            "-headers", "Connection: keep-alive",
-            "-analyzeduration", "10000000", // 10秒分析时间
-            "-probesize", "50000000",   // 50MB探测大小
-            "-fflags", "+genpts+discardcorrupt", // 生成PTS并丢弃损坏帧
-            "-i",
-            audioUrl,
-            "-f",
-            "s16le", // Raw PCM 16-bit signed little-endian
-            "-ar",
-            "48000",
-            "-ac",
-            "2",
-            "-vn",
-            "-loglevel",
-            "warning", // 改为warning级别以获取更多调试信息
-            "-bufsize", "2048k", // 增加缓冲区大小
-            "pipe:1",
-          ]);
-          
-          // 保存FFmpeg进程引用以便清理
-          this.ffmpegProcess = ffmpegProcess;
-
-          let stderr = "";
-
-          // 动态监控FFmpeg进程状态，无固定超时限制
-          let lastDataTime = Date.now();
-          let isProcessActive = true;
-          
-          // 监控进程活跃状态 - 使用配置的阈值检测进程是否卡死
-          const activityMonitor = setInterval(() => {
-            const timeSinceLastData = Date.now() - lastDataTime;
-            const warningThreshold = config.audio.ffmpegInactiveWarningThreshold;
-            const killThreshold = config.audio.ffmpegInactiveKillThreshold;
-            
-            if (timeSinceLastData > warningThreshold && isProcessActive) {
-              logger.warn("FFmpeg process appears inactive, checking status", {
-                timeSinceLastData,
-                warningThreshold,
-                killThreshold,
+          if (code !== 0 && code !== null) {
+            // 忽略SIGKILL和SIGTERM导致的退出码
+            if (code === 137 || code === 143 || code === 15) {
+              logger.info("FFmpeg process was gracefully terminated", {
+                code,
                 guild: this.currentGuild,
               });
-              
-              // 如果进程真的卡死了，尝试优雅关闭
-              if (timeSinceLastData > killThreshold) {
-                logger.error(`FFmpeg process inactive for over ${killThreshold/1000} seconds, terminating`, {
-                  guild: this.currentGuild,
-                  timeSinceLastData,
-                });
-                clearInterval(activityMonitor);
-                
-                if (ffmpegProcess.stdin && !ffmpegProcess.stdin.destroyed) {
-                  ffmpegProcess.stdin.end();
-                }
-                
-                setTimeout(() => {
-                  if (!ffmpegProcess.killed) {
-                    ffmpegProcess.kill('SIGKILL');
-                  }
-                }, 2000);
-                
-                reject(new Error(`FFmpeg process became inactive for ${timeSinceLastData/1000} seconds`));
-              }
+              return;
             }
-          }, config.audio.ffmpegActivityCheckInterval);
 
-          ffmpegProcess.stderr.on("data", (data) => {
-            stderr += data.toString();
-            lastDataTime = Date.now(); // 更新最后数据时间
-          });
-          
-          ffmpegProcess.stdout.on("data", (_data) => {
-            lastDataTime = Date.now(); // 更新最后数据时间 - 修复：确保stdout数据也更新活跃时间
-          });
-
-          ffmpegProcess.on("error", (error) => {
-            clearInterval(activityMonitor);
-            isProcessActive = false;
-            logger.error("FFmpeg process error", {
-              error: error.message,
+            logger.error("FFmpeg process exited with error", {
+              code,
               stderr: stderr.substring(0, 500),
               guild: this.currentGuild,
             });
-            reject(new Error(`FFmpeg process error: ${error.message}`));
-          });
-
-          ffmpegProcess.on("close", (code) => {
-            clearInterval(activityMonitor);
-            isProcessActive = false;
-            
-            // 清理进程引用
-            if (this.ffmpegProcess === ffmpegProcess) {
-              this.ffmpegProcess = null;
-            }
-            
-            if (code !== 0 && code !== null) {
-              // 忽略SIGKILL和SIGTERM导致的退出码
-              if (code === 137 || code === 143 || code === 15) {
-                logger.info("FFmpeg process was gracefully terminated", {
-                  code,
-                  guild: this.currentGuild,
-                });
-                return;
-              }
-              
-              logger.error("FFmpeg process exited with error", {
-                code,
-                stderr: stderr.substring(0, 500),
-                guild: this.currentGuild,
-              });
-              reject(new Error(`FFmpeg failed with code ${code}: ${stderr}`));
-              return;
-            }
-          });
-
-          try {
-            // 🔧 添加：保存FFmpeg进程引用以便后续清理
-            this.ffmpegProcess = ffmpegProcess;
-            
-            // 🔧 修复：使用Raw PCM而不是Opus，让Discord.js处理编码
-            const audioResource = createAudioResource(ffmpegProcess.stdout, {
-              inputType: StreamType.Raw,
-            });
-
-            logger.info("Audio resource created successfully");
-            resolve(audioResource);
-          } catch (createError) {
-            logger.error("Failed to create Discord audio resource", {
-              error: createError.message,
-            });
-            reject(
-              new Error(
-                `Failed to create audio resource: ${createError.message}`
-              )
-            );
+            reject(new Error(`FFmpeg failed with code ${code}: ${stderr}`));
+            return;
           }
         });
+
+        try {
+          // 🔧 修复：使用Raw PCM而不是Opus，让Discord.js处理编码
+          const audioResource = createAudioResource(ffmpegProcess.stdout, {
+            inputType: StreamType.Raw,
+          });
+
+          logger.info("Audio resource created successfully");
+          resolve(audioResource);
+        } catch (createError) {
+          logger.error("Failed to create Discord audio resource", {
+            error: createError.message,
+          });
+          reject(
+            new Error(
+              `Failed to create audio resource: ${createError.message}`
+            )
+          );
+        }
       } catch (error) {
         logger.error("Failed to create audio resource", {
           error: error.message,
@@ -1039,6 +1052,22 @@ class AudioPlayer {
       });
       this.handleTrackEnd();
       return;
+    }
+
+    // Force refresh audio URL on retry since it likely expired
+    if (this.currentTrack.normalizedUrl) {
+      try {
+        const AudioManager = require("./manager");
+        const extractor = AudioManager.getExtractor();
+        if (extractor) {
+          const freshUrl = await extractor.getAudioStreamUrl(this.currentTrack.normalizedUrl);
+          this.currentTrack.audioUrl = freshUrl;
+          this.currentTrack.extractedAt = new Date().toISOString();
+          logger.info("Refreshed audio URL for retry", { title: this.currentTrack.title });
+        }
+      } catch (e) {
+        logger.warn("Failed to refresh audio URL for retry", { error: e.message });
+      }
     }
 
     // 等待一下再重试

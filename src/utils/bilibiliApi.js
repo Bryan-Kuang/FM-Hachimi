@@ -4,6 +4,7 @@
 
 const axios = require("axios");
 const logger = require("../services/logger_service");
+const config = require("../config/config");
 
 class BilibiliAPI {
   constructor() {
@@ -202,13 +203,14 @@ class BilibiliAPI {
       const likes = Number(v.like || 0);
       const likeRate = views > 0 ? likes / views : 0;
 
-      // New Criteria: Like Rate > 5% OR Views > 10,000
-      const pass = likeRate > 0.05 || views > 10000;
+      const pass = likeRate > config.bilibili.likeRateThreshold || views > config.bilibili.viewCountThreshold;
 
       if (pass) {
         v.likeRate = likeRate;
         v.qualificationReason =
-          views > 10000 ? "Views > 10,000" : "Like rate > 5%";
+          views > config.bilibili.viewCountThreshold
+            ? `Views > ${config.bilibili.viewCountThreshold.toLocaleString()}`
+            : `Like rate > ${(config.bilibili.likeRateThreshold * 100).toFixed(0)}%`;
         qualified.push(v);
       }
     }
@@ -333,9 +335,9 @@ class BilibiliAPI {
       });
 
       const rawCandidates = await this.fetchRawCandidates("哈基米", {
-        maxPages: 3,
-        pageSize: 50,
-        timeoutMs: 8000,
+        maxPages: config.bilibili.hachimiMaxPages,
+        pageSize: config.bilibili.hachimiPageSize,
+        timeoutMs: config.bilibili.searchTimeout,
       });
 
       if (!rawCandidates || rawCandidates.length === 0) {

@@ -1,9 +1,9 @@
 /**
  * Play Command
- * Plays audio from a Bilibili video URL
+ * Plays audio from a Bilibili video URL or keyword search
  */
 
-const { SlashCommandBuilder } = require("discord.js");
+const { SlashCommandBuilder, MessageFlags } = require("discord.js");
 const UrlValidator = require("../../utils/validator");
 const AudioManager = require("../../audio/manager");
 const PlaylistManager = require("../../playlist/playlist_manager");
@@ -14,11 +14,11 @@ const logger = require("../../services/logger_service");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("play")
-    .setDescription("Play audio from a Bilibili video")
+    .setDescription("Play audio from a Bilibili video URL or keyword")
     .addStringOption((option) =>
       option
-        .setName("url")
-        .setDescription("Bilibili video URL")
+        .setName("query")
+        .setDescription("Bilibili video URL or search keyword")
         .setRequired(true)
     ),
 
@@ -26,7 +26,7 @@ module.exports = {
 
   async execute(interaction) {
     try {
-      const url = interaction.options.getString("url");
+      const query = interaction.options.getString("query") || interaction.options.getString("url");
       const user = interaction.user;
       const member = interaction.member;
 
@@ -34,7 +34,7 @@ module.exports = {
       if (!member.voice.channel) {
         return await interaction.reply({
           content: "Voice channel required",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -43,20 +43,37 @@ module.exports = {
       if (botVoiceChannel && botVoiceChannel.id !== member.voice.channel.id) {
         return await interaction.reply({
           content: `Bot is already playing in <#${botVoiceChannel.id}>`,
-          ephemeral: true,
-        });
-      }
-
-      // Validate Bilibili URL
-      if (!UrlValidator.isValidBilibiliUrl(url)) {
-        return await interaction.reply({
-          content: "Invalid URL",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
       // Defer reply immediately to prevent timeout
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      // Determine if input is a URL or keyword
+      let url;
+      if (UrlValidator.isValidBilibiliUrl(query)) {
+        url = query;
+      } else {
+        // Keyword search — pick the first result
+        await interaction.editReply({ content: `🔍 搜索 "${query}"...` });
+
+        const bilibiliApi = require("../../utils/bilibiliApi");
+        const results = await bilibiliApi.searchVideos(query, 1, 5);
+
+        if (!results || results.length === 0) {
+          return await interaction.editReply({
+            content: `未找到 "${query}" 相关视频`,
+          });
+        }
+
+        url = results[0].url;
+        logger.info("Keyword search resolved to URL", {
+          keyword: query,
+          resolvedUrl: url,
+          title: results[0].title,
+        });
+      }
 
       const player = AudioManager.getPlayer(interaction.guild.id);
       const joined = await player.joinVoiceChannel(member.voice.channel);
@@ -83,16 +100,17 @@ module.exports = {
         await PlayerControl.play(interaction.guild.id);
       }
       await interaction.editReply({
-        content: "🎵 已添加并开始播放",
+        content: `🎵 已添加: ${track.title || url}`,
       });
       logger.info("Play command completed", {
+        query,
         url,
         title: track.title,
         user: user.username,
       });
     } catch (error) {
       logger.error("Play command failed", {
-        url: interaction.options.getString("url"),
+        query: interaction.options.getString("query"),
         user: interaction.user.username,
         error: error.message,
         stack: error.stack,
@@ -102,7 +120,7 @@ module.exports = {
         if (interaction.replied || interaction.deferred) {
           await interaction.editReply({ content: "Play failed" });
         } else {
-          await interaction.reply({ content: "Play failed", ephemeral: true });
+          await interaction.reply({ content: "Play failed", flags: MessageFlags.Ephemeral });
         }
       } catch (replyError) {
         logger.error("Failed to send error response", {

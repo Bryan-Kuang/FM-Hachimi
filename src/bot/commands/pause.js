@@ -3,7 +3,7 @@
  * Pauses the currently playing audio
  */
 
-const { SlashCommandBuilder } = require("discord.js");
+const { SlashCommandBuilder, MessageFlags } = require("discord.js");
 const PlayerControl = require("../../control/player_control");
 const InterfaceUpdater = require("../../ui/interface_updater");
 const logger = require("../../services/logger_service");
@@ -24,11 +24,11 @@ module.exports = {
       if (!member.voice.channel) {
         return await interaction.reply({
           content: "Voice channel required",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
-      await interaction.reply({ content: "执行中...", ephemeral: true })
+      await interaction.reply({ content: "执行中...", flags: MessageFlags.Ephemeral })
       InterfaceUpdater.setPlaybackContext(
         interaction.guild.id,
         interaction.channelId
@@ -54,7 +54,7 @@ module.exports = {
       if (interaction.replied || interaction.deferred) {
         await interaction.editReply("暂停失败")
       } else {
-        await interaction.reply({ content: "暂停失败", ephemeral: true })
+        await interaction.reply({ content: "暂停失败", flags: MessageFlags.Ephemeral })
       }
     }
   },

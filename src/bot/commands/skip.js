@@ -3,7 +3,7 @@
  * Skips to the next track in the queue
  */
 
-const { SlashCommandBuilder } = require("discord.js");
+const { SlashCommandBuilder, MessageFlags } = require("discord.js");
 const PlayerControl = require("../../control/player_control");
 const InterfaceUpdater = require("../../ui/interface_updater");
 const logger = require("../../services/logger_service");
@@ -22,10 +22,10 @@ module.exports = {
 
       // Check if user is in a voice channel
       if (!member.voice.channel) {
-        return await interaction.reply({ content: "Voice channel required", ephemeral: true })
+        return await interaction.reply({ content: "Voice channel required", flags: MessageFlags.Ephemeral })
       }
 
-      await interaction.reply({ content: "执行中...", ephemeral: true })
+      await interaction.reply({ content: "执行中...", flags: MessageFlags.Ephemeral })
       InterfaceUpdater.setPlaybackContext(interaction.guild.id, interaction.channelId)
       const ok = await PlayerControl.next(interaction.guild.id)
       if (!ok) {
@@ -46,7 +46,7 @@ module.exports = {
       if (interaction.replied || interaction.deferred) {
         await interaction.editReply("Skip failed")
       } else {
-        await interaction.reply({ content: "Skip failed", ephemeral: true })
+        await interaction.reply({ content: "Skip failed", flags: MessageFlags.Ephemeral })
       }
     }
   },

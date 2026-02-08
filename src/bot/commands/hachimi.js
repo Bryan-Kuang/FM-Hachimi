@@ -3,7 +3,7 @@
  * Automatically plays Bilibili videos with "哈基米" tag that meet specific criteria
  */
 
-const { SlashCommandBuilder } = require("discord.js");
+const { SlashCommandBuilder, MessageFlags } = require("discord.js");
 const AudioManager = require("../../audio/manager");
 const PlaylistManager = require("../../playlist/playlist_manager");
 const InterfaceUpdater = require("../../ui/interface_updater");
@@ -43,7 +43,7 @@ module.exports = {
 
         return await interaction.reply({
           embeds: [errorEmbed],
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -60,7 +60,7 @@ module.exports = {
 
         return await interaction.reply({
           embeds: [errorEmbed],
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -69,7 +69,7 @@ module.exports = {
         interaction.guild.id,
         interaction.channelId
       );
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       const loadingEmbed = EmbedBuilders.createLoadingEmbed(
         "🔍 Searching for Hachimi videos that meet quality criteria..."
@@ -113,7 +113,7 @@ module.exports = {
       if (interaction.replied || interaction.deferred) {
         await interaction.editReply({ embeds: [errorEmbed] });
       } else {
-        await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+        await interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
       }
     }
   },

@@ -20,6 +20,11 @@ class InterfaceUpdater {
     this.contexts.set(guildId, { channelId, messageId: messageId || prev.messageId })
   }
 
+  clearContext(guildId) {
+    this.contexts.delete(guildId)
+    this.seq.delete(guildId)
+  }
+
   bind(playerControl) {
     playerControl.onStateChanged(async ({ guildId, state }) => {
       await this.handleUpdate(guildId, state)
@@ -32,6 +37,10 @@ class InterfaceUpdater {
       this.seq.set(guildId, s)
       const ctx = this.contexts.get(guildId)
       if (!ctx || !ctx.channelId) return
+      if (!state.currentTrack) {
+        ProgressTracker.stopTracking(guildId)
+        return
+      }
       const channel = this.client.channels.cache.get(ctx.channelId) || await this.client.channels.fetch(ctx.channelId)
       const currentTime = AudioManager.getPlayer(guildId).getCurrentTime()
       const embed = EmbedBuilders.createNowPlayingEmbed(state.currentTrack, {

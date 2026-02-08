@@ -21,6 +21,13 @@ module.exports = {
     file: process.env.LOG_FILE || "bot.log",
     toFile: process.env.LOG_TO_FILE !== "false",
   },
+  bilibili: {
+    likeRateThreshold: parseFloat(process.env.BILIBILI_LIKE_RATE_THRESHOLD) || 0.05,
+    viewCountThreshold: parseInt(process.env.BILIBILI_VIEW_COUNT_THRESHOLD) || 10000,
+    hachimiPageSize: parseInt(process.env.HACHIMI_PAGE_SIZE) || 50,
+    hachimiMaxPages: parseInt(process.env.HACHIMI_MAX_PAGES) || 3,
+    searchTimeout: parseInt(process.env.BILIBILI_SEARCH_TIMEOUT) || 8000,
+  },
   test: {
     mode: process.env.TEST_MODE === "true",
     guildId: process.env.TEST_GUILD_ID,

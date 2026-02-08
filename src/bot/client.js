@@ -8,12 +8,14 @@ const {
   GatewayIntentBits,
   Collection,
   ActivityType,
+  MessageFlags,
 } = require("discord.js");
 const logger = require("../services/logger_service");
 const config = require("../config/config");
 const PlayerControl = require("../control/player_control");
 const PlaylistManager = require("../playlist/playlist_manager");
 const InterfaceUpdater = require("../ui/interface_updater");
+const Debug = require("../utils/debug");
 
 class BotClient {
   constructor() {
@@ -45,7 +47,6 @@ class BotClient {
   async initialize() {
     try {
       logger.info("Initializing Discord bot client");
-      const Debug = require("../utils/debug");
       Debug.trace('client.initialize.begin')
 
       // Set up event handlers
@@ -67,8 +68,7 @@ class BotClient {
         InterfaceUpdater.bind(PlayerControl);
         Debug.trace('client.bind.interface_updater')
       } catch (e) {
-        const ls = require("../services/logger_service");
-        ls.error("Failed to bind UI updater", { error: e.message });
+        logger.error("Failed to bind UI updater", { error: e.message });
         Debug.error('client.bind.failed', e)
       }
 
@@ -80,7 +80,6 @@ class BotClient {
         error: error.message,
         stack: error.stack,
       });
-      const Debug = require("../utils/debug");
       Debug.error('client.initialize.failed', error)
       throw error;
     }
@@ -91,7 +90,7 @@ class BotClient {
    */
   setupEventHandlers() {
     // Bot ready event
-    this.client.once("ready", () => {
+    this.client.once("clientReady", () => {
       this.isReady = true;
       this.startTime = new Date();
 
@@ -100,7 +99,6 @@ class BotClient {
         id: this.client.user.id,
         guilds: this.client.guilds.cache.size,
       });
-      const Debug = require("../utils/debug");
       Debug.trace('client.event.ready')
 
       // Set bot activity status
@@ -109,8 +107,15 @@ class BotClient {
       });
     });
 
-    // Voice state update event - handle disconnects
+    // Voice state update event - handle disconnects and debug logging
     this.client.on("voiceStateUpdate", (oldState, newState) => {
+      logger.debug("Voice state update", {
+        userId: newState.id,
+        oldChannel: oldState.channelId,
+        newChannel: newState.channelId,
+      });
+      Debug.trace('client.event.voiceStateUpdate', { userId: newState.id, oldChannel: oldState.channelId, newChannel: newState.channelId })
+
       // Check if bot was disconnected from a voice channel
       if (
         oldState.member.id === this.client.user.id &&
@@ -122,19 +127,14 @@ class BotClient {
           channel: oldState.channel.name,
         });
 
-        // Clear queue and reset player state for this guild
-        const AudioManager = require("../../audio/manager");
+        // Clean up player state for this guild using proper method
+        const AudioManager = require("../audio/manager");
         const player = AudioManager.getPlayer(oldState.guild.id);
         if (player) {
-          player.queue = [];
-          player.currentTrack = null;
-          player.currentIndex = -1;
-          player.isPlaying = false;
-          player.isPaused = false;
-          player.startTime = null;
-          player.voiceConnection = null;
+          player.stop();
+          InterfaceUpdater.clearContext(oldState.guild.id);
 
-          logger.info("Queue cleared due to voice disconnect", {
+          logger.info("Player stopped due to voice disconnect", {
             guild: oldState.guild.name,
           });
         }
@@ -196,12 +196,12 @@ class BotClient {
         if (interaction.replied || interaction.deferred) {
           await interaction.followUp({
             content: errorMessage,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
         } else {
           await interaction.reply({
             content: errorMessage,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
         }
       }
@@ -213,25 +213,12 @@ class BotClient {
         error: error.message,
         stack: error.stack,
       });
-      const Debug = require("../utils/debug");
       Debug.error('client.event.error', error)
     });
 
     this.client.on("warn", (warning) => {
       logger.warn("Discord client warning", { warning });
-      const Debug = require("../utils/debug");
       Debug.trace('client.event.warn', { warning })
-    });
-
-    // Voice state updates for tracking user activity
-    this.client.on("voiceStateUpdate", (oldState, newState) => {
-      logger.debug("Voice state update", {
-        userId: newState.id,
-        oldChannel: oldState.channelId,
-        newChannel: newState.channelId,
-      });
-      const Debug = require("../utils/debug");
-      Debug.trace('client.event.voiceStateUpdate', { userId: newState.id, oldChannel: oldState.channelId, newChannel: newState.channelId })
     });
   }
 
@@ -245,6 +232,7 @@ class BotClient {
       require("./commands/resume"),
       require("./commands/skip"),
       require("./commands/prev"),
+      require("./commands/stop"),
       require("./commands/queue"),
       require("./commands/nowplaying"),
       require("./commands/help"),
@@ -261,7 +249,6 @@ class BotClient {
           logger.warn("Invalid command structure", { command });
         }
       } catch (e) {
-        const Debug = require("../utils/debug");
         Debug.error('command.load.failed', e)
         throw e
       }
@@ -270,7 +257,6 @@ class BotClient {
     logger.info("Commands loaded", {
       count: this.client.commands.size,
     });
-    const Debug = require("../utils/debug");
     Debug.trace('client.commands.count', { count: this.client.commands.size })
   }
 
@@ -300,7 +286,7 @@ class BotClient {
           )} more second(s) before reusing the \`${
             command.data.name
           }\` command.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return true;
       }
@@ -322,14 +308,12 @@ class BotClient {
     try {
       await this.client.login(config.discord.token);
       logger.info("Successfully logged in to Discord");
-      const Debug = require("../utils/debug");
       Debug.trace('client.login.success')
     } catch (error) {
       logger.error("Failed to login to Discord", {
         error: error.message,
         code: error.code,
       });
-      const Debug = require("../utils/debug");
       Debug.error('client.login.failed', error)
       throw error;
     }

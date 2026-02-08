@@ -3,7 +3,7 @@
  * Shows a list of all bot commands with descriptions
  */
 
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 const logger = require("../../services/logger_service");
 
 module.exports = {
@@ -52,7 +52,7 @@ module.exports = {
 
       await interaction.reply({
         embeds: [helpEmbed],
-        ephemeral: true, // 只有命令执行者能看到
+        flags: MessageFlags.Ephemeral, // 只有命令执行者能看到
       });
 
       logger.info("Help command completed successfully", {
@@ -70,12 +70,12 @@ module.exports = {
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp({
           content: `❌ ${errorMessage}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       } else {
         await interaction.reply({
           content: `❌ ${errorMessage}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
     }
