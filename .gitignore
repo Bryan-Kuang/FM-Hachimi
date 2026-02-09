@@ -61,6 +61,7 @@ temp/
 *.temp
 
 # IDE files
+.github/
 .trae/
 .vscode/
 .idea/

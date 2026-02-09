@@ -75,6 +75,11 @@ class ProgressTracker {
         return;
       }
 
+      // Validate required properties to prevent embed builder crashes
+      if (!track.title || track.duration == null) {
+        return;
+      }
+
       const currentTime = player.getCurrentTime();
 
       // Create updated embed

@@ -33,6 +33,7 @@ class AudioPlayer {
     this.progressInterval = null; // Interval for progress updates
     this.ffmpegProcess = null; // 🔧 添加：跟踪当前FFmpeg进程
     this._ffmpegChecked = false; // Lazy FFmpeg availability check
+    this._cdnRetryPending = false; // Flag for CDN failure retry coordination
 
     // Set up audio player event handlers
     this.setupAudioPlayerEvents();
@@ -85,6 +86,16 @@ class AudioPlayer {
         actualPlaybackDuration,
         trackDuration: this.currentTrack?.duration,
       });
+
+      // 🔧 CDN故障重试：如果FFmpeg因CDN失败退出，优先重试而非跳过
+      if (this._cdnRetryPending && this.currentTrack) {
+        logger.info("CDN retry pending, retrying instead of skipping", {
+          track: this.currentTrack?.title,
+          actualPlaybackDuration,
+        });
+        this.retryCurrentTrack();
+        return;
+      }
 
       // 🔧 修复：使用实际播放时间而不是state.playbackDuration
       // 对于Raw PCM，playbackDuration可能始终为0
@@ -391,7 +402,7 @@ class AudioPlayer {
       // Re-extract audio URL if it's stale (Bilibili CDN URLs expire)
       if (this.currentTrack.extractedAt && this.currentTrack.normalizedUrl) {
         const age = Date.now() - new Date(this.currentTrack.extractedAt).getTime();
-        if (age > 30 * 60 * 1000) { // older than 30 minutes
+        if (age > config.audio.urlRefreshThreshold) {
           try {
             const AudioManager = require("./manager");
             const extractor = AudioManager.getExtractor();
@@ -554,7 +565,8 @@ class AudioPlayer {
                 }
               }, 2000);
 
-              reject(new Error(`FFmpeg process became inactive for ${timeSinceLastData/1000} seconds`));
+              // Set CDN retry flag so idle handler retries instead of skipping
+              this._cdnRetryPending = true;
             }
           }
         }, config.audio.ffmpegActivityCheckInterval);
@@ -595,6 +607,18 @@ class AudioPlayer {
                 code,
                 guild: this.currentGuild,
               });
+              return;
+            }
+
+            // 检测CDN故障（URL过期、连接断开等），设置重试标志
+            if (this.isCdnFailure(code, stderr)) {
+              logger.warn("FFmpeg CDN failure detected, will retry", {
+                code,
+                stderr: stderr.substring(0, 500),
+                guild: this.currentGuild,
+                track: this.currentTrack?.title,
+              });
+              this._cdnRetryPending = true;
               return;
             }
 
@@ -1031,9 +1055,29 @@ class AudioPlayer {
   }
 
   /**
+   * Check if FFmpeg stderr indicates a CDN/network failure that can be retried
+   */
+  isCdnFailure(code, stderr) {
+    if (code !== 255) return false;
+    const cdnPatterns = [
+      /End of file/i,
+      /Server returned 4\d{2}/i,
+      /Server returned 5\d{2}/i,
+      /Connection reset/i,
+      /Connection refused/i,
+      /Connection timed out/i,
+      /I\/O error/i,
+      /HTTP error/i,
+    ];
+    return cdnPatterns.some((p) => p.test(stderr));
+  }
+
+  /**
    * Retry current track (when playback fails immediately)
    */
   async retryCurrentTrack() {
+    this._cdnRetryPending = false; // Clear CDN retry flag
+
     if (!this.currentTrack) {
       logger.warn("No current track to retry");
       return;

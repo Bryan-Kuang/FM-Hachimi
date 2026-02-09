@@ -146,8 +146,8 @@ process.on("unhandledRejection", (reason, promise) => {
 
 process.on("uncaughtException", (error) => {
   logger.error("Uncaught exception", {
-    error: error.message,
-    stack: error.stack,
+    error: error?.message || String(error),
+    stack: error?.stack,
   });
 
   // Attempt graceful shutdown

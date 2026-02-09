@@ -41,11 +41,13 @@ class InterfaceUpdater {
         ProgressTracker.stopTracking(guildId)
         return
       }
+      // Capture to local variable to prevent race condition during async ops
+      const currentTrack = state.currentTrack
       const channel = this.client.channels.cache.get(ctx.channelId) || await this.client.channels.fetch(ctx.channelId)
       const currentTime = AudioManager.getPlayer(guildId).getCurrentTime()
-      const embed = EmbedBuilders.createNowPlayingEmbed(state.currentTrack, {
+      const embed = EmbedBuilders.createNowPlayingEmbed(currentTrack, {
         currentTime,
-        requestedBy: state.currentTrack?.requestedBy,
+        requestedBy: currentTrack.requestedBy,
         queuePosition: (state.currentIndex >= 0 ? state.currentIndex + 1 : 0),
         totalQueue: state.queueLength,
         loopMode: state.loopMode

@@ -189,6 +189,7 @@ class BilibiliExtractor {
         "--dump-json",
         "--no-download",
         "--no-check-certificate",
+        "--no-warnings",
         "--user-agent",
         this.userAgent,
         url,
@@ -243,25 +244,34 @@ class BilibiliExtractor {
         }
 
         try {
-          const videoData = JSON.parse(stdout);
+          // yt-dlp --dump-json outputs one JSON object per line;
+          // extra lines (warnings, progress) may appear — find the first valid JSON line
+          const lines = stdout.split('\n').filter(l => l.trim());
+          const jsonLine = lines.find(l => l.trim().startsWith('{'));
+          if (!jsonLine) {
+            throw new Error('No JSON object found in yt-dlp output');
+          }
+          const videoData = JSON.parse(jsonLine);
           const metadata = this.parseVideoMetadata(videoData);
-          
+
           // Cache the result
           this.videoInfoCache.set(cacheKey, {
             data: metadata,
             timestamp: Date.now()
           });
-          
-          logger.debug("Video info cached", { 
-            url: cacheKey, 
-            cacheSize: this.videoInfoCache.size 
+
+          logger.debug("Video info cached", {
+            url: cacheKey,
+            cacheSize: this.videoInfoCache.size
           });
-          
+
           resolve(metadata);
         } catch (parseError) {
           logger.error("Failed to parse video metadata", {
             error: parseError.message,
             stdout: stdout.substring(0, 500),
+            stdoutTail: stdout.substring(Math.max(0, stdout.length - 200)),
+            stdoutLength: stdout.length,
           });
           reject(
             new Error(`Failed to parse video metadata: ${parseError.message}`)
@@ -314,6 +324,7 @@ class BilibiliExtractor {
         "--format",
         "bestaudio/best",
         "--no-check-certificate",
+        "--no-warnings",
         "--user-agent",
         this.userAgent,
         url,
