@@ -130,7 +130,11 @@ class BotClient {
         // Clean up player state for this guild using proper method
         const AudioManager = require("../audio/manager");
         const player = AudioManager.getPlayer(oldState.guild.id);
+        let currentTrack = null;
+
         if (player) {
+          // Capture current track before stopping
+          currentTrack = player.currentTrack;
           player.stop();
           InterfaceUpdater.clearContext(oldState.guild.id);
 
@@ -138,6 +142,11 @@ class BotClient {
             guild: oldState.guild.name,
           });
         }
+
+        // Check if bot was manually disconnected by fetching audit logs
+        this.sendDisconnectMessage(oldState.guild, currentTrack).catch((err) => {
+          logger.warn("Failed to send disconnect message", { error: err.message });
+        });
       }
     });
 
@@ -220,6 +229,79 @@ class BotClient {
       logger.warn("Discord client warning", { warning });
       Debug.trace('client.event.warn', { warning })
     });
+  }
+
+  /**
+   * Send a humorous message when bot is manually disconnected
+   * @param {Guild} guild - Discord guild
+   * @param {Object} currentTrack - Currently playing track (if any)
+   */
+  async sendDisconnectMessage(guild, currentTrack) {
+    try {
+      // Get the last text channel used by the bot
+      const context = InterfaceUpdater.contexts.get(guild.id);
+      if (!context || !context.channelId) {
+        logger.debug("No text channel context for disconnect message");
+        return;
+      }
+
+      const channel = await this.client.channels.fetch(context.channelId).catch(() => null);
+      if (!channel) {
+        logger.debug("Failed to fetch text channel for disconnect message");
+        return;
+      }
+
+      // Try to find who disconnected the bot from audit logs
+      let culprit = "未知凶手";
+      try {
+        const { AuditLogEvent } = require("discord.js");
+        const auditLogs = await guild.fetchAuditLogs({
+          type: AuditLogEvent.MemberDisconnect,
+          limit: 5,
+        });
+
+        // Find the most recent disconnect action for our bot within last 5 seconds
+        const matchingLogs = auditLogs.entries.filter((entry) => {
+          return (
+            entry.target.id === this.client.user.id &&
+            Date.now() - entry.createdTimestamp < 5000
+          );
+        });
+
+        if (matchingLogs.size > 0) {
+          // Pick the most recent one
+          const mostRecent = Array.from(matchingLogs.values()).reduce((prev, current) => {
+            return current.createdTimestamp > prev.createdTimestamp ? current : prev;
+          });
+          culprit = mostRecent.executor.displayName || mostRecent.executor.username;
+        }
+      } catch (auditError) {
+        logger.debug("Failed to fetch audit logs for disconnect", {
+          error: auditError.message,
+        });
+        // Continue with unknown culprit
+      }
+
+      // Build the message
+      const botName = guild.members.me.displayName || this.client.user.username;
+      let message = `饿啊～\n**${botName}** 被谋害了，凶手是 **${culprit}**`;
+
+      if (currentTrack && currentTrack.title) {
+        message += `\n遗言是：**${currentTrack.title}**`;
+      }
+
+      await channel.send(message);
+
+      logger.info("Sent disconnect message", {
+        guild: guild.name,
+        culprit,
+        hadTrack: !!currentTrack,
+      });
+    } catch (error) {
+      logger.error("Error sending disconnect message", {
+        error: error.message,
+      });
+    }
   }
 
   /**
