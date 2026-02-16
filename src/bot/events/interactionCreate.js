@@ -157,73 +157,6 @@ async function handleButtonInteraction(interaction) {
     let responseButtons;
 
     switch (customId) {
-      case "pause_resume": {
-        const isPlaying = result.player.isPlaying;
-        responseEmbed = EmbedBuilders.createSuccessEmbed(
-          isPlaying ? "Resumed" : "Paused",
-          isPlaying ? "▶️ Audio playback resumed" : "⏸️ Audio playback paused"
-        );
-
-        responseButtons = ButtonBuilders.createPlaybackControls({
-          isPlaying: result.player.isPlaying,
-          hasQueue: result.player.queueLength > 0,
-          canGoBack: result.player.hasPrevious,
-          canSkip: result.player.hasNext,
-          loopMode: result.player.loopMode,
-        });
-        break;
-      }
-
-      case "skip": {
-        if (result.newTrack) {
-          responseEmbed = EmbedBuilders.createNowPlayingEmbed(result.newTrack, {
-            requestedBy: result.newTrack.requestedBy,
-            queuePosition: result.player.currentIndex + 1,
-            totalQueue: result.player.queueLength,
-            loopMode: result.player.loopMode, // Fix: Add missing loopMode parameter
-          });
-        } else {
-          responseEmbed = EmbedBuilders.createSuccessEmbed(
-            "Skipped",
-            "⏭️ Skipped to next track"
-          );
-        }
-
-        responseButtons = ButtonBuilders.createPlaybackControls({
-          isPlaying: result.player.isPlaying,
-          hasQueue: result.player.queueLength > 0,
-          canGoBack: result.player.hasPrevious,
-          canSkip: result.player.hasNext,
-          loopMode: result.player.loopMode,
-        });
-        break;
-      }
-
-      case "prev": {
-        if (result.newTrack) {
-          responseEmbed = EmbedBuilders.createNowPlayingEmbed(result.newTrack, {
-            requestedBy: result.newTrack.requestedBy,
-            queuePosition: result.player.currentIndex + 1,
-            totalQueue: result.player.queueLength,
-            loopMode: result.player.loopMode, // Fix: Add missing loopMode parameter
-          });
-        } else {
-          responseEmbed = EmbedBuilders.createSuccessEmbed(
-            "Previous",
-            "⏮️ Went back to previous track"
-          );
-        }
-
-        responseButtons = ButtonBuilders.createPlaybackControls({
-          isPlaying: result.player.isPlaying,
-          hasQueue: result.player.queueLength > 0,
-          canGoBack: result.player.hasPrevious,
-          canSkip: result.player.hasNext,
-          loopMode: result.player.loopMode,
-        });
-        break;
-      }
-
       case "queue": {
         const queueInfo = AudioManager.getQueue(interaction.guild.id);
         responseEmbed = EmbedBuilders.createQueueEmbed(queueInfo.queue, {
@@ -297,14 +230,6 @@ async function handleButtonInteraction(interaction) {
           queue: queueInfoLoop.queue,
           currentIndex: queueInfoLoop.state.currentIndex,
         });
-        break;
-      }
-
-      case "stop": {
-        responseEmbed = EmbedBuilders.createSuccessEmbed(
-          "⏹️ Playback Stopped",
-          "Music stopped, queue cleared, and left voice channel."
-        );
         break;
       }
 

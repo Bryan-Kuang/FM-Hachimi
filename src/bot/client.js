@@ -90,7 +90,7 @@ class BotClient {
    */
   setupEventHandlers() {
     // Bot ready event
-    this.client.once("clientReady", () => {
+    this.client.once("ready", () => {
       this.isReady = true;
       this.startTime = new Date();
 
