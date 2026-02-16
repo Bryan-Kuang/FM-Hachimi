@@ -1,0 +1,46 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+        env:
+          TEST_MODE: true
+          NODE_ENV: test
+
+  deploy:
+    needs: ci
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Deploy to Oracle Cloud
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd ~/bilibili-bot
+            git pull origin main
+            docker-compose up -d --build
+            docker image prune -f
