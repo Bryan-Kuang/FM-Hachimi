@@ -1,0 +1,46 @@
+version: "3.9"
+
+services:
+  bilibili-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bilibili-discord-bot
+    restart: unless-stopped
+
+    # Environment variables from .env file
+    env_file:
+      - .env
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Resource limits (Oracle Cloud Free Tier friendly)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('./src/index.js')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # Volumes for persistent data (logs) and cookies
+    volumes:
+      - ./logs:/app/logs
+      - ./cookies.txt:/app/cookies.txt
+
+    # Network mode
+    network_mode: bridge

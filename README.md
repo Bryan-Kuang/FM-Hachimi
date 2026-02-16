@@ -140,6 +140,39 @@ LOG_LEVEL=info
 NODE_ENV=production
 ```
 
+## 🚢 生产环境部署
+
+### Docker 部署（推荐）
+
+使用 Docker 容器化部署，支持 Oracle Cloud、AWS、Azure 等云平台：
+
+```bash
+# 1. 配置环境变量
+cp .env.example .env
+nano .env  # 填入你的 DISCORD_TOKEN
+
+# 2. 一键部署
+./deploy.sh
+
+# 3. 查看日志
+docker-compose logs -f
+```
+
+**完整部署指南**：
+- 📖 [Oracle Cloud 部署教程](./DEPLOYMENT.md) - 详细的云端部署步骤
+- ⚡ [快速开始](./QUICK_START.md) - 30 秒快速部署
+- ✅ [部署检查清单](./DEPLOYMENT_CHECKLIST.md) - 确保万无一失
+
+### 本地开发运行
+
+```bash
+# 开发模式（支持热重载）
+npm run dev
+
+# 生产模式
+npm start
+```
+
 ## 🎯 当前可用功能
 
 ### URL 支持

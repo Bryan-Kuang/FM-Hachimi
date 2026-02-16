@@ -4,6 +4,12 @@
 !.env.example
 !.env.template
 
+# Server config (contains IP address)
+.server.env
+
+# Cookies
+cookies.txt
+
 # Dependencies
 node_modules/
 jspm_packages/

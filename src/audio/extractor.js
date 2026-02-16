@@ -5,7 +5,9 @@
 
 const _axios = require("axios");
 const { spawn } = require("child_process");
+const fs = require("fs");
 const logger = require("../services/logger_service");
+const config = require("../config/config");
 const UrlValidator = require("../utils/validator");
 
 class BilibiliExtractor {
@@ -13,6 +15,7 @@ class BilibiliExtractor {
     this.userAgent =
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     this._ytdlpChecked = false; // Lazy check flag
+    this._cookiesFile = this._resolveCookiesFile();
     
     // Video info cache to avoid repeated yt-dlp calls
     this.videoInfoCache = new Map();
@@ -77,6 +80,34 @@ class BilibiliExtractor {
       this.cacheCleanupInterval = null;
     }
     this.clearCache();
+  }
+
+  /**
+   * Resolve the cookies file path from config
+   * @returns {string|null} - Resolved cookie file path, or null if not configured/invalid
+   */
+  _resolveCookiesFile() {
+    const cookiesFile = config.bilibili?.cookiesFile;
+    if (!cookiesFile) return null;
+
+    if (fs.existsSync(cookiesFile)) {
+      logger.info("Bilibili cookies file configured", { path: cookiesFile });
+      return cookiesFile;
+    }
+
+    logger.warn("Bilibili cookies file not found", { path: cookiesFile });
+    return null;
+  }
+
+  /**
+   * Get yt-dlp cookie arguments if a cookies file is configured
+   * @returns {Array<string>} - Cookie-related args for yt-dlp
+   */
+  _getCookieArgs() {
+    if (this._cookiesFile && fs.existsSync(this._cookiesFile)) {
+      return ["--cookies", this._cookiesFile];
+    }
+    return [];
   }
 
   /**
@@ -192,6 +223,7 @@ class BilibiliExtractor {
         "--no-warnings",
         "--user-agent",
         this.userAgent,
+        ...this._getCookieArgs(),
         url,
       ];
 
@@ -327,6 +359,7 @@ class BilibiliExtractor {
         "--no-warnings",
         "--user-agent",
         this.userAgent,
+        ...this._getCookieArgs(),
         url,
       ];
 
@@ -669,7 +702,8 @@ class BilibiliExtractor {
         searchQuery,
         "--get-id",
         "--no-download",
-        "--flat-playlist"
+        "--flat-playlist",
+        ...this._getCookieArgs()
       ]);
 
       let stdout = "";

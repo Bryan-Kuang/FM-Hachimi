@@ -28,6 +28,7 @@ module.exports = {
     hachimiPageSize: parseInt(process.env.HACHIMI_PAGE_SIZE) || 50,
     hachimiMaxPages: parseInt(process.env.HACHIMI_MAX_PAGES) || 3,
     searchTimeout: parseInt(process.env.BILIBILI_SEARCH_TIMEOUT) || 8000,
+    cookiesFile: process.env.BILIBILI_COOKIES_FILE || "",
   },
   test: {
     mode: process.env.TEST_MODE === "true",
