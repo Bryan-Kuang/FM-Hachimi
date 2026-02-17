@@ -33,7 +33,7 @@ class ProgressTracker {
       guildId,
       interval: setInterval(() => {
         this.updateProgress(guildId);
-      }, 1000),
+      }, 5000),
     };
 
     this.activeTrackers.set(guildId, tracker);
