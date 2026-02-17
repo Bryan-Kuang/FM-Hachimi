@@ -31,9 +31,10 @@ class ProgressTracker {
     const tracker = {
       message,
       guildId,
+      updating: false,
       interval: setInterval(() => {
         this.updateProgress(guildId);
-      }, 5000),
+      }, 1000),
     };
 
     this.activeTrackers.set(guildId, tracker);
@@ -61,6 +62,10 @@ class ProgressTracker {
   async updateProgress(guildId) {
     const tracker = this.activeTrackers.get(guildId);
     if (!tracker) return;
+
+    // Skip if previous edit is still in flight (prevents rate limit queue buildup)
+    if (tracker.updating) return;
+    tracker.updating = true;
 
     try {
       const { message, guildId } = tracker;
@@ -125,6 +130,8 @@ class ProgressTracker {
       if (error.code === 10008 || error.code === 50001) {
         this.stopTracking(guildId);
       }
+    } finally {
+      if (tracker) tracker.updating = false;
     }
   }
 
