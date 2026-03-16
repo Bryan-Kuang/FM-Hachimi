@@ -126,6 +126,7 @@ class BilibiliAPI {
       like: typeof video.like === "number" ? video.like : 0,
       danmaku: video.danmaku || 0,
       tag: video.tag || "",
+      tid: video.typeid || 0,
       url: `https://www.bilibili.com/video/${video.bvid}`,
     };
   }

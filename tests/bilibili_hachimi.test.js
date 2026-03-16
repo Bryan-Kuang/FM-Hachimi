@@ -63,4 +63,36 @@ describe("BilibiliAPI Hachimi Logic", () => {
     expect(tids).not.toContain(1);   // 动画
     expect(tids).not.toContain(17);  // 游戏
   });
+
+  test("parseVideoInfo captures tid from typeid field", () => {
+    const raw = {
+      bvid: "BV1test",
+      aid: 123,
+      title: "Test Video",
+      author: "Author",
+      mid: 456,
+      description: "desc",
+      pic: "https://img.example.com/pic.jpg",
+      duration: "03:45",
+      pubdate: 1700000000,
+      play: 5000,
+      like: 300,
+      danmaku: 50,
+      tag: "鬼畜",
+      typeid: 22,
+    };
+    const result = BilibiliAPI.parseVideoInfo(raw);
+    expect(result.tid).toBe(22);
+  });
+
+  test("parseVideoInfo defaults tid to 0 when typeid is missing", () => {
+    const raw = {
+      bvid: "BV2test",
+      title: "No Type Video",
+      play: 1000,
+      like: 50,
+    };
+    const result = BilibiliAPI.parseVideoInfo(raw);
+    expect(result.tid).toBe(0);
+  });
 });
