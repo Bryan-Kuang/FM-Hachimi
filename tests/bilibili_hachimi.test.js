@@ -95,4 +95,31 @@ describe("BilibiliAPI Hachimi Logic", () => {
     const result = BilibiliAPI.parseVideoInfo(raw);
     expect(result.tid).toBe(0);
   });
+
+  describe("filterByPartition", () => {
+    const videos = [
+      { bvid: "a", tid: 22 },   // 鬼畜调教 → allowed
+      { bvid: "b", tid: 3 },    // 音乐区 → allowed
+      { bvid: "c", tid: 119 },  // 鬼畜区 main → allowed
+      { bvid: "d", tid: 1 },    // 动画区 → not allowed
+      { bvid: "e", tid: 17 },   // 游戏区 → not allowed
+      { bvid: "f", tid: 0 },    // unknown → not allowed
+    ];
+
+    test("keeps only videos with allowed tids", () => {
+      const allowed = [3, 22, 26, 28, 29, 30, 31, 59, 119, 126, 130, 193, 216, 243];
+      const result = BilibiliAPI.filterByPartition(videos, allowed);
+      expect(result.map(v => v.bvid)).toEqual(["a", "b", "c"]);
+    });
+
+    test("returns empty array when no videos match", () => {
+      const result = BilibiliAPI.filterByPartition(videos, [999]);
+      expect(result).toEqual([]);
+    });
+
+    test("returns empty array for empty input", () => {
+      const result = BilibiliAPI.filterByPartition([], [3, 22]);
+      expect(result).toEqual([]);
+    });
+  });
 });

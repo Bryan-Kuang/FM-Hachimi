@@ -219,6 +219,18 @@ class BilibiliAPI {
   }
 
   /**
+   * Filter videos to only those in allowed Bilibili partitions
+   * @param {Array} videos - Video objects with tid field
+   * @param {number[]} allowedTids - Allowed partition TIDs
+   * @returns {Array}
+   */
+  filterByPartition(videos, allowedTids) {
+    if (!Array.isArray(videos)) return [];
+    const allowed = new Set(allowedTids);
+    return videos.filter(v => allowed.has(v.tid));
+  }
+
+  /**
    * Search for Hachimi videos with quality filtering (Redesigned)
    * @param {number} maxResults - Maximum number of results to return (default: 5)
    * @returns {Promise<Array>} Array of qualified video objects
