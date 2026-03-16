@@ -96,6 +96,21 @@ describe("BilibiliAPI Hachimi Logic", () => {
     expect(result.tid).toBe(0);
   });
 
+  test("processCandidates excludes videos not in 鬼畜/音乐 partitions", () => {
+    const rawList = [
+      { bvid: "keep1", tid: 22, view: 20000, like: 1000, url: "https://bilibili.com/video/BVkeep1" },
+      { bvid: "keep2", tid: 3,  view: 50000, like: 3000, url: "https://bilibili.com/video/BVkeep2" },
+      { bvid: "drop1", tid: 1,  view: 20000, like: 1000, url: "https://bilibili.com/video/BVdrop1" },
+      { bvid: "drop2", tid: 17, view: 20000, like: 1000, url: "https://bilibili.com/video/BVdrop2" },
+    ];
+    const { results } = BilibiliAPI.processCandidates(rawList, null, 10);
+    const ids = results.map(v => v.bvid);
+    expect(ids).toContain("keep1");
+    expect(ids).toContain("keep2");
+    expect(ids).not.toContain("drop1");
+    expect(ids).not.toContain("drop2");
+  });
+
   describe("filterByPartition", () => {
     const videos = [
       { bvid: "a", tid: 22 },   // 鬼畜调教 → allowed

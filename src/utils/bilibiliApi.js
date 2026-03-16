@@ -313,7 +313,9 @@ class BilibiliAPI {
       deduped.push(v);
     }
 
-    const qualified = this.filterQualityVideos(deduped);
+    // Partition filter: only allow 鬼畜区 and 音乐区
+    const partitionFiltered = this.filterByPartition(deduped, config.bilibili.hachimiAllowedTids);
+    const qualified = this.filterQualityVideos(partitionFiltered);
     const afterHistory = HistoryStore.filter(guildId, qualified);
     const softFallback = afterHistory.length === 0 && qualified.length > 0;
     const pool = softFallback ? qualified : afterHistory;
@@ -332,6 +334,7 @@ class BilibiliAPI {
       meta: {
         totalRaw: (rawList || []).length,
         dedupedCount: deduped.length,
+        partitionFilteredCount: partitionFiltered.length,
         qualifiedCount: qualified.length,
         excludedByHistory: qualified.length - afterHistory.length,
         softFallbackApplied: softFallback,
