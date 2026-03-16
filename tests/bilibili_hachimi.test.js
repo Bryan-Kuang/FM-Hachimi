@@ -121,5 +121,11 @@ describe("BilibiliAPI Hachimi Logic", () => {
       const result = BilibiliAPI.filterByPartition([], [3, 22]);
       expect(result).toEqual([]);
     });
+
+    test("returns empty array when allowedTids is not an array", () => {
+      const videos = [{ bvid: "x", tid: 22 }];
+      expect(BilibiliAPI.filterByPartition(videos, null)).toEqual([]);
+      expect(BilibiliAPI.filterByPartition(videos, undefined)).toEqual([]);
+    });
   });
 });

@@ -225,7 +225,7 @@ class BilibiliAPI {
    * @returns {Array}
    */
   filterByPartition(videos, allowedTids) {
-    if (!Array.isArray(videos)) return [];
+    if (!Array.isArray(videos) || !Array.isArray(allowedTids)) return [];
     const allowed = new Set(allowedTids);
     return videos.filter(v => allowed.has(v.tid));
   }
