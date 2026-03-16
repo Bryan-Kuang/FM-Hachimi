@@ -46,4 +46,21 @@ describe("BilibiliAPI Hachimi Logic", () => {
     const result = BilibiliAPI.filterQualityVideos(video);
     expect(result.length).toBe(0);
   });
+
+  test("config has hachimiAllowedTids with music and guichu partitions", () => {
+    const config = require("../src/config/config");
+    const tids = config.bilibili.hachimiAllowedTids;
+    expect(Array.isArray(tids)).toBe(true);
+    // 音乐区 main and sub-partitions
+    expect(tids).toContain(3);    // 音乐区 main
+    expect(tids).toContain(28);   // 原创音乐
+    expect(tids).toContain(30);   // VOCALOID
+    // 鬼畜区 main and sub-partitions
+    expect(tids).toContain(119);  // 鬼畜区 main
+    expect(tids).toContain(22);   // 鬼畜调教
+    expect(tids).toContain(26);   // 音MAD
+    // Should NOT contain unrelated partitions
+    expect(tids).not.toContain(1);   // 动画
+    expect(tids).not.toContain(17);  // 游戏
+  });
 });
