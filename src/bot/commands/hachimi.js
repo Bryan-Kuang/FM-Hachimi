@@ -251,7 +251,7 @@ module.exports = {
       successEmbed.addFields(
         {
           name: "📊 Quality Criteria Applied",
-          value: "• Like Rate > 5%\n• OR Views > 10,000",
+          value: "• 仅鬼畜区 / 音乐区\n• Like Rate > 5%\n• OR Views > 10,000",
           inline: false,
         },
         {
