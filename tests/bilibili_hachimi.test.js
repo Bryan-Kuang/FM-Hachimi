@@ -96,6 +96,21 @@ describe("BilibiliAPI Hachimi Logic", () => {
     expect(result.tid).toBe(0);
   });
 
+  // Regression: fallback search results (tid=0) were previously filtered out
+  // by filterByPartition, causing hachimi to return 0 songs when the official
+  // Bilibili API was blocked and _fallbackSearch was used instead.
+  test("regression: processCandidates does not filter out fallback results (tid=0)", () => {
+    // _fallbackSearch returns videos without partition info — tid defaults to 0
+    const fallbackResults = [
+      { bvid: "fb1", tid: 0, view: 20000, like: 1000, url: "https://bilibili.com/video/BVfb1" },
+      { bvid: "fb2", tid: 0, view: 50000, like: 3000, url: "https://bilibili.com/video/BVfb2" },
+    ];
+    const { results, meta } = BilibiliAPI.processCandidates(fallbackResults, null, 10);
+    // Must NOT be filtered out just because tid=0 (unknown partition)
+    expect(results.length).toBeGreaterThan(0);
+    expect(meta.partitionFilteredCount).toBe(2);
+  });
+
   test("processCandidates excludes videos not in 鬼畜/音乐 partitions", () => {
     const rawList = [
       { bvid: "keep1", tid: 22, view: 20000, like: 1000, url: "https://bilibili.com/video/BVkeep1" },

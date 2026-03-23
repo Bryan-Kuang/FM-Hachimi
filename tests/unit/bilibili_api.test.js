@@ -154,6 +154,70 @@ describe("BilibiliAPI", () => {
     });
   });
 
+  // ─── _fallbackSearch ────────────────────────────────────────
+
+  describe("_fallbackSearch", () => {
+    test("fallback results include tid=0 field", async () => {
+      const Extractor = require("../../src/audio/extractor");
+      Extractor.mockImplementationOnce(() => ({
+        searchVideos: jest.fn().mockResolvedValue({
+          success: true,
+          results: [
+            {
+              id: "BVfallback1",
+              title: "Fallback Video",
+              uploader: "Author",
+              viewCount: 5000,
+              duration: 180,
+              url: "https://bilibili.com/video/BVfallback1",
+            },
+          ],
+        }),
+      }));
+
+      const results = await BilibiliAPI._fallbackSearch("test", 5);
+
+      expect(results).toHaveLength(1);
+      expect(results[0].tid).toBe(0);
+    });
+
+    test("fallback results preserve url and basic fields", async () => {
+      const Extractor = require("../../src/audio/extractor");
+      Extractor.mockImplementationOnce(() => ({
+        searchVideos: jest.fn().mockResolvedValue({
+          success: true,
+          results: [
+            {
+              id: "BVfallback2",
+              title: "Another Fallback",
+              uploader: "Author2",
+              viewCount: 12000,
+              duration: 240,
+              url: "https://bilibili.com/video/BVfallback2",
+            },
+          ],
+        }),
+      }));
+
+      const results = await BilibiliAPI._fallbackSearch("test", 5);
+
+      expect(results[0].url).toBe("https://bilibili.com/video/BVfallback2");
+      expect(results[0].view).toBe(12000);
+      expect(results[0].tid).toBe(0);
+    });
+
+    test("returns empty array when extractor fails", async () => {
+      const Extractor = require("../../src/audio/extractor");
+      Extractor.mockImplementationOnce(() => ({
+        searchVideos: jest.fn().mockRejectedValue(new Error("yt-dlp not found")),
+      }));
+
+      const results = await BilibiliAPI._fallbackSearch("test", 5);
+
+      expect(results).toEqual([]);
+    });
+  });
+
   // ─── searchVideos (with axios mock) ─────────────────────────
 
   describe("searchVideos", () => {
