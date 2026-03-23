@@ -118,18 +118,20 @@ describe("BilibiliAPI Hachimi Logic", () => {
       { bvid: "c", tid: 119 },  // 鬼畜区 main → allowed
       { bvid: "d", tid: 1 },    // 动画区 → not allowed
       { bvid: "e", tid: 17 },   // 游戏区 → not allowed
-      { bvid: "f", tid: 0 },    // unknown → not allowed
+      { bvid: "f", tid: 0 },    // unknown (fallback) → pass through
     ];
 
-    test("keeps only videos with allowed tids", () => {
+    test("keeps only videos with allowed tids (tid=0 passes through)", () => {
       const allowed = [3, 22, 26, 28, 29, 30, 31, 59, 119, 126, 130, 193, 216, 243];
       const result = BilibiliAPI.filterByPartition(videos, allowed);
-      expect(result.map(v => v.bvid)).toEqual(["a", "b", "c"]);
+      // tid=0 (unknown partition) passes through alongside known allowed tids
+      expect(result.map(v => v.bvid)).toEqual(["a", "b", "c", "f"]);
     });
 
-    test("returns empty array when no videos match", () => {
+    test("returns only tid=0 videos when no known tids match", () => {
       const result = BilibiliAPI.filterByPartition(videos, [999]);
-      expect(result).toEqual([]);
+      // tid=0 always passes through (unknown partition from fallback search)
+      expect(result).toEqual([{ bvid: "f", tid: 0 }]);
     });
 
     test("returns empty array for empty input", () => {

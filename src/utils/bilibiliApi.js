@@ -180,6 +180,7 @@ class BilibiliAPI {
         like: 0,
         danmaku: 0,
         tag: "",
+        tid: 0,
         url: item.url,
       }));
     } catch (err) {
@@ -227,7 +228,7 @@ class BilibiliAPI {
   filterByPartition(videos, allowedTids) {
     if (!Array.isArray(videos) || !Array.isArray(allowedTids)) return [];
     const allowed = new Set(allowedTids);
-    return videos.filter(v => allowed.has(v.tid));
+    return videos.filter(v => v.tid === 0 || allowed.has(v.tid));
   }
 
   /**
