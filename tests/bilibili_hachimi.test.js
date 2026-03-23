@@ -96,6 +96,21 @@ describe("BilibiliAPI Hachimi Logic", () => {
     expect(result.tid).toBe(0);
   });
 
+  // Regression: fallback search results (tid=0) were previously filtered out
+  // by filterByPartition, causing hachimi to return 0 songs when the official
+  // Bilibili API was blocked and _fallbackSearch was used instead.
+  test("regression: processCandidates does not filter out fallback results (tid=0)", () => {
+    // _fallbackSearch returns videos without partition info — tid defaults to 0
+    const fallbackResults = [
+      { bvid: "fb1", tid: 0, view: 20000, like: 1000, url: "https://bilibili.com/video/BVfb1" },
+      { bvid: "fb2", tid: 0, view: 50000, like: 3000, url: "https://bilibili.com/video/BVfb2" },
+    ];
+    const { results, meta } = BilibiliAPI.processCandidates(fallbackResults, null, 10);
+    // Must NOT be filtered out just because tid=0 (unknown partition)
+    expect(results.length).toBeGreaterThan(0);
+    expect(meta.partitionFilteredCount).toBe(2);
+  });
+
   test("processCandidates excludes videos not in 鬼畜/音乐 partitions", () => {
     const rawList = [
       { bvid: "keep1", tid: 22, view: 20000, like: 1000, url: "https://bilibili.com/video/BVkeep1" },
@@ -118,18 +133,20 @@ describe("BilibiliAPI Hachimi Logic", () => {
       { bvid: "c", tid: 119 },  // 鬼畜区 main → allowed
       { bvid: "d", tid: 1 },    // 动画区 → not allowed
       { bvid: "e", tid: 17 },   // 游戏区 → not allowed
-      { bvid: "f", tid: 0 },    // unknown → not allowed
+      { bvid: "f", tid: 0 },    // unknown (fallback) → pass through
     ];
 
-    test("keeps only videos with allowed tids", () => {
+    test("keeps only videos with allowed tids (tid=0 passes through)", () => {
       const allowed = [3, 22, 26, 28, 29, 30, 31, 59, 119, 126, 130, 193, 216, 243];
       const result = BilibiliAPI.filterByPartition(videos, allowed);
-      expect(result.map(v => v.bvid)).toEqual(["a", "b", "c"]);
+      // tid=0 (unknown partition) passes through alongside known allowed tids
+      expect(result.map(v => v.bvid)).toEqual(["a", "b", "c", "f"]);
     });
 
-    test("returns empty array when no videos match", () => {
+    test("returns only tid=0 videos when no known tids match", () => {
       const result = BilibiliAPI.filterByPartition(videos, [999]);
-      expect(result).toEqual([]);
+      // tid=0 always passes through (unknown partition from fallback search)
+      expect(result).toEqual([{ bvid: "f", tid: 0 }]);
     });
 
     test("returns empty array for empty input", () => {
