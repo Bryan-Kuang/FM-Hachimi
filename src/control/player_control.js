@@ -1,5 +1,6 @@
 const EventEmitter = require('events')
 const AudioManager = require('../audio/manager')
+const InterfaceUpdater = require('../ui/interface_updater')
 const logger = require('../services/logger_service')
 
 class PlayerControl {
@@ -101,6 +102,11 @@ class PlayerControl {
       const result = await this.audioManager.stopPlayback(guildId)
       if (result && result.player) {
         this.emitState(guildId, result.player, null)
+      }
+      if (result && result.success) {
+        // Clear stale messageId and seq so the next /play sends a fresh embed
+        // rather than attempting to edit a deleted message.
+        InterfaceUpdater.clearContext(guildId)
       }
       return !!(result && result.success)
     } catch (e) {
