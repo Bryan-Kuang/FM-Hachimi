@@ -962,7 +962,12 @@ class AudioPlayer {
         this.ffmpegProcess.kill('SIGTERM');
         this.ffmpegProcess = null;
       }
-      
+
+      // Reset flags before stopping audioPlayer — prevents Idle handler from
+      // misinterpreting this as a CDN failure or double-skip during stop.
+      this._cdnRetryPending = false;
+      this._manualNavigating = false;
+
       // Stop audio player
       this.audioPlayer.stop();
 
@@ -1147,7 +1152,7 @@ class AudioPlayer {
       }
     }
 
-    // 等待一下再重试
+    // 等待一下再重试 (.unref() so it doesn't block process exit)
     setTimeout(() => {
       this.playCurrentTrack().catch((error) => {
         logger.error("Retry failed", {
@@ -1156,7 +1161,7 @@ class AudioPlayer {
         });
         this.handleTrackEnd();
       });
-    }, 2000);
+    }, 2000).unref();
   }
 
   /**
@@ -1198,7 +1203,7 @@ class AudioPlayer {
         // 然后终止进程
         processToCleanup.kill('SIGTERM');
         
-        // 如果进程没有在合理时间内退出，强制杀死
+        // 如果进程没有在合理时间内退出，强制杀死 (.unref() so it doesn't block process exit)
         setTimeout(() => {
           if (processToCleanup && !processToCleanup.killed) {
             logger.warn("Force killing FFmpeg process", {
@@ -1206,7 +1211,7 @@ class AudioPlayer {
             });
             processToCleanup.kill('SIGKILL');
           }
-        }, 1000);
+        }, 1000).unref();
         
       } catch (error) {
         logger.warn("Error cleaning up FFmpeg process", {
