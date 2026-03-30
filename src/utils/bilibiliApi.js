@@ -279,17 +279,33 @@ class BilibiliAPI {
       clearTimeout(timeout);
 
       const all = [];
+      let apiBlocked = false;
       for (const r of responses) {
         if (r.status === "fulfilled" && r.value?.data?.code === 0) {
           const parsed = this.parseSearchResults(r.value.data.data);
           all.push(...parsed.videos);
-        } else if (r.status === "rejected") {
+        } else if (r.status === "fulfilled") {
+          apiBlocked = true;
+          logger.warn("Bilibili API returned non-zero code", {
+            code: r.value?.data?.code,
+            message: r.value?.data?.message,
+          });
+        } else {
           logger.warn("Page fetch rejected", {
             reason: r.reason?.message,
             status: r.reason?.response?.status,
-            data: r.reason?.response?.data,
           });
         }
+      }
+
+      if (all.length === 0) {
+        const reason = apiBlocked
+          ? "API blocked (cookie/auth issue)"
+          : "network error or empty response";
+        logger.warn(
+          `fetchRawCandidates: no results from API (${reason}), using extractor fallback`
+        );
+        return await this._fallbackSearch(keyword, 50);
       }
 
       return all;
@@ -358,8 +374,8 @@ class BilibiliAPI {
       });
 
       if (!rawCandidates || rawCandidates.length === 0) {
-        logger.warn("No Hachimi videos found in search results");
-        return [];
+        logger.warn("No Hachimi videos found even after fallback");
+        return { results: [], failReason: "search_failed" };
       }
 
       const { results, meta } = this.processCandidates(
@@ -370,13 +386,16 @@ class BilibiliAPI {
 
       logger.info("Hachimi video search completed", meta);
 
-      return results;
+      if (results.length === 0) {
+        return { results: [], failReason: "quality_filter", meta };
+      }
+      return { results, meta };
     } catch (error) {
       logger.error("Error searching Hachimi videos", {
         error: error.message,
         stack: error.stack,
       });
-      return [];
+      return { results: [], failReason: "exception", error: error.message };
     }
   }
 
