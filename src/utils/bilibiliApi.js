@@ -180,6 +180,7 @@ class BilibiliAPI {
         like: 0,
         danmaku: 0,
         tag: "",
+        tid: 0,
         url: item.url,
       }));
     } catch (err) {
@@ -216,6 +217,18 @@ class BilibiliAPI {
       }
     }
     return qualified;
+  }
+
+  /**
+   * Filter videos to only those in allowed Bilibili partitions
+   * @param {Array} videos - Video objects with tid field
+   * @param {number[]} allowedTids - Allowed partition TIDs
+   * @returns {Array}
+   */
+  filterByPartition(videos, allowedTids) {
+    if (!Array.isArray(videos) || !Array.isArray(allowedTids)) return [];
+    const allowed = new Set(allowedTids);
+    return videos.filter(v => v.tid === 0 || allowed.has(v.tid));
   }
 
   /**
@@ -317,7 +330,9 @@ class BilibiliAPI {
       deduped.push(v);
     }
 
-    const qualified = this.filterQualityVideos(deduped);
+    // Partition filter: only allow 鬼畜区 and 音乐区
+    const partitionFiltered = this.filterByPartition(deduped, config.bilibili.hachimiAllowedTids);
+    const qualified = this.filterQualityVideos(partitionFiltered);
     const afterHistory = HistoryStore.filter(guildId, qualified);
     const softFallback = afterHistory.length === 0 && qualified.length > 0;
     const pool = softFallback ? qualified : afterHistory;
@@ -336,6 +351,7 @@ class BilibiliAPI {
       meta: {
         totalRaw: (rawList || []).length,
         dedupedCount: deduped.length,
+        partitionFilteredCount: partitionFiltered.length,
         qualifiedCount: qualified.length,
         excludedByHistory: qualified.length - afterHistory.length,
         softFallbackApplied: softFallback,
