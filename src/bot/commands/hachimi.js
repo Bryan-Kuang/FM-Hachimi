@@ -79,16 +79,6 @@ module.exports = {
       // Get audio manager instance
       const audioManager = AudioManager; // Fix: use exported singleton instead of getInstance()
 
-      // Clear current queue
-      const player = audioManager.getPlayer(interaction.guild.id);
-      if (player) {
-        player.clearQueue();
-        logger.info("Queue cleared for Hachimi feature", {
-          guild: interaction.guild.id,
-          user: user.username,
-        });
-      }
-
       await this.searchAndAddHachimiVideos(
         interaction,
         audioManager,
@@ -172,6 +162,11 @@ module.exports = {
       // Get or create player for this guild
       let player = audioManager.getPlayer(interaction.guild.id);
 
+      // Stop current audio without disconnecting from voice channel
+      if (player.isPlaying || player.isPaused) {
+        await player.stop();
+      }
+
       // Join voice channel if not already connected
       if (
         !player.voiceConnection ||
@@ -251,7 +246,7 @@ module.exports = {
       successEmbed.addFields(
         {
           name: "📊 Quality Criteria Applied",
-          value: "• Like Rate > 5%\n• OR Views > 10,000",
+          value: "• 仅鬼畜区 / 音乐区\n• Like Rate > 5%\n• OR Views > 10,000",
           inline: false,
         },
         {
