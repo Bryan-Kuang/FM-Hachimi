@@ -36,6 +36,7 @@ class AudioPlayer {
     this._cdnRetryPending = false; // Flag for CDN failure retry coordination
     this._manualNavigating = false; // Flag to prevent double-skip from stale Idle events
     this._inactivityTimer = null; // Auto-disconnect after 1 min of inactivity
+    this.isIdle = false; // True when nothing is playing; idle state owns the inactivity timer
 
     // Set up audio player event handlers
     this.setupAudioPlayerEvents();
@@ -390,6 +391,7 @@ class AudioPlayer {
       return false;
     }
     this._cancelInactivityTimer();
+    this.isIdle = false;
 
     if (!this.voiceConnection) {
       logger.warn("No voice connection available");
@@ -771,7 +773,7 @@ class AudioPlayer {
     this.currentIndex = -1;
     this.isPlaying = false;
     this.isPaused = false;
-    this._startInactivityTimer();
+    this._enterIdle();
 
     return false;
   }
@@ -976,7 +978,7 @@ class AudioPlayer {
       this.isPaused = false;
       this.startTime = null;
 
-      this._startInactivityTimer();
+      this._enterIdle();
 
       logger.info("Playback stopped, will auto-disconnect if idle", {
         guild: this.currentGuild,
@@ -1010,7 +1012,14 @@ class AudioPlayer {
     }
   }
 
-  /** Destroy the voice connection without touching audio/queue state. */
+  /** Enter idle state: nothing left to play. Starts the inactivity timer. */
+  _enterIdle() {
+    this.isIdle = true;
+    this._startInactivityTimer();
+    logger.info("Player entered idle state", { guild: this.currentGuild });
+  }
+
+  /** Destroy the voice connection and remove the player from AudioManager. */
   _doDisconnect() {
     this._cancelInactivityTimer();
     if (this.voiceConnection) {
@@ -1019,7 +1028,14 @@ class AudioPlayer {
       } catch (_) { /* connection may already be destroyed */ }
       this.voiceConnection = null;
     }
+    const guildId = this.currentGuild;
     this.currentGuild = null;
+    this.isIdle = false;
+    if (guildId) {
+      const AudioManager = require("./manager");
+      AudioManager.players.delete(guildId);
+      logger.info("Audio player instance removed after idle timeout", { guild: guildId });
+    }
     logger.info("Disconnected from voice channel");
   }
 
@@ -1062,6 +1078,7 @@ class AudioPlayer {
     return {
       isPlaying: this.isPlaying,
       isPaused: this.isPaused,
+      isIdle: this.isIdle,
       currentTrack: this.currentTrack,
       currentIndex: this.currentIndex,
       queue: this.queue,
