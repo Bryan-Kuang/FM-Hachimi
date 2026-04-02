@@ -35,6 +35,7 @@ class AudioPlayer {
     this._ffmpegChecked = false; // Lazy FFmpeg availability check
     this._cdnRetryPending = false; // Flag for CDN failure retry coordination
     this._manualNavigating = false; // Flag to prevent double-skip from stale Idle events
+    this._inactivityTimer = null; // Auto-disconnect after 1 min of inactivity
 
     // Set up audio player event handlers
     this.setupAudioPlayerEvents();
@@ -388,6 +389,7 @@ class AudioPlayer {
       logger.warn("No current track to play");
       return false;
     }
+    this._cancelInactivityTimer();
 
     if (!this.voiceConnection) {
       logger.warn("No voice connection available");
@@ -761,7 +763,7 @@ class AudioPlayer {
       guild: this.currentGuild,
     });
 
-    // 🔧 修复：当队列播放完毕时，重置播放状态
+    // 队列播放完毕，重置播放状态并启动空闲计时器
     if (this.audioPlayer) {
       this.audioPlayer.stop();
     }
@@ -769,6 +771,7 @@ class AudioPlayer {
     this.currentIndex = -1;
     this.isPlaying = false;
     this.isPaused = false;
+    this._startInactivityTimer();
 
     return false;
   }
@@ -952,26 +955,20 @@ class AudioPlayer {
   }
 
   /**
-   * Stop playback and clear queue
+   * Stop playback and clear queue. Stays in voice channel;
+   * auto-disconnects after INACTIVITY_TIMEOUT_MS of no new play requests.
    */
   async stop() {
     try {
-      // 🔧 添加：清理FFmpeg进程
-      if (this.ffmpegProcess && !this.ffmpegProcess.killed) {
-        logger.debug("Terminating FFmpeg process");
-        this.ffmpegProcess.kill('SIGTERM');
-        this.ffmpegProcess = null;
-      }
+      this.cleanupFFmpegProcess();
 
-      // Reset flags before stopping audioPlayer — prevents Idle handler from
-      // misinterpreting this as a CDN failure or double-skip during stop.
+      // Set _manualNavigating so the Idle event fired by audioPlayer.stop()
+      // is suppressed and does not trigger handleTrackEnd / skip.
       this._cdnRetryPending = false;
-      this._manualNavigating = false;
+      this._manualNavigating = true;
 
-      // Stop audio player
       this.audioPlayer.stop();
 
-      // Clear queue and reset state
       this.queue = [];
       this.currentTrack = null;
       this.currentIndex = -1;
@@ -979,13 +976,9 @@ class AudioPlayer {
       this.isPaused = false;
       this.startTime = null;
 
-      // Leave voice channel
-      if (this.voiceConnection) {
-        this.voiceConnection.destroy();
-        this.voiceConnection = null;
-      }
+      this._startInactivityTimer();
 
-      logger.info("Playback stopped and queue cleared", {
+      logger.info("Playback stopped, will auto-disconnect if idle", {
         guild: this.currentGuild,
       });
 
@@ -997,6 +990,37 @@ class AudioPlayer {
       });
       return false;
     }
+  }
+
+  // ─── Inactivity helpers ───────────────────────────────────────────────────
+
+  _startInactivityTimer() {
+    this._cancelInactivityTimer();
+    if (!this.voiceConnection) return; // nothing to disconnect
+    this._inactivityTimer = setTimeout(() => {
+      logger.info("Auto-disconnecting due to inactivity", { guild: this.currentGuild });
+      this._doDisconnect();
+    }, 60 * 1000);
+  }
+
+  _cancelInactivityTimer() {
+    if (this._inactivityTimer) {
+      clearTimeout(this._inactivityTimer);
+      this._inactivityTimer = null;
+    }
+  }
+
+  /** Destroy the voice connection without touching audio/queue state. */
+  _doDisconnect() {
+    this._cancelInactivityTimer();
+    if (this.voiceConnection) {
+      try {
+        this.voiceConnection.destroy();
+      } catch (_) { /* connection may already be destroyed */ }
+      this.voiceConnection = null;
+    }
+    this.currentGuild = null;
+    logger.info("Disconnected from voice channel");
   }
 
   /**
@@ -1077,19 +1101,19 @@ class AudioPlayer {
    * Leave voice channel
    */
   leaveVoiceChannel() {
-    logger.info("Leaving voice channel");
-    
-    // 🔧 修复：使用完善的FFmpeg进程清理方法
     this.cleanupFFmpegProcess();
-    
-    if (this.voiceConnection) {
-      this.voiceConnection.destroy();
-      this.voiceConnection = null;
-      this.currentGuild = null;
-      this.stop();
-
-      logger.info("Left voice channel");
-    }
+    this._cancelInactivityTimer();
+    this._cdnRetryPending = false;
+    this._manualNavigating = true;
+    this.audioPlayer.stop();
+    this.queue = [];
+    this.currentTrack = null;
+    this.currentIndex = -1;
+    this.isPlaying = false;
+    this.isPaused = false;
+    this.startTime = null;
+    this._doDisconnect();
+    logger.info("Left voice channel");
   }
 
   /**

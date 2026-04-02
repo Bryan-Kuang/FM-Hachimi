@@ -419,7 +419,7 @@ class AudioManager {
     return {
       success: stopped,
       message: stopped
-        ? "Stopped playback, cleared queue, and left voice channel"
+        ? "Stopped playback, will auto-disconnect if idle for 1 minute"
         : "Failed to stop playback",
       player: state,
     };
