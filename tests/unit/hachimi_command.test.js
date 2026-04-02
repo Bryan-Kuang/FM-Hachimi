@@ -52,10 +52,12 @@ describe('hachimi command integration with PlayerControl', () => {
     }
 
     const bilibiliApi = require('../../src/utils/bilibiliApi')
-    jest.spyOn(bilibiliApi, 'searchHachimiVideos').mockResolvedValue([
-      { url: 'https://www.bilibili.com/video/BV1xx1' },
-      { url: 'https://www.bilibili.com/video/BV2xx2' },
-    ])
+    jest.spyOn(bilibiliApi, 'searchHachimiVideos').mockResolvedValue({
+      results: [
+        { url: 'https://www.bilibili.com/video/BV1xx1' },
+        { url: 'https://www.bilibili.com/video/BV2xx2' },
+      ],
+    })
 
     const PlaylistManager = require('../../src/playlist/playlist_manager')
     jest.spyOn(PlaylistManager, 'add').mockResolvedValue({ title: 'Mock Track' })
