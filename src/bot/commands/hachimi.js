@@ -9,6 +9,7 @@ const PlaylistManager = require("../../playlist/playlist_manager");
 const InterfaceUpdater = require("../../ui/interface_updater");
 const EmbedBuilders = require("../../ui/embeds");
 const logger = require("../../services/logger_service");
+const commandQueue = require("../../utils/command_queue");
 
 // Configuration Constants
 /**
@@ -27,79 +28,87 @@ module.exports = {
   cooldown: 30, // 30 seconds cooldown to prevent spam
 
   async execute(interaction) {
+    const user = interaction.user;
+    const member = interaction.member;
+
+    // Check if user is in a voice channel
+    if (!member.voice.channel) {
+      const errorEmbed = EmbedBuilders.createErrorEmbed(
+        "Voice Channel Required",
+        "You need to be in a voice channel to use Hachimi feature!",
+        {
+          suggestion: "Join a voice channel and try again.",
+        }
+      );
+
+      return await interaction.reply({
+        embeds: [errorEmbed],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    // Check if bot is in a voice channel and if it's different from user's
+    const botVoiceChannel = interaction.guild.members.me?.voice?.channel;
+    if (botVoiceChannel && botVoiceChannel.id !== member.voice.channel.id) {
+      const errorEmbed = EmbedBuilders.createErrorEmbed(
+        "Different Voice Channel",
+        "I'm already playing music in a different voice channel!",
+        {
+          suggestion: `Join ${botVoiceChannel.name} or wait for the current session to end.`,
+        }
+      );
+
+      return await interaction.reply({
+        embeds: [errorEmbed],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    // Defer immediately — must happen before entering the queue to beat Discord's 3s timeout
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     try {
-      const user = interaction.user;
-      const member = interaction.member;
+      const queue = commandQueue.getQueue(interaction.guild.id, "hachimi");
 
-      // Check if user is in a voice channel
-      if (!member.voice.channel) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          "Voice Channel Required",
-          "You need to be in a voice channel to use Hachimi feature!",
-          {
-            suggestion: "Join a voice channel and try again.",
-          }
+      if (queue.isFull()) {
+        return await interaction.editReply({
+          content: "哈基米队列已满，请稍后再试。",
+        });
+      }
+
+      // Let the user know their request is queued behind a running one
+      if (queue.count > 0) {
+        const waitingEmbed = EmbedBuilders.createLoadingEmbed(
+          "⏳ 等待上一个哈基米完成..."
+        );
+        await interaction.editReply({ embeds: [waitingEmbed] });
+      }
+
+      await commandQueue.run(interaction.guild.id, "hachimi", async () => {
+        // Bind playback UI context inside the queued work so it isn't
+        // overwritten by another invocation's early setup
+        InterfaceUpdater.setPlaybackContext(
+          interaction.guild.id,
+          interaction.channelId
         );
 
-        return await interaction.reply({
-          embeds: [errorEmbed],
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-
-      // Check if bot is in a voice channel and if it's different from user's
-      const botVoiceChannel = interaction.guild.members.me?.voice?.channel;
-      if (botVoiceChannel && botVoiceChannel.id !== member.voice.channel.id) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          "Different Voice Channel",
-          "I'm already playing music in a different voice channel!",
-          {
-            suggestion: `Join ${botVoiceChannel.name} or wait for the current session to end.`,
-          }
+        const loadingEmbed = EmbedBuilders.createLoadingEmbed(
+          "🔍 Searching for Hachimi videos that meet quality criteria..."
         );
+        await interaction.editReply({ embeds: [loadingEmbed] });
 
-        return await interaction.reply({
-          embeds: [errorEmbed],
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-
-      // Bind playback UI context to current channel and defer reply to avoid timeout
-      InterfaceUpdater.setPlaybackContext(
-        interaction.guild.id,
-        interaction.channelId
-      );
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
-      const loadingEmbed = EmbedBuilders.createLoadingEmbed(
-        "🔍 Searching for Hachimi videos that meet quality criteria..."
-      );
-      await interaction.editReply({ embeds: [loadingEmbed] });
-
-      // Get audio manager instance
-      const audioManager = AudioManager; // Fix: use exported singleton instead of getInstance()
-
-      // Clear current queue
-      const player = audioManager.getPlayer(interaction.guild.id);
-      if (player) {
-        player.clearQueue();
-        logger.info("Queue cleared for Hachimi feature", {
-          guild: interaction.guild.id,
-          user: user.username,
-        });
-      }
-
-      await this.searchAndAddHachimiVideos(
-        interaction,
-        audioManager,
-        user.username
-      );
+        await this.searchAndAddHachimiVideos(
+          interaction,
+          AudioManager,
+          user.username
+        );
+      });
     } catch (error) {
       logger.error("Error in hachimi command", {
         error: error.message,
         stack: error.stack,
         guild: interaction.guild?.id,
-        user: interaction.user?.username,
+        user: user.username,
       });
 
       const errorEmbed = EmbedBuilders.createErrorEmbed(
@@ -110,11 +119,7 @@ module.exports = {
         }
       );
 
-      if (interaction.replied || interaction.deferred) {
-        await interaction.editReply({ embeds: [errorEmbed] });
-      } else {
-        await interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
-      }
+      await interaction.editReply({ embeds: [errorEmbed] });
     }
   },
 
