@@ -407,13 +407,21 @@ class AudioManager {
   async stopPlayback(guildId) {
     const player = this.getPlayer(guildId);
     const stopped = await player.stop();
+    const state = player.getState(); // capture state before removing instance
+
+    if (stopped) {
+      // Remove the player instance so the next getPlayer() call creates a
+      // fresh one — prevents event listener accumulation and stale flag bleed.
+      this.players.delete(guildId);
+      logger.info("Audio player instance removed for guild", { guildId });
+    }
 
     return {
       success: stopped,
       message: stopped
-        ? "Stopped playback, cleared queue, and left voice channel"
+        ? "Stopped playback, will auto-disconnect if idle for 1 minute"
         : "Failed to stop playback",
-      player: player.getState(),
+      player: state,
     };
   }
 

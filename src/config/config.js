@@ -29,6 +29,8 @@ module.exports = {
     hachimiMaxPages: parseInt(process.env.HACHIMI_MAX_PAGES) || 3,
     searchTimeout: parseInt(process.env.BILIBILI_SEARCH_TIMEOUT) || 8000,
     cookiesFile: process.env.BILIBILI_COOKIES_FILE || "",
+    // Hachimi partition filter: only 鬼畜区 (119) and 音乐区 (3) sub-partitions allowed
+    hachimiAllowedTids: [3, 22, 26, 28, 29, 30, 31, 59, 119, 126, 130, 193, 216, 243],
   },
   test: {
     mode: process.env.TEST_MODE === "true",

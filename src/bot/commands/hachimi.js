@@ -143,7 +143,11 @@ module.exports = {
       }
 
       // Search for qualified Hachimi videos (randomized with history filtering)
-      const qualifiedVideos = await bilibiliApi.searchHachimiVideos(
+      const {
+        results: qualifiedVideos,
+        failReason,
+        error: searchError,
+      } = await bilibiliApi.searchHachimiVideos(
         safeBatchSize,
         interaction.guild.id
       );
@@ -163,19 +167,39 @@ module.exports = {
       }
 
       if (qualifiedVideos.length === 0) {
-        const noResultsEmbed = EmbedBuilders.createErrorEmbed(
-          "No Qualified Videos Found",
-          "No Hachimi videos currently meet the quality criteria.",
-          {
-            suggestion: "Quality criteria: Like Rate > 5% OR Views > 10,000",
-          }
-        );
+        let title, description, suggestion;
 
+        if (failReason === "search_failed") {
+          title = "Search Failed";
+          description =
+            "Could not retrieve videos from Bilibili. The API may be temporarily unavailable or blocked.";
+          suggestion =
+            "This is likely a network issue or API rate limit. Please try again in a few minutes.";
+        } else if (failReason === "exception") {
+          title = "Internal Error";
+          description = `An unexpected error occurred: ${searchError || "unknown error"}`;
+          suggestion =
+            "Please try again. If the problem persists, contact the bot administrator.";
+        } else {
+          // failReason === "quality_filter" — extremely unlikely given Bilibili content volume
+          title = "No Qualified Videos Found";
+          description = "No Hachimi videos currently meet the quality criteria.";
+          suggestion = "Quality criteria: Like Rate > 5% OR Views > 10,000";
+        }
+
+        const noResultsEmbed = EmbedBuilders.createErrorEmbed(title, description, {
+          suggestion,
+        });
         return await interaction.editReply({ embeds: [noResultsEmbed] });
       }
 
       // Get or create player for this guild
       let player = audioManager.getPlayer(interaction.guild.id);
+
+      // Stop current audio without disconnecting from voice channel
+      if (player.isPlaying || player.isPaused) {
+        await player.stop();
+      }
 
       // Join voice channel if not already connected
       if (
@@ -256,7 +280,7 @@ module.exports = {
       successEmbed.addFields(
         {
           name: "📊 Quality Criteria Applied",
-          value: "• Like Rate > 5%\n• OR Views > 10,000",
+          value: "• 仅鬼畜区 / 音乐区\n• Like Rate > 5%\n• OR Views > 10,000",
           inline: false,
         },
         {
