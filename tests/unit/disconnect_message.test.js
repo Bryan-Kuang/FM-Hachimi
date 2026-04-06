@@ -69,28 +69,41 @@ jest.mock('../../src/config/config', () => ({
 }));
 
 // Mock other dependencies
-jest.mock('../../src/playback/player_control');
-jest.mock('../../src/playback/playlist_manager');
-jest.mock('../../src/ui/interface_updater');
 jest.mock('../../src/utils/debug', () => ({
   trace: jest.fn(),
   error: jest.fn(),
 }));
 
 const logger = require('../../src/services/logger_service');
-const InterfaceUpdater = require('../../src/ui/interface_updater');
 
 describe('Disconnect Message Feature', () => {
   let botClient;
   let mockGuild;
   let mockChannel;
   let mockAuditLogs;
+  let mockPlaybackService;
 
   beforeEach(() => {
     jest.clearAllMocks();
 
-    // Setup InterfaceUpdater mock
-    InterfaceUpdater.contexts = new Map();
+    // Create mock playbackService
+    mockPlaybackService = {
+      stop: jest.fn(),
+      pause: jest.fn(),
+      resume: jest.fn(),
+      skip: jest.fn(),
+      previous: jest.fn(),
+      play: jest.fn(),
+      addTrack: jest.fn(),
+      setUIContext: jest.fn(),
+      clearUIContext: jest.fn(),
+      hasUIContext: jest.fn().mockReturnValue(false),
+      getUIContext: jest.fn().mockReturnValue(null),
+      getPlayer: jest.fn(),
+      getQueue: jest.fn(),
+      getExtractor: jest.fn(),
+      notifyState: jest.fn(),
+    };
 
     // Create mock channel
     mockChannel = {
@@ -117,8 +130,8 @@ describe('Disconnect Message Feature', () => {
       fetchAuditLogs: jest.fn().mockResolvedValue(mockAuditLogs),
     };
 
-    // Create bot client
-    botClient = new BotClient();
+    // Create bot client with playbackService
+    botClient = new BotClient(mockPlaybackService);
     botClient.client = {
       user: { id: 'bot-123', username: 'TestBot' },
       channels: {
@@ -129,8 +142,8 @@ describe('Disconnect Message Feature', () => {
 
   describe('sendDisconnectMessage', () => {
     test('should send message with culprit and current track', async () => {
-      // Setup: text channel context exists
-      InterfaceUpdater.contexts.set('guild-123', {
+      // Setup: text channel context exists via playbackService
+      mockPlaybackService.getUIContext.mockReturnValue({
         channelId: 'channel-456',
       });
 
@@ -164,7 +177,7 @@ describe('Disconnect Message Feature', () => {
     });
 
     test('should send message without track when idle', async () => {
-      InterfaceUpdater.contexts.set('guild-123', {
+      mockPlaybackService.getUIContext.mockReturnValue({
         channelId: 'channel-456',
       });
 
@@ -188,7 +201,7 @@ describe('Disconnect Message Feature', () => {
     });
 
     test('should show "未知凶手" when no audit log access', async () => {
-      InterfaceUpdater.contexts.set('guild-123', {
+      mockPlaybackService.getUIContext.mockReturnValue({
         channelId: 'channel-456',
       });
 
@@ -209,7 +222,7 @@ describe('Disconnect Message Feature', () => {
     });
 
     test('should show "未知凶手" when audit log has no matching entry', async () => {
-      InterfaceUpdater.contexts.set('guild-123', {
+      mockPlaybackService.getUIContext.mockReturnValue({
         channelId: 'channel-456',
       });
 
@@ -228,7 +241,7 @@ describe('Disconnect Message Feature', () => {
     });
 
     test('should show "未知凶手" when disconnect log is too old', async () => {
-      InterfaceUpdater.contexts.set('guild-123', {
+      mockPlaybackService.getUIContext.mockReturnValue({
         channelId: 'channel-456',
       });
 
@@ -247,7 +260,7 @@ describe('Disconnect Message Feature', () => {
     });
 
     test('should pick most recent disconnect from multiple entries', async () => {
-      InterfaceUpdater.contexts.set('guild-123', {
+      mockPlaybackService.getUIContext.mockReturnValue({
         channelId: 'channel-456',
       });
 
@@ -279,7 +292,7 @@ describe('Disconnect Message Feature', () => {
     });
 
     test('should not send message when no text channel context', async () => {
-      // No context set
+      // getUIContext returns null by default
       await botClient.sendDisconnectMessage(mockGuild, null);
 
       expect(mockChannel.send).not.toHaveBeenCalled();
@@ -289,13 +302,11 @@ describe('Disconnect Message Feature', () => {
     });
 
     test('should not send message when channel fetch fails', async () => {
-      InterfaceUpdater.contexts.set('guild-123', {
+      mockPlaybackService.getUIContext.mockReturnValue({
         channelId: 'channel-999',
       });
 
-      botClient.client.channels.fetch.mockRejectedValue(
-        new Error('Unknown Channel')
-      );
+      botClient.client.channels.fetch.mockResolvedValue(null);
 
       await botClient.sendDisconnectMessage(mockGuild, null);
 
@@ -306,7 +317,7 @@ describe('Disconnect Message Feature', () => {
     });
 
     test('should handle channel send failure gracefully', async () => {
-      InterfaceUpdater.contexts.set('guild-123', {
+      mockPlaybackService.getUIContext.mockReturnValue({
         channelId: 'channel-456',
       });
 
@@ -323,7 +334,7 @@ describe('Disconnect Message Feature', () => {
     });
 
     test('should use fallback username when displayName is missing', async () => {
-      InterfaceUpdater.contexts.set('guild-123', {
+      mockPlaybackService.getUIContext.mockReturnValue({
         channelId: 'channel-456',
       });
 
@@ -341,7 +352,7 @@ describe('Disconnect Message Feature', () => {
     });
 
     test('should use bot username when guild displayName is missing', async () => {
-      InterfaceUpdater.contexts.set('guild-123', {
+      mockPlaybackService.getUIContext.mockReturnValue({
         channelId: 'channel-456',
       });
 
@@ -356,7 +367,7 @@ describe('Disconnect Message Feature', () => {
     });
 
     test('should handle track with special characters in title', async () => {
-      InterfaceUpdater.contexts.set('guild-123', {
+      mockPlaybackService.getUIContext.mockReturnValue({
         channelId: 'channel-456',
       });
 
@@ -372,7 +383,7 @@ describe('Disconnect Message Feature', () => {
     });
 
     test('should log success when message is sent', async () => {
-      InterfaceUpdater.contexts.set('guild-123', {
+      mockPlaybackService.getUIContext.mockReturnValue({
         channelId: 'channel-456',
       });
 
@@ -399,7 +410,7 @@ describe('Disconnect Message Feature', () => {
 
   describe('Edge Cases', () => {
     test('should handle empty audit log entries', async () => {
-      InterfaceUpdater.contexts.set('guild-123', {
+      mockPlaybackService.getUIContext.mockReturnValue({
         channelId: 'channel-456',
       });
 
@@ -414,7 +425,7 @@ describe('Disconnect Message Feature', () => {
     });
 
     test('should handle track with missing title', async () => {
-      InterfaceUpdater.contexts.set('guild-123', {
+      mockPlaybackService.getUIContext.mockReturnValue({
         channelId: 'channel-456',
       });
 
@@ -428,7 +439,7 @@ describe('Disconnect Message Feature', () => {
     });
 
     test('should handle concurrent disconnect messages', async () => {
-      InterfaceUpdater.contexts.set('guild-123', {
+      mockPlaybackService.getUIContext.mockReturnValue({
         channelId: 'channel-456',
       });
 

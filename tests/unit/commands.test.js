@@ -69,8 +69,6 @@ jest.mock("discord.js", () => ({
 }));
 
 // Mock dependencies
-jest.mock("../../src/playback/player_control");
-jest.mock("../../src/ui/interface_updater");
 jest.mock("../../src/services/logger_service", () => ({
   info: jest.fn(),
   error: jest.fn(),
@@ -78,7 +76,7 @@ jest.mock("../../src/services/logger_service", () => ({
   debug: jest.fn(),
 }));
 
-// Mock AudioManager and Player
+// Mock player used by SceneFactory
 const mockPlayer = {
   isPlaying: false,
   isPaused: false,
@@ -87,20 +85,30 @@ const mockPlayer = {
   stop: jest.fn().mockResolvedValue(true),
   getState: jest.fn(),
   getCurrentTime: jest.fn().mockReturnValue(0),
+  joinVoiceChannel: jest.fn().mockResolvedValue(true),
 };
 
-const mockAudioManager = {
+// Create mock playbackService
+const mockPlaybackService = {
+  stop: jest.fn().mockResolvedValue(true),
+  pause: jest.fn().mockReturnValue(true),
+  resume: jest.fn().mockReturnValue(true),
+  skip: jest.fn().mockResolvedValue(true),
+  previous: jest.fn().mockResolvedValue(true),
+  play: jest.fn().mockResolvedValue(true),
+  addTrack: jest.fn().mockResolvedValue({ title: 'Track' }),
+  setUIContext: jest.fn(),
+  clearUIContext: jest.fn(),
+  hasUIContext: jest.fn(),
+  getUIContext: jest.fn(),
   getPlayer: jest.fn().mockReturnValue(mockPlayer),
   getQueue: jest.fn(),
   getExtractor: jest.fn(),
+  notifyState: jest.fn(),
 };
-
-jest.mock("../../src/session/audio_manager", () => mockAudioManager);
 
 const SceneFactory = require("../utils/scene_factory");
 
-const PlayerControl = require("../../src/playback/player_control");
-const InterfaceUpdater = require("../../src/ui/interface_updater");
 const logger = require("../../src/services/logger_service");
 const snapshotMinimal = (embed) => ({
   title: embed?.data?.title,
@@ -112,6 +120,12 @@ describe("Bot Commands Coverage", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // Reset mockPlayer state
+    mockPlayer.isPlaying = false;
+    mockPlayer.isPaused = false;
+    mockPlayer.queue = [];
+    mockPlayer.voiceConnection = null;
+    mockPlaybackService.getPlayer.mockReturnValue(mockPlayer);
     interaction = {
       user: { username: "TestUser" },
       member: { voice: { channel: { id: "vc-1" } } },
@@ -125,7 +139,7 @@ describe("Bot Commands Coverage", () => {
   });
 
   describe("Stop Command", () => {
-    const stopCommand = require("../../src/bot/commands/stop");
+    const stopCommand = require("../../src/bot/commands/stop")(mockPlaybackService);
 
     const testCases = [
       {
@@ -154,30 +168,32 @@ describe("Bot Commands Coverage", () => {
       {
         description: "停止失败",
         scene: { userVc: "vc-1", botVc: "vc-1", playerState: "playing" },
-        setup: () => { PlayerControl.stop.mockResolvedValue(false); },
+        setup: () => { mockPlaybackService.stop.mockResolvedValue(false); },
         expected: { playerCalled: true, replyContains: "Stop failed" },
       },
     ];
 
     test.each(testCases)("%s", async ({ scene, setup, expected }) => {
-      PlayerControl.stop.mockResolvedValue(true);
-      const { interaction } = SceneFactory.createScene(scene);
+      mockPlaybackService.stop.mockResolvedValue(true);
+      const { interaction, player } = SceneFactory.createScene(scene);
+      // Wire the mockPlaybackService.getPlayer to return the scene player
+      mockPlaybackService.getPlayer.mockReturnValue(player);
       if (setup) setup();
       await stopCommand.execute(interaction);
 
       if (scene.userVc) {
-        expect(InterfaceUpdater.setPlaybackContext).toHaveBeenCalledWith(
+        expect(mockPlaybackService.setUIContext).toHaveBeenCalledWith(
           "guild-1",
           "channel-1"
         );
       } else {
-        expect(InterfaceUpdater.setPlaybackContext).not.toHaveBeenCalled();
+        expect(mockPlaybackService.setUIContext).not.toHaveBeenCalled();
       }
 
       if (expected.playerCalled) {
-        expect(PlayerControl.stop).toHaveBeenCalledWith("guild-1");
+        expect(mockPlaybackService.stop).toHaveBeenCalledWith("guild-1");
       } else {
-        expect(PlayerControl.stop).not.toHaveBeenCalled();
+        expect(mockPlaybackService.stop).not.toHaveBeenCalled();
       }
 
       expect(interaction.reply).toHaveBeenCalledWith(
@@ -189,7 +205,7 @@ describe("Bot Commands Coverage", () => {
   });
 
   describe("Pause Command", () => {
-    const pauseCommand = require("../../src/bot/commands/pause");
+    const pauseCommand = require("../../src/bot/commands/pause")(mockPlaybackService);
 
     const cases = [
       {
@@ -205,7 +221,7 @@ describe("Bot Commands Coverage", () => {
         description: "暂停失败",
         scene: { userVc: "vc-1", botVc: "vc-1", playerState: "idle" },
         setup: () => {
-          PlayerControl.pause.mockReturnValue(false);
+          mockPlaybackService.pause.mockReturnValue(false);
         },
         expected: { editReplyContains: "暂停失败", contextCalled: true },
       },
@@ -213,7 +229,7 @@ describe("Bot Commands Coverage", () => {
         description: "正常暂停",
         scene: { userVc: "vc-1", botVc: "vc-1", playerState: "idle" },
         setup: () => {
-          PlayerControl.pause.mockReturnValue(true);
+          mockPlaybackService.pause.mockReturnValue(true);
         },
         expected: { editReplyContains: "⏸️ 已暂停", contextCalled: true },
       },
@@ -226,12 +242,12 @@ describe("Bot Commands Coverage", () => {
       await pauseCommand.execute(interaction);
 
       if (expected.contextCalled) {
-        expect(InterfaceUpdater.setPlaybackContext).toHaveBeenCalledWith(
+        expect(mockPlaybackService.setUIContext).toHaveBeenCalledWith(
           "guild-1",
           "channel-1"
         );
       } else {
-        expect(InterfaceUpdater.setPlaybackContext).not.toHaveBeenCalled();
+        expect(mockPlaybackService.setUIContext).not.toHaveBeenCalled();
       }
       if (expected.replyContains) {
         expect(interaction.reply).toHaveBeenCalledWith(
@@ -249,7 +265,7 @@ describe("Bot Commands Coverage", () => {
   });
 
   describe("Resume Command", () => {
-    const resumeCommand = require("../../src/bot/commands/resume");
+    const resumeCommand = require("../../src/bot/commands/resume")(mockPlaybackService);
 
     const cases = [
       {
@@ -265,7 +281,7 @@ describe("Bot Commands Coverage", () => {
         description: "恢复失败",
         scene: { userVc: "vc-1", botVc: "vc-1", playerState: "idle" },
         setup: () => {
-          PlayerControl.resume.mockReturnValue(false);
+          mockPlaybackService.resume.mockReturnValue(false);
         },
         expected: { editReplyContains: "恢复失败", contextCalled: true },
       },
@@ -273,7 +289,7 @@ describe("Bot Commands Coverage", () => {
         description: "正常恢复",
         scene: { userVc: "vc-1", botVc: "vc-1", playerState: "idle" },
         setup: () => {
-          PlayerControl.resume.mockReturnValue(true);
+          mockPlaybackService.resume.mockReturnValue(true);
         },
         expected: { editReplyContains: "▶️ 已恢复", contextCalled: true },
       },
@@ -286,12 +302,12 @@ describe("Bot Commands Coverage", () => {
       await resumeCommand.execute(interaction);
 
       if (expected.contextCalled) {
-        expect(InterfaceUpdater.setPlaybackContext).toHaveBeenCalledWith(
+        expect(mockPlaybackService.setUIContext).toHaveBeenCalledWith(
           "guild-1",
           "channel-1"
         );
       } else {
-        expect(InterfaceUpdater.setPlaybackContext).not.toHaveBeenCalled();
+        expect(mockPlaybackService.setUIContext).not.toHaveBeenCalled();
       }
       if (expected.replyContains) {
         expect(interaction.reply).toHaveBeenCalledWith(
@@ -309,7 +325,7 @@ describe("Bot Commands Coverage", () => {
   });
 
   describe("Skip Command", () => {
-    const skipCommand = require("../../src/bot/commands/skip");
+    const skipCommand = require("../../src/bot/commands/skip")(mockPlaybackService);
 
     const cases = [
       {
@@ -325,7 +341,7 @@ describe("Bot Commands Coverage", () => {
         description: "没有下一首",
         scene: { userVc: "vc-1", botVc: "vc-1", playerState: "idle" },
         setup: () => {
-          PlayerControl.next.mockResolvedValue(false);
+          mockPlaybackService.skip.mockResolvedValue(false);
         },
         expected: { editReplyContains: "没有下一首", contextCalled: true },
       },
@@ -333,7 +349,7 @@ describe("Bot Commands Coverage", () => {
         description: "正常跳过",
         scene: { userVc: "vc-1", botVc: "vc-1", playerState: "idle" },
         setup: () => {
-          PlayerControl.next.mockResolvedValue(true);
+          mockPlaybackService.skip.mockResolvedValue(true);
         },
         expected: { editReplyContains: "⏭️ 已跳过", contextCalled: true },
       },
@@ -346,12 +362,12 @@ describe("Bot Commands Coverage", () => {
       await skipCommand.execute(interaction);
 
       if (expected.contextCalled) {
-        expect(InterfaceUpdater.setPlaybackContext).toHaveBeenCalledWith(
+        expect(mockPlaybackService.setUIContext).toHaveBeenCalledWith(
           "guild-1",
           "channel-1"
         );
       } else {
-        expect(InterfaceUpdater.setPlaybackContext).not.toHaveBeenCalled();
+        expect(mockPlaybackService.setUIContext).not.toHaveBeenCalled();
       }
       if (expected.replyContains) {
         expect(interaction.reply).toHaveBeenCalledWith(
@@ -369,7 +385,7 @@ describe("Bot Commands Coverage", () => {
   });
 
   describe("Prev Command", () => {
-    const prevCommand = require("../../src/bot/commands/prev");
+    const prevCommand = require("../../src/bot/commands/prev")(mockPlaybackService);
 
     const cases = [
       {
@@ -385,7 +401,7 @@ describe("Bot Commands Coverage", () => {
         description: "没有上一首",
         scene: { userVc: "vc-1", botVc: "vc-1", playerState: "idle" },
         setup: () => {
-          PlayerControl.prev.mockResolvedValue(false);
+          mockPlaybackService.previous.mockResolvedValue(false);
         },
         expected: { editReplyContains: "没有上一首", contextCalled: true },
       },
@@ -393,7 +409,7 @@ describe("Bot Commands Coverage", () => {
         description: "正常上一首",
         scene: { userVc: "vc-1", botVc: "vc-1", playerState: "idle" },
         setup: () => {
-          PlayerControl.prev.mockResolvedValue(true);
+          mockPlaybackService.previous.mockResolvedValue(true);
         },
         expected: { editReplyContains: "⏮️ 已返回上一首", contextCalled: true },
       },
@@ -406,12 +422,12 @@ describe("Bot Commands Coverage", () => {
       await prevCommand.execute(interaction);
 
       if (expected.contextCalled) {
-        expect(InterfaceUpdater.setPlaybackContext).toHaveBeenCalledWith(
+        expect(mockPlaybackService.setUIContext).toHaveBeenCalledWith(
           "guild-1",
           "channel-1"
         );
       } else {
-        expect(InterfaceUpdater.setPlaybackContext).not.toHaveBeenCalled();
+        expect(mockPlaybackService.setUIContext).not.toHaveBeenCalled();
       }
       if (expected.replyContains) {
         expect(interaction.reply).toHaveBeenCalledWith(
@@ -429,7 +445,7 @@ describe("Bot Commands Coverage", () => {
   });
 
   describe("Queue Command", () => {
-    const queueCommand = require("../../src/bot/commands/queue");
+    const queueCommand = require("../../src/bot/commands/queue")(mockPlaybackService);
 
     const cases = [
       {
@@ -457,11 +473,11 @@ describe("Bot Commands Coverage", () => {
 
     test.each(cases)("%s", async ({ scene, queueResult }) => {
       const { interaction } = SceneFactory.createScene(scene);
-      mockAudioManager.getQueue.mockReturnValue(queueResult);
+      mockPlaybackService.getQueue.mockReturnValue(queueResult);
 
       await queueCommand.execute(interaction);
 
-      expect(mockAudioManager.getQueue).toHaveBeenCalledWith("guild-1");
+      expect(mockPlaybackService.getQueue).toHaveBeenCalledWith("guild-1");
       const arg = interaction.reply.mock.calls[0][0];
       expect(arg).toEqual(
         expect.objectContaining({
@@ -474,7 +490,7 @@ describe("Bot Commands Coverage", () => {
   });
 
   describe("NowPlaying Command", () => {
-    const nowPlayingCommand = require("../../src/bot/commands/nowplaying");
+    const nowPlayingCommand = require("../../src/bot/commands/nowplaying")(mockPlaybackService);
 
     const cases = [
       {
@@ -507,6 +523,7 @@ describe("Bot Commands Coverage", () => {
       const { interaction, player } = SceneFactory.createScene(scene);
       player.getState.mockReturnValue(state);
       player.getCurrentTime.mockReturnValue(30);
+      mockPlaybackService.getPlayer.mockReturnValue(player);
 
       await nowPlayingCommand.execute(interaction);
 
@@ -535,7 +552,7 @@ describe("Bot Commands Coverage", () => {
   });
 
   describe("Help Command", () => {
-    const helpCommand = require("../../src/bot/commands/help");
+    const helpCommand = require("../../src/bot/commands/help")(mockPlaybackService);
 
     test("should display help info", async () => {
       const { interaction } = SceneFactory.createScene({
@@ -556,15 +573,11 @@ describe("Bot Commands Coverage", () => {
   });
 
   describe("Play Command", () => {
-    const playCommand = require("../../src/bot/commands/play");
+    const playCommand = require("../../src/bot/commands/play")(mockPlaybackService);
     jest.mock("../../src/bilibili/validator", () => ({
       isValidBilibiliUrl: jest.fn(),
     }));
-    jest.mock("../../src/playback/playlist_manager", () => ({
-      add: jest.fn(),
-    }));
     const UrlValidator = require("../../src/bilibili/validator");
-    const PlaylistManager = require("../../src/playback/playlist_manager");
 
     const cases = [
       {
@@ -641,7 +654,7 @@ describe("Bot Commands Coverage", () => {
         },
         setup: () => {
           UrlValidator.isValidBilibiliUrl.mockReturnValue(true);
-          PlaylistManager.add.mockResolvedValue(null);
+          mockPlaybackService.addTrack.mockResolvedValue(null);
         },
         expected: { editReplyContains: "Add failed", deferCalled: true },
       },
@@ -655,8 +668,8 @@ describe("Bot Commands Coverage", () => {
         },
         setup: () => {
           UrlValidator.isValidBilibiliUrl.mockReturnValue(true);
-          PlaylistManager.add.mockResolvedValue({ title: "Track" });
-          PlayerControl.play.mockResolvedValue(true);
+          mockPlaybackService.addTrack.mockResolvedValue({ title: "Track" });
+          mockPlaybackService.play.mockResolvedValue(true);
         },
         expected: {
           editReplyContains: "🎵 已添加",
@@ -669,6 +682,7 @@ describe("Bot Commands Coverage", () => {
     test.each(cases)("%s", async ({ scene, setup, expected }) => {
       const { interaction, player } = SceneFactory.createScene(scene);
       interaction.deferReply = jest.fn().mockResolvedValue();
+      mockPlaybackService.getPlayer.mockReturnValue(player);
       setup({ player });
 
       await playCommand.execute(interaction);
@@ -693,8 +707,8 @@ describe("Bot Commands Coverage", () => {
         expect(interaction.deferReply).not.toHaveBeenCalled();
       }
       if (expected.playCalled) {
-        expect(PlayerControl.play).toHaveBeenCalledWith("guild-1");
-        expect(InterfaceUpdater.setPlaybackContext).toHaveBeenCalledWith(
+        expect(mockPlaybackService.play).toHaveBeenCalledWith("guild-1");
+        expect(mockPlaybackService.setUIContext).toHaveBeenCalledWith(
           "guild-1",
           "channel-1"
         );
@@ -703,7 +717,7 @@ describe("Bot Commands Coverage", () => {
   });
 
   describe("Search Command", () => {
-    const searchCommand = require("../../src/bot/commands/search");
+    const searchCommand = require("../../src/bot/commands/search")(mockPlaybackService);
 
     beforeAll(() => {
       jest.useFakeTimers();
@@ -757,7 +771,7 @@ describe("Bot Commands Coverage", () => {
     test.each(cases)("%s", async ({ scene, extractor, expectTitle }) => {
       const { interaction } = SceneFactory.createScene(scene);
       interaction.deferReply = jest.fn().mockResolvedValue();
-      mockAudioManager.getExtractor.mockReturnValue(extractor);
+      mockPlaybackService.getExtractor.mockReturnValue(extractor);
 
       await searchCommand.execute(interaction);
 

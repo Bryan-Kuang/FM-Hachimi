@@ -158,7 +158,7 @@ describe("BilibiliAPI", () => {
 
   describe("_fallbackSearch", () => {
     test("fallback results include tid=0 field", async () => {
-      const Extractor = require("../../src/audio/extractor");
+      const Extractor = require("../../src/bilibili/extractor");
       Extractor.mockImplementationOnce(() => ({
         searchVideos: jest.fn().mockResolvedValue({
           success: true,
@@ -182,7 +182,7 @@ describe("BilibiliAPI", () => {
     });
 
     test("fallback results preserve url and basic fields", async () => {
-      const Extractor = require("../../src/audio/extractor");
+      const Extractor = require("../../src/bilibili/extractor");
       Extractor.mockImplementationOnce(() => ({
         searchVideos: jest.fn().mockResolvedValue({
           success: true,
@@ -207,7 +207,7 @@ describe("BilibiliAPI", () => {
     });
 
     test("returns empty array when extractor fails", async () => {
-      const Extractor = require("../../src/audio/extractor");
+      const Extractor = require("../../src/bilibili/extractor");
       Extractor.mockImplementationOnce(() => ({
         searchVideos: jest.fn().mockRejectedValue(new Error("yt-dlp not found")),
       }));

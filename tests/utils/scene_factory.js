@@ -1,6 +1,3 @@
-const PlayerControl = require("../../src/playback/player_control");
-const AudioManager = require("../../src/session/audio_manager");
-
 class InteractionBuilder {
   constructor() {
     this._guildId = "guild-1";
@@ -93,9 +90,8 @@ const createScene = ({ userVc, botVc, playerState, options }) => {
     .build();
 
   const player = createMockAudioPlayer(playerState);
-  AudioManager.getPlayer = jest.fn().mockReturnValue(player);
 
-  return { interaction, playerControl: PlayerControl, player };
+  return { interaction, player };
 };
 
 class MockEventEmitter {
