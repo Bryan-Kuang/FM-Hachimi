@@ -165,6 +165,101 @@ describe("AudioPlayer", () => {
     });
   });
 
+  // ─── _manualNavigating guard (regression: issue #2 double-skip) ──
+
+  describe("_manualNavigating guard", () => {
+    test("is initialized to false", () => {
+      expect(player._manualNavigating).toBe(false);
+    });
+
+    test("_handleIdle ignores event and clears flag when manual navigation is in progress", () => {
+      player._manualNavigating = true;
+      player.currentTrack = { title: "Song 2" };
+      player.handleTrackEnd = jest.fn();
+
+      player._handleIdle();
+
+      expect(player._manualNavigating).toBe(false);
+      expect(player.handleTrackEnd).not.toHaveBeenCalled();
+    });
+
+    test("_handleIdle processes normally when flag is false and track played long enough", () => {
+      player._manualNavigating = false;
+      player.currentTrack = { title: "Song 1", duration: 300 };
+      player.startTime = Date.now() - 5000; // 5s ago > 3s threshold
+      player.handleTrackEnd = jest.fn();
+
+      player._handleIdle();
+
+      expect(player.handleTrackEnd).toHaveBeenCalled();
+    });
+
+    test("skip sets _manualNavigating flag and resets startTime", async () => {
+      player.queue = [
+        { title: "Song 1", audioUrl: "url1" },
+        { title: "Song 2", audioUrl: "url2" },
+      ];
+      player.currentIndex = 0;
+      player.currentTrack = player.queue[0];
+      player.startTime = Date.now() - 30 * 60 * 1000; // stale: 30 min ago
+      player.loopMode = "none";
+      player.voiceConnection = null;
+
+      await player.skip();
+
+      // No voice connection → flag should be cleared synchronously
+      expect(player._manualNavigating).toBe(false);
+      // startTime should have been reset
+      expect(player.startTime).toBeNull();
+    });
+
+    test("previous sets _manualNavigating flag and resets startTime", async () => {
+      player.queue = [
+        { title: "Song 1", audioUrl: "url1" },
+        { title: "Song 2", audioUrl: "url2" },
+      ];
+      player.currentIndex = 1;
+      player.currentTrack = player.queue[1];
+      player.startTime = Date.now() - 30 * 60 * 1000;
+      player.loopMode = "none";
+      player.voiceConnection = null;
+
+      await player.previous();
+
+      expect(player._manualNavigating).toBe(false);
+      expect(player.startTime).toBeNull();
+    });
+
+    test("regression #2: skip does not double-advance queue via stale Idle event", async () => {
+      // Reproduces the bug: song 2 played for 30 min, user skips midway.
+      // Idle fires from killed FFmpeg with stale startTime — without the guard,
+      // handleTrackEnd would be called again, advancing index from 2 to 3.
+      player.queue = [
+        { title: "Song 1", audioUrl: "url1" },
+        { title: "Song 2", audioUrl: "url2" },
+        { title: "Song 3", audioUrl: "url3" },
+      ];
+      player.currentIndex = 1; // on song 2
+      player.currentTrack = player.queue[1];
+      player.startTime = Date.now() - 30 * 60 * 1000; // 30 min ago (stale)
+      player.loopMode = "queue";
+      player.voiceConnection = null;
+      player.handleTrackEnd = jest.fn();
+
+      // User skips song 2
+      await player.skip();
+      expect(player.currentIndex).toBe(2); // should be on song 3
+
+      // Simulate stale Idle event arriving after skip
+      player._manualNavigating = true; // restored as it would be mid-playCurrentTrack
+      player._handleIdle();
+
+      // handleTrackEnd must NOT be called — the guard prevented the double-skip
+      expect(player.handleTrackEnd).not.toHaveBeenCalled();
+      expect(player.currentIndex).toBe(2); // still song 3, not song 4
+    });
+  });
+
   // ─── getState ────────────────────────────────────────────────
 
   describe("getState", () => {

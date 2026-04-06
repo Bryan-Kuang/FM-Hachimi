@@ -407,20 +407,19 @@ class AudioManager {
   async stopPlayback(guildId) {
     const player = this.getPlayer(guildId);
     const stopped = await player.stop();
-    const state = player.getState(); // capture state before removing instance
+    const state = player.getState();
 
-    if (stopped) {
-      // Clear the player from the session so the next getPlayer() call
-      // creates a fresh one — prevents event listener accumulation and stale flag bleed.
-      const session = this.sessionManager.get(guildId);
-      session.player = null;
-      logger.info("Audio player instance removed for guild", { guildId });
-    }
+    // Do NOT remove the player from the map here. The inactivity timer lives
+    // on this instance; deleting it orphans the timer so _cancelInactivityTimer()
+    // on the next play request has no effect — the old timer fires 60 s later
+    // and destroys the shared voice connection mid-playback.
+    // The player stays alive; if no new play arrives within 60 s the inactivity
+    // timer fires on the correct instance and _doDisconnect() tears down cleanly.
 
     return {
       success: stopped,
       message: stopped
-        ? "Stopped playback, cleared queue, and left voice channel"
+        ? "Stopped playback, will auto-disconnect if idle for 1 minute"
         : "Failed to stop playback",
       player: state,
     };

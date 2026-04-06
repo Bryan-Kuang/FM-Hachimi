@@ -6,7 +6,7 @@ const PlayerControl = require('../../src/playback/player_control')
 test('event-driven UI: first send then edit on subsequent updates', async () => {
   const sent1 = { id: 'msg-1' }
   const channel = {
-    messages: { edit: jest.fn() },
+    messages: { edit: jest.fn().mockResolvedValue(sent1) },
     send: jest.fn().mockResolvedValue(sent1)
   }
   const client = { channels: { cache: new Map([['ch-1', channel]]), fetch: jest.fn().mockResolvedValue(channel) } }

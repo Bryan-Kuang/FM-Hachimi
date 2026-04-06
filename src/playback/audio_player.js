@@ -35,6 +35,9 @@ class AudioPlayer {
     this.ffmpegProcess = null; // 🔧 添加：跟踪当前FFmpeg进程
     this._ffmpegChecked = false; // Lazy FFmpeg availability check
     this._cdnRetryPending = false; // Flag for CDN failure retry coordination
+    this._manualNavigating = false; // Flag to prevent double-skip from stale Idle events
+    this._inactivityTimer = null; // Auto-disconnect after 1 min of inactivity
+    this.isIdle = false; // True when nothing is playing; idle state owns the inactivity timer
 
     // Set up audio player event handlers
     this.setupAudioPlayerEvents();
@@ -48,6 +51,7 @@ class AudioPlayer {
       this.isPlaying = true;
       this.isPaused = false;
       this.startTime = Date.now(); // Record when playback started
+      this._manualNavigating = false; // New track started, clear navigation guard
 
       logger.info("Audio player started playing", {
         track: this.currentTrack?.title,
@@ -68,63 +72,7 @@ class AudioPlayer {
       });
     });
 
-    this.audioPlayer.on(AudioPlayerStatus.Idle, () => {
-      this.isPlaying = false;
-
-      // 🔧 修复：清理FFmpeg进程避免"Broken pipe"错误
-      this.cleanupFFmpegProcess();
-
-      // Calculate actual playback duration using startTime
-      const actualPlaybackDuration = this.startTime
-        ? Date.now() - this.startTime
-        : 0;
-
-      logger.info("Audio player became idle", {
-        track: this.currentTrack?.title,
-        guild: this.currentGuild,
-        resource: this.audioPlayer.state.resource !== null,
-        playbackDuration: this.audioPlayer.state.playbackDuration,
-        actualPlaybackDuration,
-        trackDuration: this.currentTrack?.duration,
-      });
-
-      // 🔧 CDN故障重试：如果FFmpeg因CDN失败退出，优先重试而非跳过
-      if (this._cdnRetryPending && this.currentTrack) {
-        logger.info("CDN retry pending, retrying instead of skipping", {
-          track: this.currentTrack?.title,
-          actualPlaybackDuration,
-        });
-        this.retryCurrentTrack();
-        return;
-      }
-
-      // 🔧 修复：使用实际播放时间而不是state.playbackDuration
-      // 对于Raw PCM，playbackDuration可能始终为0
-      if (
-        actualPlaybackDuration > 3000 ||
-        (this.currentTrack?.duration &&
-          actualPlaybackDuration >= (this.currentTrack.duration - 2) * 1000)
-      ) {
-        // 正常播放结束（播放超过3秒或接近歌曲总时长）
-        logger.info("Track ended normally", {
-          actualPlaybackDuration,
-          trackDuration: this.currentTrack?.duration,
-        });
-        this.handleTrackEnd();
-      } else if (this.currentTrack) {
-        // 播放时间太短，可能是错误，重试当前曲目
-        logger.warn("Playback duration too short, retrying current track", {
-          actualPlaybackDuration,
-          track: this.currentTrack?.title,
-          loopMode: this.loopMode,
-        });
-        // 如果是track loop模式，不计入retry次数
-        if (this.loopMode === "track") {
-          this.currentTrack.retryCount = 0;
-        }
-        this.retryCurrentTrack();
-      }
-    });
+    this.audioPlayer.on(AudioPlayerStatus.Idle, () => this._handleIdle());
 
     this.audioPlayer.on("error", (error) => {
       logger.error("Audio player error", {
@@ -139,6 +87,82 @@ class AudioPlayer {
       // Try to recover by skipping to next track
       this.handleTrackEnd();
     });
+  }
+
+  /**
+   * Handle AudioPlayerStatus.Idle event.
+   * Extracted for testability; also guards against the double-skip race condition:
+   * when skip()/previous() kills the old FFmpeg process, a stale Idle event can
+   * fire with a large actualPlaybackDuration, causing handleTrackEnd() to be called
+   * again and advancing the queue index an extra time.
+   */
+  _handleIdle() {
+    this.isPlaying = false;
+
+    // 🔧 修复：清理FFmpeg进程避免"Broken pipe"错误
+    this.cleanupFFmpegProcess();
+
+    // Guard: if a manual skip/prev is in progress, the Idle event is a side-effect
+    // of killing the old FFmpeg — ignore it so we don't advance the queue twice.
+    if (this._manualNavigating) {
+      logger.info("Idle event ignored during manual navigation", {
+        track: this.currentTrack?.title,
+        guild: this.currentGuild,
+      });
+      this._manualNavigating = false;
+      return;
+    }
+
+    // Calculate actual playback duration using startTime
+    const actualPlaybackDuration = this.startTime
+      ? Date.now() - this.startTime
+      : 0;
+
+    logger.info("Audio player became idle", {
+      track: this.currentTrack?.title,
+      guild: this.currentGuild,
+      resource: this.audioPlayer.state.resource !== null,
+      playbackDuration: this.audioPlayer.state.playbackDuration,
+      actualPlaybackDuration,
+      trackDuration: this.currentTrack?.duration,
+    });
+
+    // 🔧 CDN故障重试：如果FFmpeg因CDN失败退出，优先重试而非跳过
+    if (this._cdnRetryPending && this.currentTrack) {
+      logger.info("CDN retry pending, retrying instead of skipping", {
+        track: this.currentTrack?.title,
+        actualPlaybackDuration,
+      });
+      this.retryCurrentTrack();
+      return;
+    }
+
+    // 🔧 修复：使用实际播放时间而不是state.playbackDuration
+    // 对于Raw PCM，playbackDuration可能始终为0
+    if (
+      actualPlaybackDuration > 3000 ||
+      (this.currentTrack?.duration &&
+        actualPlaybackDuration >= (this.currentTrack.duration - 2) * 1000)
+    ) {
+      // 正常播放结束（播放超过3秒或接近歌曲总时长）
+      logger.info("Track ended normally", {
+        actualPlaybackDuration,
+        trackDuration: this.currentTrack?.duration,
+      });
+      this.handleTrackEnd();
+    } else if (this.currentTrack) {
+      // 播放时间太短，可能是错误，重试当前曲目
+      logger.warn("Playback duration too short, retrying current track", {
+        actualPlaybackDuration,
+        track: this.currentTrack?.title,
+        loopMode: this.loopMode,
+      });
+      // 如果是track loop模式，不计入retry次数
+      if (this.loopMode === "track") {
+        this.currentTrack.retryCount = 0;
+      }
+      this.retryCurrentTrack();
+    }
   }
 
   /**
@@ -367,6 +391,8 @@ class AudioPlayer {
       logger.warn("No current track to play");
       return false;
     }
+    this._cancelInactivityTimer();
+    this.isIdle = false;
 
     if (!this.voiceConnection) {
       logger.warn("No voice connection available");
@@ -687,6 +713,11 @@ class AudioPlayer {
    * @returns {Promise<boolean>} - Success status
    */
   async skip() {
+    // Set guard flag to prevent the Idle event (fired when old FFmpeg is killed)
+    // from triggering handleTrackEnd() and advancing the queue a second time.
+    this._manualNavigating = true;
+    this.startTime = null;
+
     // Check if we can skip to next track
     if (this.currentIndex < this.queue.length - 1) {
       this.currentIndex++;
@@ -695,6 +726,7 @@ class AudioPlayer {
       if (this.voiceConnection) {
         return await this.playCurrentTrack();
       }
+      this._manualNavigating = false; // No voice connection, clear immediately
       return true; // Track was set successfully for testing
     } else if (this.loopMode === "queue" && this.queue.length > 0) {
       // Loop back to beginning
@@ -708,6 +740,7 @@ class AudioPlayer {
       if (this.voiceConnection) {
         return await this.playCurrentTrack();
       }
+      this._manualNavigating = false;
       return true; // Loop was set successfully for testing
     } else if (this.loopMode === "track" && this.currentTrack) {
       // Restart current track
@@ -719,6 +752,7 @@ class AudioPlayer {
       if (this.voiceConnection) {
         return await this.playCurrentTrack();
       }
+      this._manualNavigating = false;
       return true; // Track loop was set successfully for testing
     }
 
@@ -730,7 +764,7 @@ class AudioPlayer {
       guild: this.currentGuild,
     });
 
-    // 🔧 修复：当队列播放完毕时，重置播放状态
+    // 队列播放完毕，重置播放状态并启动空闲计时器
     if (this.audioPlayer) {
       this.audioPlayer.stop();
     }
@@ -738,6 +772,7 @@ class AudioPlayer {
     this.currentIndex = -1;
     this.isPlaying = false;
     this.isPaused = false;
+    this._enterIdle();
 
     return false;
   }
@@ -747,6 +782,10 @@ class AudioPlayer {
    * @returns {Promise<boolean>} - Success status
    */
   async previous() {
+    // Set guard flag — same race condition as skip()
+    this._manualNavigating = true;
+    this.startTime = null;
+
     if (this.currentIndex > 0) {
       this.currentIndex--;
       this.currentTrack = this.queue[this.currentIndex];
@@ -755,12 +794,11 @@ class AudioPlayer {
         title: this.currentTrack?.title,
         guild: this.currentGuild,
       });
-      
-      // 🔧 修复：在测试环境下或有语音连接时播放
+
       if (this.voiceConnection) {
         return await this.playCurrentTrack();
       } else {
-        // 测试环境下直接返回true
+        this._manualNavigating = false;
         return true;
       }
     } else if (this.loopMode === "queue" && this.queue.length > 0) {
@@ -771,16 +809,16 @@ class AudioPlayer {
         title: this.currentTrack?.title,
         guild: this.currentGuild,
       });
-      
-      // 🔧 修复：在测试环境下或有语音连接时播放
+
       if (this.voiceConnection) {
         return await this.playCurrentTrack();
       } else {
-        // 测试环境下直接返回true
+        this._manualNavigating = false;
         return true;
       }
     }
 
+    this._manualNavigating = false;
     return false;
   }
 
@@ -918,21 +956,20 @@ class AudioPlayer {
   }
 
   /**
-   * Stop playback and clear queue
+   * Stop playback and clear queue. Stays in voice channel;
+   * auto-disconnects after INACTIVITY_TIMEOUT_MS of no new play requests.
    */
   async stop() {
     try {
-      // 🔧 添加：清理FFmpeg进程
-      if (this.ffmpegProcess && !this.ffmpegProcess.killed) {
-        logger.debug("Terminating FFmpeg process");
-        this.ffmpegProcess.kill('SIGTERM');
-        this.ffmpegProcess = null;
-      }
-      
-      // Stop audio player
+      this.cleanupFFmpegProcess();
+
+      // Set _manualNavigating so the Idle event fired by audioPlayer.stop()
+      // is suppressed and does not trigger handleTrackEnd / skip.
+      this._cdnRetryPending = false;
+      this._manualNavigating = true;
+
       this.audioPlayer.stop();
 
-      // Clear queue and reset state
       this.queue = [];
       this.currentTrack = null;
       this.currentIndex = -1;
@@ -940,13 +977,9 @@ class AudioPlayer {
       this.isPaused = false;
       this.startTime = null;
 
-      // Leave voice channel
-      if (this.voiceConnection) {
-        this.voiceConnection.destroy();
-        this.voiceConnection = null;
-      }
+      this._enterIdle();
 
-      logger.info("Playback stopped and queue cleared", {
+      logger.info("Playback stopped, will auto-disconnect if idle", {
         guild: this.currentGuild,
       });
 
@@ -958,6 +991,51 @@ class AudioPlayer {
       });
       return false;
     }
+  }
+
+  // ─── Inactivity helpers ───────────────────────────────────────────────────
+
+  _startInactivityTimer() {
+    this._cancelInactivityTimer();
+    if (!this.voiceConnection) return; // nothing to disconnect
+    this._inactivityTimer = setTimeout(() => {
+      logger.info("Auto-disconnecting due to inactivity", { guild: this.currentGuild });
+      this._doDisconnect();
+    }, 60 * 1000);
+  }
+
+  _cancelInactivityTimer() {
+    if (this._inactivityTimer) {
+      clearTimeout(this._inactivityTimer);
+      this._inactivityTimer = null;
+    }
+  }
+
+  /** Enter idle state: nothing left to play. Starts the inactivity timer. */
+  _enterIdle() {
+    this.isIdle = true;
+    this._startInactivityTimer();
+    logger.info("Player entered idle state", { guild: this.currentGuild });
+  }
+
+  /** Destroy the voice connection and remove the player from AudioManager. */
+  _doDisconnect() {
+    this._cancelInactivityTimer();
+    if (this.voiceConnection) {
+      try {
+        this.voiceConnection.destroy();
+      } catch (_) { /* connection may already be destroyed */ }
+      this.voiceConnection = null;
+    }
+    const guildId = this.currentGuild;
+    this.currentGuild = null;
+    this.isIdle = false;
+    if (guildId) {
+      const AudioManager = require("./manager");
+      AudioManager.players.delete(guildId);
+      logger.info("Audio player instance removed after idle timeout", { guild: guildId });
+    }
+    logger.info("Disconnected from voice channel");
   }
 
   /**
@@ -999,6 +1077,7 @@ class AudioPlayer {
     return {
       isPlaying: this.isPlaying,
       isPaused: this.isPaused,
+      isIdle: this.isIdle,
       currentTrack: this.currentTrack,
       currentIndex: this.currentIndex,
       queue: this.queue,
@@ -1038,19 +1117,19 @@ class AudioPlayer {
    * Leave voice channel
    */
   leaveVoiceChannel() {
-    logger.info("Leaving voice channel");
-    
-    // 🔧 修复：使用完善的FFmpeg进程清理方法
     this.cleanupFFmpegProcess();
-    
-    if (this.voiceConnection) {
-      this.voiceConnection.destroy();
-      this.voiceConnection = null;
-      this.currentGuild = null;
-      this.stop();
-
-      logger.info("Left voice channel");
-    }
+    this._cancelInactivityTimer();
+    this._cdnRetryPending = false;
+    this._manualNavigating = true;
+    this.audioPlayer.stop();
+    this.queue = [];
+    this.currentTrack = null;
+    this.currentIndex = -1;
+    this.isPlaying = false;
+    this.isPaused = false;
+    this.startTime = null;
+    this._doDisconnect();
+    logger.info("Left voice channel");
   }
 
   /**
@@ -1111,7 +1190,7 @@ class AudioPlayer {
       }
     }
 
-    // 等待一下再重试
+    // 等待一下再重试 (.unref() so it doesn't block process exit)
     setTimeout(() => {
       this.playCurrentTrack().catch((error) => {
         logger.error("Retry failed", {
@@ -1120,7 +1199,7 @@ class AudioPlayer {
         });
         this.handleTrackEnd();
       });
-    }, 2000);
+    }, 2000).unref();
   }
 
   /**
@@ -1162,7 +1241,7 @@ class AudioPlayer {
         // 然后终止进程
         processToCleanup.kill('SIGTERM');
         
-        // 如果进程没有在合理时间内退出，强制杀死
+        // 如果进程没有在合理时间内退出，强制杀死 (.unref() so it doesn't block process exit)
         setTimeout(() => {
           if (processToCleanup && !processToCleanup.killed) {
             logger.warn("Force killing FFmpeg process", {
@@ -1170,7 +1249,7 @@ class AudioPlayer {
             });
             processToCleanup.kill('SIGKILL');
           }
-        }, 1000);
+        }, 1000).unref();
         
       } catch (error) {
         logger.warn("Error cleaning up FFmpeg process", {

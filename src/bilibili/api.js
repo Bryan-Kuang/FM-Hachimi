@@ -135,6 +135,7 @@ class BilibiliAPI {
       like: typeof video.like === "number" ? video.like : 0,
       danmaku: video.danmaku || 0,
       tag: video.tag || "",
+      tid: Number(video.typeid) || 0,
       url: `https://www.bilibili.com/video/${video.bvid}`,
     };
   }
@@ -188,6 +189,7 @@ class BilibiliAPI {
         like: 0,
         danmaku: 0,
         tag: "",
+        tid: 0,
         url: item.url,
       }));
     } catch (err) {
@@ -224,6 +226,18 @@ class BilibiliAPI {
       }
     }
     return qualified;
+  }
+
+  /**
+   * Filter videos to only those in allowed Bilibili partitions
+   * @param {Array} videos - Video objects with tid field
+   * @param {number[]} allowedTids - Allowed partition TIDs
+   * @returns {Array}
+   */
+  filterByPartition(videos, allowedTids) {
+    if (!Array.isArray(videos) || !Array.isArray(allowedTids)) return [];
+    const allowed = new Set(allowedTids);
+    return videos.filter(v => v.tid === 0 || allowed.has(v.tid));
   }
 
   /**
@@ -274,17 +288,33 @@ class BilibiliAPI {
       clearTimeout(timeout);
 
       const all = [];
+      let apiBlocked = false;
       for (const r of responses) {
         if (r.status === "fulfilled" && r.value?.data?.code === 0) {
           const parsed = this.parseSearchResults(r.value.data.data);
           all.push(...parsed.videos);
-        } else if (r.status === "rejected") {
+        } else if (r.status === "fulfilled") {
+          apiBlocked = true;
+          logger.warn("Bilibili API returned non-zero code", {
+            code: r.value?.data?.code,
+            message: r.value?.data?.message,
+          });
+        } else {
           logger.warn("Page fetch rejected", {
             reason: r.reason?.message,
             status: r.reason?.response?.status,
-            data: r.reason?.response?.data,
           });
         }
+      }
+
+      if (all.length === 0) {
+        const reason = apiBlocked
+          ? "API blocked (cookie/auth issue)"
+          : "network error or empty response";
+        logger.warn(
+          `fetchRawCandidates: no results from API (${reason}), using extractor fallback`
+        );
+        return await this._fallbackSearch(keyword, 50);
       }
 
       return all;
@@ -308,7 +338,9 @@ class BilibiliAPI {
       deduped.push(v);
     }
 
-    const qualified = this.filterQualityVideos(deduped);
+    // Partition filter: only allow 鬼畜区 and 音乐区
+    const partitionFiltered = this.filterByPartition(deduped, config.bilibili.hachimiAllowedTids);
+    const qualified = this.filterQualityVideos(partitionFiltered);
     const afterHistory = this.historyStore ? this.historyStore.filter(guildId, qualified) : qualified;
     const softFallback = afterHistory.length === 0 && qualified.length > 0;
     const pool = softFallback ? qualified : afterHistory;
@@ -327,6 +359,7 @@ class BilibiliAPI {
       meta: {
         totalRaw: (rawList || []).length,
         dedupedCount: deduped.length,
+        partitionFilteredCount: partitionFiltered.length,
         qualifiedCount: qualified.length,
         excludedByHistory: qualified.length - afterHistory.length,
         softFallbackApplied: softFallback,
@@ -349,8 +382,8 @@ class BilibiliAPI {
       });
 
       if (!rawCandidates || rawCandidates.length === 0) {
-        logger.warn("No Hachimi videos found in search results");
-        return [];
+        logger.warn("No Hachimi videos found even after fallback");
+        return { results: [], failReason: "search_failed" };
       }
 
       const { results, meta } = this.processCandidates(
@@ -361,13 +394,16 @@ class BilibiliAPI {
 
       logger.info("Hachimi video search completed", meta);
 
-      return results;
+      if (results.length === 0) {
+        return { results: [], failReason: "quality_filter", meta };
+      }
+      return { results, meta };
     } catch (error) {
       logger.error("Error searching Hachimi videos", {
         error: error.message,
         stack: error.stack,
       });
-      return [];
+      return { results: [], failReason: "exception", error: error.message };
     }
   }
 

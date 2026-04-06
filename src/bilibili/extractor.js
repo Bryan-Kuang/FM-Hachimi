@@ -22,10 +22,10 @@ class BilibiliExtractor {
     this.cacheExpiry = 30 * 60 * 1000; // 30 minutes cache expiry
     this.maxCacheSize = 100; // Maximum number of cached entries
     
-    // Start cache cleanup interval
+    // Start cache cleanup interval (.unref() so it doesn't block process exit)
     this.cacheCleanupInterval = setInterval(() => {
       this.cleanupExpiredCache();
-    }, 10 * 60 * 1000); // Cleanup every 10 minutes
+    }, 10 * 60 * 1000).unref(); // Cleanup every 10 minutes
   }
 
   /**
@@ -325,7 +325,7 @@ class BilibiliExtractor {
         reject(new Error(errorMessage));
       });
 
-      // Set timeout for the operation
+      // Set timeout for the operation (.unref() so it doesn't block process exit)
       const timeoutId = setTimeout(() => {
         ytdlp.kill('SIGTERM');
         // Force kill after 2 seconds if still running
@@ -335,12 +335,12 @@ class BilibiliExtractor {
           }
         }, 2000);
         reject(new Error("Video info extraction timeout"));
-      }, 30000); // 30 seconds timeout
-      
-      // Clear timeout when process ends
-      ytdlp.on('close', () => {
-        clearTimeout(timeoutId);
-      });
+      }, 30000).unref(); // 30 seconds timeout
+
+      // Clear timeout when process ends (close or error — whichever fires first)
+      const clearKillTimeout = () => clearTimeout(timeoutId);
+      ytdlp.on('close', clearKillTimeout);
+      ytdlp.on('error', clearKillTimeout);
     });
   }
 
@@ -438,7 +438,7 @@ class BilibiliExtractor {
         reject(new Error(errorMessage));
       });
 
-      // Set timeout for the operation
+      // Set timeout for the operation (.unref() so it doesn't block process exit)
       const timeoutId = setTimeout(() => {
         ytdlp.kill('SIGTERM');
         // Force kill after 2 seconds if still running
@@ -448,12 +448,12 @@ class BilibiliExtractor {
           }
         }, 2000);
         reject(new Error("Audio stream URL extraction timeout"));
-      }, 30000); // 30 seconds timeout
-      
-      // Clear timeout when process ends
-      ytdlp.on('close', () => {
-        clearTimeout(timeoutId);
-      });
+      }, 30000).unref(); // 30 seconds timeout
+
+      // Clear timeout when process ends (close or error — whichever fires first)
+      const clearKillTimeout = () => clearTimeout(timeoutId);
+      ytdlp.on('close', clearKillTimeout);
+      ytdlp.on('error', clearKillTimeout);
     });
   }
 

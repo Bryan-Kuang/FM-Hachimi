@@ -97,6 +97,10 @@ class InterfaceUpdater {
             this.progressTracker.stopTracking(guildId)
           }
         } catch (e) {
+          // Disable buttons on stale message to prevent ghost interactions
+          try {
+            await channel.messages.edit(ctx.messageId, { components: [] })
+          } catch (_) { /* message may already be deleted */ }
           const sent = await channel.send(options)
           session.uiContext = { channelId: ctx.channelId, messageId: sent.id }
           if (state.isPlaying && state.currentTrack) {
