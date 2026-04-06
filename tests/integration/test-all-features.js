@@ -4,11 +4,11 @@
  */
 
 const { Client, GatewayIntentBits, ButtonStyle } = require("discord.js");
-const BilibiliExtractor = require("../../src/audio/extractor");
-const AudioManager = require("../../src/audio/manager");
+const BilibiliExtractor = require("../../src/bilibili/extractor");
+const AudioManager = require("../../src/session/audio_manager");
 const ButtonBuilders = require("../../src/ui/buttons");
 const EmbedBuilders = require("../../src/ui/embeds");
-const ProgressTracker = require("../../src/audio/progress-tracker");
+const ProgressTracker = require("../../src/ui/progress_tracker");
 const logger = require("../../src/services/logger_service");
 require("dotenv").config();
 

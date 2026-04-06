@@ -1,7 +1,7 @@
 jest.mock('../../src/ui/embeds', () => ({ createNowPlayingEmbed: () => ({}) }))
 jest.mock('../../src/ui/buttons', () => ({ createPlaybackControls: () => [] }))
 const InterfaceUpdater = require('../../src/ui/interface_updater')
-const PlayerControl = require('../../src/control/player_control')
+const PlayerControl = require('../../src/playback/player_control')
 
 test('event-driven UI: first send then edit on subsequent updates', async () => {
   const sent1 = { id: 'msg-1' }

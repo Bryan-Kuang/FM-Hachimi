@@ -6,70 +6,71 @@
 const { SlashCommandBuilder, MessageFlags } = require("discord.js");
 const EmbedBuilders = require("../../ui/embeds");
 const ButtonBuilders = require("../../ui/buttons");
-const AudioManager = require("../../audio/manager");
 const logger = require("../../services/logger_service");
 
-module.exports = {
-  data: new SlashCommandBuilder()
-    .setName("queue")
-    .setDescription("Display the current music queue"),
+module.exports = function createQueueCommand(playbackService) {
+  return {
+    data: new SlashCommandBuilder()
+      .setName("queue")
+      .setDescription("Display the current music queue"),
 
-  cooldown: 3,
+    cooldown: 3,
 
-  async execute(interaction) {
-    try {
-      const user = interaction.user;
+    async execute(interaction) {
+      try {
+        const user = interaction.user;
 
-      // Get actual queue from audio manager
-      const queueInfo = AudioManager.getQueue(interaction.guild.id);
+        // Get actual queue from playback service
+        const queueInfo = playbackService.getQueue(interaction.guild.id);
 
-      // Create queue embed
-      const queueEmbed = EmbedBuilders.createQueueEmbed(
-        queueInfo.queue,
-        {
-          currentTrack: queueInfo.currentTrack,
-          page: 1,
-          itemsPerPage: 10,
-          totalPages: Math.ceil(queueInfo.state.queueLength / 10) || 1,
-        }
-      );
+        // Create queue embed
+        const queueEmbed = EmbedBuilders.createQueueEmbed(
+          queueInfo.queue,
+          {
+            currentTrack: queueInfo.currentTrack,
+            page: 1,
+            itemsPerPage: 10,
+            totalPages: Math.ceil(queueInfo.state.queueLength / 10) || 1,
+          }
+        );
 
-      // Create queue management buttons
-      const queueButtons = ButtonBuilders.createQueueControls({
-        hasQueue: queueInfo.state.queueLength > 0,
-        queueLength: queueInfo.state.queueLength,
-        queue: queueInfo.queue,
-        currentIndex: queueInfo.state.currentIndex,
-      });
+        // Create queue management buttons
+        const queueButtons = ButtonBuilders.createQueueControls({
+          hasQueue: queueInfo.state.queueLength > 0,
+          queueLength: queueInfo.state.queueLength,
+          queue: queueInfo.queue,
+          currentIndex: queueInfo.state.currentIndex,
+        });
 
-      await interaction.reply({
-        embeds: [queueEmbed],
-        components: queueButtons, // Pass array of ActionRowBuilders directly
-      });
+        await interaction.reply({
+          embeds: [queueEmbed],
+          components: queueButtons, // Pass array of ActionRowBuilders directly
+        });
 
-      logger.info("Queue command executed successfully", {
-        user: user.username,
-        queueLength: queueInfo.state.queueLength,
-      });
-    } catch (error) {
-      logger.error("Queue command failed", {
-        user: interaction.user.username,
-        error: error.message,
-        stack: error.stack,
-      });
+        logger.info("Queue command executed successfully", {
+          user: user.username,
+          queueLength: queueInfo.state.queueLength,
+        });
+      } catch (error) {
+        logger.error("Queue command failed", {
+          user: interaction.user.username,
+          error: error.message,
+          stack: error.stack,
+        });
 
-      const errorEmbed = EmbedBuilders.createErrorEmbed(
-        "Queue Display Failed",
-        "Failed to display the current queue.",
-        {
-          errorCode: "QUEUE_FAILED",
-        }
-      );
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          "Queue Display Failed",
+          "Failed to display the current queue.",
+          {
+            errorCode: "QUEUE_FAILED",
+          }
+        );
 
-      await interaction.reply({
-        embeds: [errorEmbed],
-        flags: MessageFlags.Ephemeral,
-      });
-    }
-  },
+        await interaction.reply({
+          embeds: [errorEmbed],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+    },
+  };
 };

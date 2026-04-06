@@ -3,7 +3,7 @@
  * Tests that FFmpeg processes are properly cleaned up when switching tracks
  */
 
-const AudioPlayer = require("../../src/audio/player");
+const AudioPlayer = require("../../src/playback/audio_player");
 const logger = require("../../src/services/logger_service");
 
 /**

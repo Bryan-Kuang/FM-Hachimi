@@ -20,8 +20,8 @@ async function testSystemIntegration() {
   // Test component integration
   totalTests++;
   try {
-    const BilibiliExtractor = require("../../src/audio/extractor");
-    const AudioManager = require("../../src/audio/manager");
+    const BilibiliExtractor = require("../../src/bilibili/extractor");
+    const AudioManager = require("../../src/session/audio_manager");
     const BotClient = require("../../src/bot/client");
 
     // Test integration flow
@@ -66,7 +66,7 @@ async function testSystemIntegration() {
   // Test utilities integration
   totalTests++;
   try {
-    const UrlValidator = require("../../src/utils/validator");
+    const UrlValidator = require("../../src/bilibili/validator");
     const Formatters = require("../../src/utils/formatters");
 
     const testUrl = "https://www.bilibili.com/video/BV1uv4y1q7Mv";

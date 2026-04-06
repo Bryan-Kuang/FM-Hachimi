@@ -1,5 +1,5 @@
-const PlayerControl = require("../../src/control/player_control");
-const AudioManager = require("../../src/audio/manager");
+const PlayerControl = require("../../src/playback/player_control");
+const AudioManager = require("../../src/session/audio_manager");
 
 class InteractionBuilder {
   constructor() {

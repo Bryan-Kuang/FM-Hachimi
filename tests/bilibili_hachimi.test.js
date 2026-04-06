@@ -1,4 +1,4 @@
-const BilibiliAPI = require("../src/utils/bilibiliApi");
+const BilibiliAPI = require("../src/bilibili/api");
 
 describe("BilibiliAPI Hachimi Logic", () => {
   // Mock Data

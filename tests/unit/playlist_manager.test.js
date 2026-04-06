@@ -1,4 +1,4 @@
-const PlaylistManager = require('../../src/playlist/playlist_manager')
+const PlaylistManager = require('../../src/playback/playlist_manager')
 
 test('playlist_manager add emits text message', async () => {
   const mockTrack = { title: 'Test Track' }

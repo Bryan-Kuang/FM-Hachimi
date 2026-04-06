@@ -5,7 +5,7 @@
  * Verify that stdout data updates activity time correctly
  */
 
-const AudioPlayer = require('../../src/audio/player');
+const AudioPlayer = require('../../src/playback/audio_player');
 const logger = require('../../src/services/logger_service');
 const config = require('../../src/config/config');
 

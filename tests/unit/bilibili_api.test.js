@@ -6,13 +6,13 @@ jest.mock("../../src/services/logger_service", () => ({
 }));
 
 // Mock the extractor to prevent real yt-dlp spawns during fallback
-jest.mock("../../src/audio/extractor", () => {
+jest.mock("../../src/bilibili/extractor", () => {
   return jest.fn().mockImplementation(() => ({
     searchVideos: jest.fn().mockResolvedValue({ success: true, results: [] }),
   }));
 });
 
-const BilibiliAPI = require("../../src/utils/bilibiliApi");
+const BilibiliAPI = require("../../src/bilibili/api");
 
 describe("BilibiliAPI", () => {
   beforeEach(() => {

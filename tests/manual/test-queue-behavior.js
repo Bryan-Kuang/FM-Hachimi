@@ -2,8 +2,8 @@
  * Test queue behavior and default loop mode
  */
 
-const AudioPlayer = require("../../src/audio/player");
-const AudioManager = require("../../src/audio/manager");
+const AudioPlayer = require("../../src/playback/audio_player");
+const AudioManager = require("../../src/session/audio_manager");
 const logger = require("../../src/services/logger_service");
 
 async function testQueueBehavior() {

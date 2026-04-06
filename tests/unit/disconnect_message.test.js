@@ -69,8 +69,8 @@ jest.mock('../../src/config/config', () => ({
 }));
 
 // Mock other dependencies
-jest.mock('../../src/control/player_control');
-jest.mock('../../src/playlist/playlist_manager');
+jest.mock('../../src/playback/player_control');
+jest.mock('../../src/playback/playlist_manager');
 jest.mock('../../src/ui/interface_updater');
 jest.mock('../../src/utils/debug', () => ({
   trace: jest.fn(),

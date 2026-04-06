@@ -9,6 +9,7 @@ const config = require("../config/config");
 class BilibiliAPI {
   constructor() {
     this.baseURL = "https://api.bilibili.com";
+    this.historyStore = null;
     this.headers = {
       "User-Agent":
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -21,6 +22,14 @@ class BilibiliAPI {
       "Sec-Fetch-Site": "same-site",
       Cookie: "buvid3=infoc;",
     };
+  }
+
+  /**
+   * Set the HistoryStore instance (injected from composition root)
+   * @param {Object} historyStore - HistoryStore instance
+   */
+  setHistoryStore(historyStore) {
+    this.historyStore = historyStore;
   }
 
   /**
@@ -155,7 +164,7 @@ class BilibiliAPI {
    */
   async _fallbackSearch(keyword, maxResults = 10) {
     try {
-      const Extractor = require("../audio/extractor");
+      const Extractor = require("./extractor");
       const extractor = new Extractor();
       const res = await extractor.searchVideos(keyword, maxResults);
       if (!res || res.success !== true || !Array.isArray(res.results))
@@ -288,7 +297,6 @@ class BilibiliAPI {
   }
 
   processCandidates(rawList, guildId, maxResults = 5) {
-    const HistoryStore = require("../utils/history_store");
     // Deduplicate by bvid
     const seen = new Set();
     const deduped = [];
@@ -301,7 +309,7 @@ class BilibiliAPI {
     }
 
     const qualified = this.filterQualityVideos(deduped);
-    const afterHistory = HistoryStore.filter(guildId, qualified);
+    const afterHistory = this.historyStore ? this.historyStore.filter(guildId, qualified) : qualified;
     const softFallback = afterHistory.length === 0 && qualified.length > 0;
     const pool = softFallback ? qualified : afterHistory;
 

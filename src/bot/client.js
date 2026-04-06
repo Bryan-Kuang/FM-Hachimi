@@ -12,13 +12,15 @@ const {
 } = require("discord.js");
 const logger = require("../services/logger_service");
 const config = require("../config/config");
-const PlayerControl = require("../control/player_control");
-const PlaylistManager = require("../playlist/playlist_manager");
-const InterfaceUpdater = require("../ui/interface_updater");
 const Debug = require("../utils/debug");
 
 class BotClient {
-  constructor() {
+  /**
+   * @param {Object} playbackService - PlaybackService instance
+   */
+  constructor(playbackService) {
+    this.playbackService = playbackService;
+
     // Initialize Discord client with required intents
     this.client = new Client({
       intents: [
@@ -43,8 +45,9 @@ class BotClient {
 
   /**
    * Initialize the bot client
+   * @param {Object} interfaceUpdater - InterfaceUpdater instance
    */
-  async initialize() {
+  async initialize(interfaceUpdater) {
     try {
       logger.info("Initializing Discord bot client");
       Debug.trace('client.initialize.begin')
@@ -62,10 +65,8 @@ class BotClient {
       Debug.trace('client.login.done')
 
       try {
-        PlayerControl.initialize(require("../audio/manager"));
-        PlaylistManager.initialize(require("../audio/manager"));
-        InterfaceUpdater.setClient(this.client);
-        InterfaceUpdater.bind(PlayerControl);
+        interfaceUpdater.setClient(this.client);
+        interfaceUpdater.bind(this.playbackService);
         Debug.trace('client.bind.interface_updater')
       } catch (e) {
         logger.error("Failed to bind UI updater", { error: e.message });
@@ -89,6 +90,8 @@ class BotClient {
    * Set up Discord event handlers
    */
   setupEventHandlers() {
+    const playbackService = this.playbackService;
+
     // Bot ready event
     this.client.once("clientReady", () => {
       this.isReady = true;
@@ -127,16 +130,15 @@ class BotClient {
           channel: oldState.channel.name,
         });
 
-        // Clean up player state for this guild using proper method
-        const AudioManager = require("../audio/manager");
-        const player = AudioManager.getPlayer(oldState.guild.id);
+        // Clean up player state for this guild using playbackService
+        const player = playbackService.getPlayer(oldState.guild.id);
         let currentTrack = null;
 
         if (player) {
           // Capture current track before stopping
           currentTrack = player.currentTrack;
           player.stop();
-          InterfaceUpdater.clearContext(oldState.guild.id);
+          playbackService.clearUIContext(oldState.guild.id);
 
           logger.info("Player stopped due to voice disconnect", {
             guild: oldState.guild.name,
@@ -151,7 +153,8 @@ class BotClient {
     });
 
     // Load interaction handlers
-    const interactionHandler = require("./events/interactionCreate");
+    const createInteractionHandler = require("./events/interactionCreate");
+    const interactionHandler = createInteractionHandler(playbackService);
 
     // Interaction handling (slash commands, buttons, and select menus)
     this.client.on("interactionCreate", async (interaction) => {
@@ -239,7 +242,7 @@ class BotClient {
   async sendDisconnectMessage(guild, currentTrack) {
     try {
       // Get the last text channel used by the bot
-      const context = InterfaceUpdater.contexts.get(guild.id);
+      const context = this.playbackService.getUIContext(guild.id);
       if (!context || !context.channelId) {
         logger.debug("No text channel context for disconnect message");
         return;
@@ -306,9 +309,11 @@ class BotClient {
 
   /**
    * Load slash commands
+   * Commands that export a factory function receive playbackService;
+   * commands that export a plain object are used as-is.
    */
   async loadCommands() {
-    const commands = [
+    const commandModules = [
       require("./commands/play"),
       require("./commands/pause"),
       require("./commands/resume"),
@@ -322,8 +327,11 @@ class BotClient {
       require("./commands/hachimi"),
     ];
 
-    for (const command of commands) {
+    for (const mod of commandModules) {
       try {
+        // Factory functions return a command object when called with playbackService
+        const command = typeof mod === "function" ? mod(this.playbackService) : mod;
+
         if (command.data && command.execute) {
           this.client.commands.set(command.data.name, command);
           logger.debug("Loaded command", { name: command.data.name });

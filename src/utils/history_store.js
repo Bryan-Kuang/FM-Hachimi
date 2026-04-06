@@ -1,38 +1,28 @@
-class HistoryStore {
-  constructor(limit = 50) {
-    this.limit = limit
-    this.guildHistory = new Map()
-  }
+/**
+ * History Store
+ * Thin facade that delegates per-guild play history to GuildSession via SessionManager.
+ * Maintains the same public API so existing callers (e.g. bilibiliApi.js) keep working.
+ */
 
-  ensure(guildId) {
-    if (!this.guildHistory.has(guildId)) {
-      this.guildHistory.set(guildId, new Set())
-    }
-    return this.guildHistory.get(guildId)
+class HistoryStore {
+  /**
+   * @param {Object} sessionManager - SessionManager instance
+   */
+  constructor(sessionManager) {
+    this.sessionManager = sessionManager
   }
 
   has(guildId, bvid) {
-    const set = this.ensure(guildId)
-    return set.has(bvid)
+    return this.sessionManager.get(guildId).hasHistory(bvid)
   }
 
   add(guildId, bvid) {
-    const set = this.ensure(guildId)
-    // move to tail (newest)
-    if (set.has(bvid)) set.delete(bvid)
-    set.add(bvid)
-    // evict oldest if over limit
-    while (set.size > this.limit) {
-      const oldest = set.values().next().value
-      set.delete(oldest)
-    }
+    this.sessionManager.get(guildId).addHistory(bvid)
   }
 
   filter(guildId, candidates) {
-    const set = this.ensure(guildId)
-    return (Array.isArray(candidates) ? candidates : []).filter(v => !set.has(v.bvid))
+    return this.sessionManager.get(guildId).filterHistory(candidates)
   }
 }
 
-module.exports = new HistoryStore()
-
+module.exports = HistoryStore

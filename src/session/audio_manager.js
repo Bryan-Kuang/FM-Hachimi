@@ -1,15 +1,20 @@
 /**
  * Audio Manager
- * Manages multiple audio players across different Discord guilds
+ * Manages multiple audio players across different Discord guilds.
+ * Player instances are stored in GuildSession via SessionManager.
  */
 
-const AudioPlayer = require("./player");
+const AudioPlayer = require("../playback/audio_player");
 const logger = require("../services/logger_service");
 
 class AudioManager {
-  constructor() {
-    this.players = new Map(); // Guild ID -> AudioPlayer
-    this.extractor = null;
+  /**
+   * @param {Object} sessionManager - SessionManager instance
+   * @param {Object} [extractor] - BilibiliExtractor instance
+   */
+  constructor(sessionManager, extractor) {
+    this.sessionManager = sessionManager;
+    this.extractor = extractor || null;
   }
 
   /**
@@ -35,14 +40,12 @@ class AudioManager {
    * @returns {AudioPlayer} - Audio player instance
    */
   getPlayer(guildId) {
-    if (!this.players.has(guildId)) {
-      const player = new AudioPlayer();
-      this.players.set(guildId, player);
-
+    const session = this.sessionManager.get(guildId);
+    if (!session.player) {
+      session.player = new AudioPlayer();
       logger.info("Created new audio player for guild", { guildId });
     }
-
-    return this.players.get(guildId);
+    return session.player;
   }
 
   /**
@@ -50,11 +53,10 @@ class AudioManager {
    * @param {string} guildId - Discord guild ID
    */
   removePlayer(guildId) {
-    const player = this.players.get(guildId);
-    if (player) {
-      player.leaveVoiceChannel();
-      this.players.delete(guildId);
-
+    const session = this.sessionManager.get(guildId);
+    if (session.player) {
+      session.player.leaveVoiceChannel();
+      session.player = null;
       logger.info("Removed audio player for guild", { guildId });
     }
   }
@@ -125,9 +127,8 @@ class AudioManager {
       if (!player.isPlaying && !player.isPaused) {
         try {
           let playSuccess;
-          // 🔧 修复：如果队列结束后添加新歌，从最新歌曲开始
+          // Fix: if queue ended and a new song is added, start from the newest song
           if (player.currentTrack === null && player.queue.length > 0) {
-            // 队列结束后添加的新歌，从最后一首（新添加的）开始
             player.currentIndex = player.queue.length - 1;
             player.currentTrack = player.queue[player.currentIndex];
             playSuccess = await player.playCurrentTrack();
@@ -141,7 +142,7 @@ class AudioManager {
               error: "Failed to start playback",
               suggestion:
                 "Check if FFmpeg is installed and the video URL is accessible.",
-              keepConnection: true, // Stay in voice channel
+              keepConnection: true,
             };
           }
         } catch (playError) {
@@ -151,13 +152,12 @@ class AudioManager {
             guild: guildId,
           });
 
-          // Don't disconnect, stay in channel and report detailed error
           return {
             success: false,
             error: playError.message,
             suggestion: this.getErrorSuggestion(playError.message),
             keepConnection: true,
-            track, // Return track info even on failure
+            track,
             player: player.getState(),
           };
         }
@@ -407,13 +407,22 @@ class AudioManager {
   async stopPlayback(guildId) {
     const player = this.getPlayer(guildId);
     const stopped = await player.stop();
+    const state = player.getState(); // capture state before removing instance
+
+    if (stopped) {
+      // Clear the player from the session so the next getPlayer() call
+      // creates a fresh one — prevents event listener accumulation and stale flag bleed.
+      const session = this.sessionManager.get(guildId);
+      session.player = null;
+      logger.info("Audio player instance removed for guild", { guildId });
+    }
 
     return {
       success: stopped,
       message: stopped
         ? "Stopped playback, cleared queue, and left voice channel"
         : "Failed to stop playback",
-      player: player.getState(),
+      player: state,
     };
   }
 
@@ -423,10 +432,8 @@ class AudioManager {
    * @returns {string} - Helpful suggestion
    */
   getErrorSuggestion(errorMessage) {
-    // Log the actual error message for debugging
     logger.debug("Generating error suggestion for:", { errorMessage });
 
-    // Check for FFmpeg issues first (most specific)
     if (
       errorMessage.includes("FFmpeg") ||
       errorMessage.includes("ffmpeg") ||
@@ -436,7 +443,6 @@ class AudioManager {
       return "FFmpeg is required for audio playback. Install it with: `brew install ffmpeg` (macOS) or `sudo apt install ffmpeg` (Ubuntu)";
     }
 
-    // Check for audio resource creation issues
     if (
       errorMessage.includes("Failed to create audio resource") ||
       errorMessage.includes("audio resource creation failed")
@@ -444,22 +450,18 @@ class AudioManager {
       return "Audio processing failed. This is usually due to missing FFmpeg. Install it with: `brew install ffmpeg` (macOS) or `sudo apt install ffmpeg` (Ubuntu)";
     }
 
-    // Certificate/SSL issues
     if (errorMessage.includes("certificate") || errorMessage.includes("SSL")) {
       return "SSL certificate issue. This may be a temporary network problem. Please try again in a few minutes.";
     }
 
-    // Video not found
     if (errorMessage.includes("404") || errorMessage.includes("Not Found")) {
       return "Video not found. The video may be private, deleted, or region-locked.";
     }
 
-    // Network timeout
     if (errorMessage.includes("timeout")) {
       return "Connection timeout. Please check your internet connection and try again.";
     }
 
-    // Voice connection issues (only if not related to FFmpeg)
     if (
       (errorMessage.includes("voice") || errorMessage.includes("connection")) &&
       !errorMessage.includes("FFmpeg") &&
@@ -468,7 +470,6 @@ class AudioManager {
       return "Voice connection issue. Make sure the bot has permission to join and speak in voice channels.";
     }
 
-    // Default fallback
     return "Please check the video URL and try again. If the problem persists, the video may not be accessible.";
   }
 
@@ -478,13 +479,15 @@ class AudioManager {
    */
   getStatistics() {
     const stats = {
-      totalGuilds: this.players.size,
+      totalGuilds: this.sessionManager.size,
       activeConnections: 0,
       totalTracks: 0,
       playingGuilds: 0,
     };
 
-    for (const [_guildId, player] of this.players) {
+    for (const [_guildId, session] of this.sessionManager.sessions) {
+      const player = session.player;
+      if (!player) continue;
       if (player.voiceConnection) {
         stats.activeConnections++;
       }
@@ -533,7 +536,6 @@ class AudioManager {
         return this.shuffleQueue(guildId);
 
       case "loop": {
-        // Loop button now shows selection menu, handled in interactionCreate
         return { success: true, showMenu: true };
       }
 
@@ -550,17 +552,14 @@ class AudioManager {
       }
 
       case "queue_remove": {
-        // Queue remove button shows selection menu, handled in interactionCreate
         return { success: true, showMenu: true };
       }
 
       case "queue": {
-        // Queue button shows queue information, handled in interactionCreate
         return { success: true, showQueue: true };
       }
 
       default:
-        // Handle queue delete buttons (format: queue_delete_<index>)
         if (customId.startsWith("queue_delete_")) {
           const index = parseInt(customId.split("_")[2]);
           if (!isNaN(index)) {
@@ -572,18 +571,12 @@ class AudioManager {
   }
 
   /**
-   * Cleanup resources
+   * Cleanup all resources via SessionManager
    */
   cleanup() {
-    for (const [_guildId, player] of this.players) {
-      player.leaveVoiceChannel();
-    }
-    this.players.clear();
-
+    this.sessionManager.cleanup();
     logger.info("Audio manager cleanup completed");
   }
 }
 
-// Export singleton instance
-const audioManager = new AudioManager();
-module.exports = audioManager;
+module.exports = AudioManager;

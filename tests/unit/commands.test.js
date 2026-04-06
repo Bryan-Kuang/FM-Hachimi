@@ -69,7 +69,7 @@ jest.mock("discord.js", () => ({
 }));
 
 // Mock dependencies
-jest.mock("../../src/control/player_control");
+jest.mock("../../src/playback/player_control");
 jest.mock("../../src/ui/interface_updater");
 jest.mock("../../src/services/logger_service", () => ({
   info: jest.fn(),
@@ -95,11 +95,11 @@ const mockAudioManager = {
   getExtractor: jest.fn(),
 };
 
-jest.mock("../../src/audio/manager", () => mockAudioManager);
+jest.mock("../../src/session/audio_manager", () => mockAudioManager);
 
 const SceneFactory = require("../utils/scene_factory");
 
-const PlayerControl = require("../../src/control/player_control");
+const PlayerControl = require("../../src/playback/player_control");
 const InterfaceUpdater = require("../../src/ui/interface_updater");
 const logger = require("../../src/services/logger_service");
 const snapshotMinimal = (embed) => ({
@@ -557,14 +557,14 @@ describe("Bot Commands Coverage", () => {
 
   describe("Play Command", () => {
     const playCommand = require("../../src/bot/commands/play");
-    jest.mock("../../src/utils/validator", () => ({
+    jest.mock("../../src/bilibili/validator", () => ({
       isValidBilibiliUrl: jest.fn(),
     }));
-    jest.mock("../../src/playlist/playlist_manager", () => ({
+    jest.mock("../../src/playback/playlist_manager", () => ({
       add: jest.fn(),
     }));
-    const UrlValidator = require("../../src/utils/validator");
-    const PlaylistManager = require("../../src/playlist/playlist_manager");
+    const UrlValidator = require("../../src/bilibili/validator");
+    const PlaylistManager = require("../../src/playback/playlist_manager");
 
     const cases = [
       {
@@ -609,7 +609,7 @@ describe("Bot Commands Coverage", () => {
         },
         setup: () => {
           UrlValidator.isValidBilibiliUrl.mockReturnValue(false);
-          const bilibiliApi = require("../../src/utils/bilibiliApi");
+          const bilibiliApi = require("../../src/bilibili/api");
           bilibiliApi.searchVideos = jest.fn().mockResolvedValue([]);
         },
         expected: { editReplyContains: "未找到", deferCalled: true },

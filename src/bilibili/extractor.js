@@ -8,7 +8,7 @@ const { spawn } = require("child_process");
 const fs = require("fs");
 const logger = require("../services/logger_service");
 const config = require("../config/config");
-const UrlValidator = require("../utils/validator");
+const UrlValidator = require("./validator");
 
 class BilibiliExtractor {
   constructor() {

@@ -79,7 +79,7 @@ class FixedBotTester {
     try {
       // 检查核心依赖
       require("@discordjs/voice");
-      require("../../src/audio/extractor");
+      require("../../src/bilibili/extractor");
 
       return { success: true, message: "All dependencies available" };
     } catch (error) {
@@ -89,7 +89,7 @@ class FixedBotTester {
 
   async testBilibiliExtraction() {
     try {
-      const BilibiliExtractor = require("../../src/audio/extractor");
+      const BilibiliExtractor = require("../../src/bilibili/extractor");
       const extractor = new BilibiliExtractor();
 
       // 快速检查，不实际提取
