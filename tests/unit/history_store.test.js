@@ -1,11 +1,25 @@
 const HistoryStore = require('../../src/utils/history_store')
+const GuildSession = require('../../src/session/guild_session')
 
-describe('HistoryStore LRU behavior', () => {
+// Create a mock sessionManager that produces real GuildSession objects
+function createMockSessionManager() {
+  const sessions = {}
+  return {
+    get(guildId) {
+      if (!sessions[guildId]) sessions[guildId] = new GuildSession(guildId)
+      return sessions[guildId]
+    },
+    _sessions: sessions,
+  }
+}
+
+describe('HistoryStore via SessionManager', () => {
   test('adds and evicts oldest when over limit', () => {
-    const hs = require('../../src/utils/history_store')
+    const sm = createMockSessionManager()
+    const hs = new HistoryStore(sm)
     const guild = 'g1'
-    // use small limit
-    hs.limit = 3
+    // Set a small limit on the underlying session
+    sm.get(guild).historyLimit = 3
     hs.add(guild, 'a')
     hs.add(guild, 'b')
     hs.add(guild, 'c')
@@ -19,9 +33,9 @@ describe('HistoryStore LRU behavior', () => {
   })
 
   test('filter removes items present in history', () => {
-    const hs = require('../../src/utils/history_store')
+    const sm = createMockSessionManager()
+    const hs = new HistoryStore(sm)
     const guild = 'g2'
-    hs.limit = 50
     hs.add(guild, 'x')
     hs.add(guild, 'y')
     const candidates = [
@@ -36,4 +50,3 @@ describe('HistoryStore LRU behavior', () => {
     expect(ids).not.toContain('y')
   })
 })
-

@@ -3,7 +3,7 @@
  * Tests the /hachimi command functionality including Bilibili API integration
  */
 
-const bilibiliApi = require('../../src/utils/bilibiliApi');
+const bilibiliApi = require('../../src/bilibili/api');
 const logger = require('../../src/services/logger_service');
 
 async function testBilibiliApi() {

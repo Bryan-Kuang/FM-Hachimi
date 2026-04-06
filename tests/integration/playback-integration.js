@@ -12,7 +12,7 @@ const {
   AudioPlayerStatus,
 } = require("@discordjs/voice");
 const { spawn } = require("child_process");
-const BilibiliExtractor = require("../../src/audio/extractor");
+const BilibiliExtractor = require("../../src/bilibili/extractor");
 
 class PlaybackIntegrationTest {
   constructor() {

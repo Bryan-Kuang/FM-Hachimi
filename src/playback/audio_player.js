@@ -18,7 +18,8 @@ const Formatters = require("../utils/formatters");
 const config = require("../config/config");
 
 class AudioPlayer {
-  constructor() {
+  constructor(extractor) {
+    this.extractor = extractor || null;
     this.audioPlayer = createAudioPlayer();
     this.voiceConnection = null;
     this.queue = [];
@@ -430,10 +431,8 @@ class AudioPlayer {
         const age = Date.now() - new Date(this.currentTrack.extractedAt).getTime();
         if (age > config.audio.urlRefreshThreshold) {
           try {
-            const AudioManager = require("./manager");
-            const extractor = AudioManager.getExtractor();
-            if (extractor) {
-              const freshUrl = await extractor.getAudioStreamUrl(this.currentTrack.normalizedUrl);
+            if (this.extractor) {
+              const freshUrl = await this.extractor.getAudioStreamUrl(this.currentTrack.normalizedUrl);
               this.currentTrack.audioUrl = freshUrl;
               this.currentTrack.extractedAt = new Date().toISOString();
               logger.info("Refreshed stale audio URL", { title: this.currentTrack.title });
@@ -1180,10 +1179,8 @@ class AudioPlayer {
     // Force refresh audio URL on retry since it likely expired
     if (this.currentTrack.normalizedUrl) {
       try {
-        const AudioManager = require("./manager");
-        const extractor = AudioManager.getExtractor();
-        if (extractor) {
-          const freshUrl = await extractor.getAudioStreamUrl(this.currentTrack.normalizedUrl);
+        if (this.extractor) {
+          const freshUrl = await this.extractor.getAudioStreamUrl(this.currentTrack.normalizedUrl);
           this.currentTrack.audioUrl = freshUrl;
           this.currentTrack.extractedAt = new Date().toISOString();
           logger.info("Refreshed audio URL for retry", { title: this.currentTrack.title });

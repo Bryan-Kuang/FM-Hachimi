@@ -3,7 +3,7 @@
  * Tests audio extraction functionality without Discord integration
  */
 
-const BilibiliExtractor = require("../../src/audio/extractor");
+const BilibiliExtractor = require("../../src/bilibili/extractor");
 const logger = require("../../src/services/logger_service");
 
 // Test URLs for different scenarios

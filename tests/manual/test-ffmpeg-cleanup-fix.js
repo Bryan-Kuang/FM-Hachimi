@@ -3,7 +3,7 @@
  * This test ensures that new FFmpeg processes are not killed by cleanup timers from old processes
  */
 
-const AudioPlayer = require('../../src/audio/player');
+const AudioPlayer = require('../../src/playback/audio_player');
 const logger = require('../../src/services/logger_service');
 
 async function testFFmpegCleanupFix() {

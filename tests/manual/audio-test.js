@@ -4,7 +4,7 @@
  */
 
 const path = require("path");
-const UrlValidator = require("../../src/utils/validator");
+const UrlValidator = require("../../src/bilibili/validator");
 const Formatters = require("../../src/utils/formatters");
 const logger = require("../../src/services/logger_service");
 

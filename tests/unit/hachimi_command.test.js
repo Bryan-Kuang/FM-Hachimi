@@ -5,6 +5,7 @@ jest.mock('discord.js', () => ({
       setDescription: function () { return this },
     }
   },
+  MessageFlags: { Ephemeral: 64 },
 }))
 
 jest.mock('../../src/ui/embeds', () => ({
@@ -26,10 +27,41 @@ jest.mock('../../src/ui/embeds', () => ({
   }),
 }))
 
-const hachimi = require('../../src/bot/commands/hachimi')
+jest.mock('../../src/services/logger_service', () => ({
+  info: jest.fn(),
+  error: jest.fn(),
+  warn: jest.fn(),
+  debug: jest.fn(),
+}))
 
-describe('hachimi command integration with PlayerControl', () => {
-  test('searchAndAddHachimiVideos uses PlayerControl.play when idle', async () => {
+jest.mock('../../src/utils/command_queue', () => ({
+  getQueue: () => ({ isFull: () => false, count: 0 }),
+  run: async (guildId, name, fn) => await fn(),
+}))
+
+describe('hachimi command integration with PlaybackService', () => {
+  test('searchAndAddHachimiVideos uses playbackService.play when idle', async () => {
+    const mockPlaybackService = {
+      setUIContext: jest.fn(),
+      getExtractor: () => ({ dummy: true }),
+      getPlayer: () => ({
+        voiceConnection: null,
+        joinVoiceChannel: jest.fn().mockResolvedValue(true),
+        clearQueue: jest.fn(),
+        isPlaying: false,
+        isPaused: false,
+        currentTrack: null,
+        stop: jest.fn(),
+      }),
+      addTrack: jest.fn().mockResolvedValue({ title: 'Mock Track' }),
+      play: jest.fn().mockResolvedValue(true),
+      notifyState: jest.fn(),
+      _notifyState: jest.fn(),
+    }
+
+    const createHachimiCommand = require('../../src/bot/commands/hachimi')
+    const hachimi = createHachimiCommand(mockPlaybackService)
+
     const mockInteraction = {
       guild: { id: 'test-guild', name: 'Test Guild' },
       channelId: 'test-channel',
@@ -39,19 +71,7 @@ describe('hachimi command integration with PlayerControl', () => {
       editReply: jest.fn().mockResolvedValue({}),
     }
 
-    const audioManager = {
-      getExtractor: () => ({ dummy: true }),
-      getPlayer: () => ({
-        voiceConnection: null,
-        joinVoiceChannel: jest.fn().mockResolvedValue(true),
-        clearQueue: jest.fn(),
-        isPlaying: false,
-        isPaused: false,
-        currentTrack: null,
-      }),
-    }
-
-    const bilibiliApi = require('../../src/utils/bilibiliApi')
+    const bilibiliApi = require('../../src/bilibili/api')
     jest.spyOn(bilibiliApi, 'searchHachimiVideos').mockResolvedValue({
       results: [
         { url: 'https://www.bilibili.com/video/BV1xx1' },
@@ -59,14 +79,8 @@ describe('hachimi command integration with PlayerControl', () => {
       ],
     })
 
-    const PlaylistManager = require('../../src/playlist/playlist_manager')
-    jest.spyOn(PlaylistManager, 'add').mockResolvedValue({ title: 'Mock Track' })
+    await hachimi.searchAndAddHachimiVideos(mockInteraction, 'Tester')
 
-    const PlayerControl = require('../../src/control/player_control')
-    const playSpy = jest.spyOn(PlayerControl, 'play').mockResolvedValue(true)
-
-    await hachimi.searchAndAddHachimiVideos(mockInteraction, audioManager, 'Tester')
-
-    expect(playSpy).toHaveBeenCalledWith('test-guild')
+    expect(mockPlaybackService.play).toHaveBeenCalledWith('test-guild')
   })
 })

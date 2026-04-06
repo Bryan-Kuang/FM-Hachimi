@@ -1,43 +1,48 @@
 /**
  * Progress Tracker
- * Manages real-time progress updates for now playing embeds
+ * Manages real-time progress updates for now playing embeds.
+ * Tracker state is stored in GuildSession via SessionManager.
  */
 
-const EmbedBuilders = require("../ui/embeds");
-const ButtonBuilders = require("../ui/buttons");
+const EmbedBuilders = require("./embeds");
+const ButtonBuilders = require("./buttons");
 const logger = require("../services/logger_service");
 
 class ProgressTracker {
-  constructor() {
-    this.activeTrackers = new Map(); // guildId -> tracker info
+  /**
+   * @param {Object} sessionManager - SessionManager instance
+   */
+  constructor(sessionManager) {
+    this.sessionManager = sessionManager;
   }
 
   /**
    * Start tracking progress for a guild
    * @param {string} guildId - Discord guild ID
    * @param {Object} message - Discord message to update
-   * @param {Object} player - Audio player instance
+   * @param {Function} getPlayerState - Callback returning { currentTrack, isPlaying, currentTime, currentIndex, queueLength, loopMode, hasPrevious, hasNext }
    */
-  startTracking(guildId, message, _playerState) {
+  startTracking(guildId, message, getPlayerState) {
     // Clear existing tracker
     this.stopTracking(guildId);
 
+    const session = this.sessionManager.get(guildId);
+
     if (process.env.NODE_ENV === "test") {
-      this.activeTrackers.set(guildId, { message, guildId, interval: null });
+      session.progressTracker = { message, guildId, interval: null, getPlayerState };
       this.updateProgress(guildId);
       return;
     }
 
-    const tracker = {
+    session.progressTracker = {
       message,
       guildId,
+      getPlayerState,
       updating: false,
       interval: setInterval(() => {
         this.updateProgress(guildId);
       }, 1000),
     };
-
-    this.activeTrackers.set(guildId, tracker);
 
     logger.info("Started progress tracking", { guild: guildId });
   }
@@ -47,10 +52,11 @@ class ProgressTracker {
    * @param {string} guildId - Discord guild ID
    */
   stopTracking(guildId) {
-    const tracker = this.activeTrackers.get(guildId);
+    const session = this.sessionManager.get(guildId);
+    const tracker = session.progressTracker;
     if (tracker) {
       if (tracker.interval) clearInterval(tracker.interval);
-      this.activeTrackers.delete(guildId);
+      session.progressTracker = null;
       logger.info("Stopped progress tracking", { guild: guildId });
     }
   }
@@ -60,7 +66,8 @@ class ProgressTracker {
    * @param {string} guildId - Discord guild ID
    */
   async updateProgress(guildId) {
-    const tracker = this.activeTrackers.get(guildId);
+    const session = this.sessionManager.get(guildId);
+    const tracker = session.progressTracker;
     if (!tracker) return;
 
     // Skip if previous edit is still in flight (prevents rate limit queue buildup)
@@ -68,15 +75,14 @@ class ProgressTracker {
     tracker.updating = true;
 
     try {
-      const { message, guildId } = tracker;
+      const { message, getPlayerState } = tracker;
 
-      // Get current player state from AudioManager
-      const AudioManager = require("../audio/manager");
-      const player = AudioManager.getPlayer(guildId);
+      // Get current player state via callback
+      const playerState = getPlayerState();
 
       // Only update if currently playing
-      const track = player.currentTrack;
-      if (!player.isPlaying || !track) {
+      const track = playerState.currentTrack;
+      if (!playerState.isPlaying || !track) {
         return;
       }
 
@@ -85,7 +91,7 @@ class ProgressTracker {
         return;
       }
 
-      const currentTime = player.getCurrentTime();
+      const currentTime = playerState.currentTime;
 
       // Create updated embed
       const updatedEmbed = EmbedBuilders.createNowPlayingEmbed(
@@ -93,14 +99,13 @@ class ProgressTracker {
         {
           currentTime,
           requestedBy: track.requestedBy,
-          queuePosition: player.currentIndex + 1,
-          totalQueue: player.queue.length,
-          loopMode: player.loopMode,
+          queuePosition: playerState.currentIndex + 1,
+          totalQueue: playerState.queueLength,
+          loopMode: playerState.loopMode,
         }
       );
 
       // Create updated buttons
-      const playerState = player.getState();
       const controlButtons = ButtonBuilders.createPlaybackControls({
         isPlaying: playerState.isPlaying,
         hasQueue: playerState.queueLength > 0,
@@ -131,7 +136,9 @@ class ProgressTracker {
         this.stopTracking(guildId);
       }
     } finally {
-      if (tracker) tracker.updating = false;
+      // Re-read tracker from session in case stopTracking was called during await
+      const currentTracker = this.sessionManager.get(guildId).progressTracker;
+      if (currentTracker) currentTracker.updating = false;
     }
   }
 
@@ -139,13 +146,14 @@ class ProgressTracker {
    * Cleanup all trackers
    */
   cleanup() {
-    for (const [guildId] of this.activeTrackers) {
-      this.stopTracking(guildId);
+    if (!this.sessionManager) return;
+    for (const [guildId, session] of this.sessionManager.sessions) {
+      if (session.progressTracker) {
+        this.stopTracking(guildId);
+      }
     }
     logger.info("Progress tracker cleanup completed");
   }
 }
 
-// Export singleton instance
-const progressTracker = new ProgressTracker();
-module.exports = progressTracker;
+module.exports = ProgressTracker;

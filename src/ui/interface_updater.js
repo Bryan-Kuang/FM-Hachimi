@@ -1,14 +1,18 @@
 const EmbedBuilders = require('../ui/embeds')
 const ButtonBuilders = require('../ui/buttons')
 const logger = require('../services/logger_service')
-const ProgressTracker = require('../audio/progress-tracker')
-const AudioManager = require('../audio/manager')
 
 class InterfaceUpdater {
-  constructor() {
+  /**
+   * @param {Object} sessionManager - SessionManager instance
+   * @param {Object} progressTracker - ProgressTracker instance
+   * @param {Object} audioManager - AudioManager instance
+   */
+  constructor(sessionManager, progressTracker, audioManager) {
     this.client = null
-    this.contexts = new Map()
-    this.seq = new Map()
+    this.sessionManager = sessionManager
+    this.progressTracker = progressTracker
+    this.audioManager = audioManager
   }
 
   setClient(client) {
@@ -16,13 +20,34 @@ class InterfaceUpdater {
   }
 
   setPlaybackContext(guildId, channelId, messageId) {
-    const prev = this.contexts.get(guildId) || {}
-    this.contexts.set(guildId, { channelId, messageId: messageId || prev.messageId })
+    const session = this.sessionManager.get(guildId)
+    const prev = session.uiContext || {}
+    session.uiContext = { channelId, messageId: messageId || prev.messageId }
   }
 
   clearContext(guildId) {
-    this.contexts.delete(guildId)
-    this.seq.delete(guildId)
+    const session = this.sessionManager.get(guildId)
+    session.uiContext = null
+    session.uiSeq = 0
+  }
+
+  /**
+   * Check whether a UI context exists for a guild.
+   * @param {string} guildId
+   * @returns {boolean}
+   */
+  hasContext(guildId) {
+    const session = this.sessionManager.get(guildId)
+    return session.uiContext != null
+  }
+
+  /**
+   * Get the UI context for a guild.
+   * @param {string} guildId
+   * @returns {Object|null}
+   */
+  getContext(guildId) {
+    return this.sessionManager.get(guildId).uiContext
   }
 
   bind(playerControl) {
@@ -33,18 +58,19 @@ class InterfaceUpdater {
 
   async handleUpdate(guildId, state) {
     try {
-      const s = (this.seq.get(guildId) || 0) + 1
-      this.seq.set(guildId, s)
-      const ctx = this.contexts.get(guildId)
+      const session = this.sessionManager.get(guildId)
+      const s = (session.uiSeq || 0) + 1
+      session.uiSeq = s
+      const ctx = session.uiContext
       if (!ctx || !ctx.channelId) return
       if (!state.currentTrack) {
-        ProgressTracker.stopTracking(guildId)
+        this.progressTracker.stopTracking(guildId)
         return
       }
       // Capture to local variable to prevent race condition during async ops
       const currentTrack = state.currentTrack
       const channel = this.client.channels.cache.get(ctx.channelId) || await this.client.channels.fetch(ctx.channelId)
-      const currentTime = AudioManager.getPlayer(guildId).getCurrentTime()
+      const currentTime = this.audioManager.getPlayer(guildId).getCurrentTime()
       const embed = EmbedBuilders.createNowPlayingEmbed(currentTrack, {
         currentTime,
         requestedBy: currentTrack.requestedBy,
@@ -64,11 +90,11 @@ class InterfaceUpdater {
         try {
           const msg = await channel.messages.edit(ctx.messageId, options)
           if (!msg) throw new Error('Message edit returned null')
-          if ((this.seq.get(guildId) || 0) !== s) return
+          if ((session.uiSeq || 0) !== s) return
           if (state.isPlaying && state.currentTrack) {
-            ProgressTracker.startTracking(guildId, msg)
+            this.progressTracker.startTracking(guildId, msg, () => this._getPlayerState(guildId))
           } else {
-            ProgressTracker.stopTracking(guildId)
+            this.progressTracker.stopTracking(guildId)
           }
         } catch (e) {
           // Disable buttons on stale message to prevent ghost interactions
@@ -76,26 +102,46 @@ class InterfaceUpdater {
             await channel.messages.edit(ctx.messageId, { components: [] })
           } catch (_) { /* message may already be deleted */ }
           const sent = await channel.send(options)
-          this.contexts.set(guildId, { channelId: ctx.channelId, messageId: sent.id })
+          session.uiContext = { channelId: ctx.channelId, messageId: sent.id }
           if (state.isPlaying && state.currentTrack) {
-            ProgressTracker.startTracking(guildId, sent)
+            this.progressTracker.startTracking(guildId, sent, () => this._getPlayerState(guildId))
           } else {
-            ProgressTracker.stopTracking(guildId)
+            this.progressTracker.stopTracking(guildId)
           }
         }
       } else {
         const sent = await channel.send(options)
-        this.contexts.set(guildId, { channelId: ctx.channelId, messageId: sent.id })
+        session.uiContext = { channelId: ctx.channelId, messageId: sent.id }
         if (state.isPlaying && state.currentTrack) {
-          ProgressTracker.startTracking(guildId, sent)
+          this.progressTracker.startTracking(guildId, sent, () => this._getPlayerState(guildId))
         } else {
-          ProgressTracker.stopTracking(guildId)
+          this.progressTracker.stopTracking(guildId)
         }
       }
     } catch (e) {
       logger.error('Interface update failed', { guildId, error: e.message })
     }
   }
+
+  /**
+   * Get current player state for progress tracking
+   * @param {string} guildId - Discord guild ID
+   * @returns {{ currentTrack, isPlaying, currentTime, currentIndex, queueLength, loopMode, hasPrevious, hasNext }}
+   */
+  _getPlayerState(guildId) {
+    const player = this.audioManager.getPlayer(guildId)
+    if (!player) return null
+    return {
+      currentTrack: player.currentTrack,
+      isPlaying: player.isPlaying,
+      currentTime: player.getCurrentTime(),
+      currentIndex: player.currentIndex,
+      queueLength: player.queue ? player.queue.length : 0,
+      loopMode: player.loopMode,
+      hasPrevious: player.currentIndex > 0,
+      hasNext: player.queue ? player.currentIndex < player.queue.length - 1 : false
+    }
+  }
 }
 
-module.exports = new InterfaceUpdater()
+module.exports = InterfaceUpdater

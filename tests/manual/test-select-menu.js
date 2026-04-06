@@ -3,7 +3,7 @@
  */
 
 const { Client, GatewayIntentBits } = require("discord.js");
-const AudioManager = require("../../src/audio/manager");
+const AudioManager = require("../../src/session/audio_manager");
 const logger = require("../../src/services/logger_service");
 
 async function testSelectMenuInteraction() {

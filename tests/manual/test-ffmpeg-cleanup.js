@@ -5,7 +5,7 @@
  * 验证在停止播放和离开语音频道时FFmpeg进程是否被正确终止
  */
 
-const AudioPlayer = require('../../src/audio/player');
+const AudioPlayer = require('../../src/playback/audio_player');
 const logger = require('../../src/services/logger_service');
 
 console.log('🧪 Testing FFmpeg Process Cleanup...');

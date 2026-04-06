@@ -1,12 +1,17 @@
 /**
  * Bilibili Discord Bot - Main Entry Point
- * Initializes and starts the Discord bot with Bilibili audio streaming capabilities
+ * Composition root: all dependencies are instantiated here and wired together.
  */
 
 const config = require("./config/config");
 const BotClient = require("./bot/client");
-const BilibiliExtractor = require("./audio/extractor");
-const AudioManager = require("./audio/manager");
+const BilibiliExtractor = require("./bilibili/extractor");
+const SessionManager = require("./session/session_manager");
+const AudioManager = require("./session/audio_manager");
+const InterfaceUpdater = require("./ui/interface_updater");
+const ProgressTracker = require("./ui/progress_tracker");
+const HistoryStore = require("./utils/history_store");
+const PlaybackService = require("./services/playback_service");
 const logger = require("./services/logger_service");
 const TokenPrecheck = require("./utils/token_precheck");
 const Debug = require("./utils/debug");
@@ -14,7 +19,7 @@ const Debug = require("./utils/debug");
 class BilibiliDiscordBot {
   constructor() {
     this.botClient = null;
-    this.extractor = null;
+    this.sessionManager = null;
     this.isRunning = false;
   }
 
@@ -42,25 +47,40 @@ class BilibiliDiscordBot {
       }
       Debug.trace("token.precheck", { reason: tokenCheck.reason || "OK" });
 
-      // Initialize Bilibili extractor
-      logger.info("Initializing Bilibili audio extractor");
-      this.extractor = new BilibiliExtractor();
+      // --- Composition root: instantiate and wire all dependencies ---
 
-      // Skip startup tests for faster boot - check on first use instead
+      const sessionManager = new SessionManager();
+      this.sessionManager = sessionManager;
+
+      const extractor = new BilibiliExtractor();
       logger.info("Bilibili extractor initialized (will test on first use)");
 
-      // Initialize Discord bot client
+      const audioManager = new AudioManager(sessionManager, extractor);
+      const progressTracker = new ProgressTracker(sessionManager);
+      const historyStore = new HistoryStore(sessionManager);
+      const interfaceUpdater = new InterfaceUpdater(sessionManager, progressTracker, audioManager);
+
+      // Inject historyStore into bilibiliApi singleton
+      const bilibiliApi = require("./bilibili/api");
+      bilibiliApi.setHistoryStore(historyStore);
+
+      const playbackService = new PlaybackService({
+        audioManager,
+        interfaceUpdater,
+        progressTracker,
+        extractor,
+        historyStore,
+      });
+      Debug.trace("inject.dependencies");
+
+      // Bot client
       logger.info("Initializing Discord bot client");
       Debug.trace("client.init");
-      this.botClient = new BotClient();
+      this.botClient = new BotClient(playbackService);
+      this.botClient.setExtractor(extractor);
 
-      // Attach extractor to bot client and audio manager
-      this.botClient.setExtractor(this.extractor);
-      AudioManager.setExtractor(this.extractor);
-      Debug.trace("inject.extractor");
-
-      // Initialize bot client
-      await this.botClient.initialize();
+      // Initialize bot client (login, load commands, bind UI)
+      await this.botClient.initialize(interfaceUpdater);
       Debug.trace("client.initialize.done");
 
       this.isRunning = true;
@@ -96,8 +116,10 @@ class BilibiliDiscordBot {
         await this.botClient.shutdown();
       }
 
-      // Cleanup audio resources
-      AudioManager.cleanup();
+      // Cleanup all guild sessions (players, progress trackers, UI contexts)
+      if (this.sessionManager) {
+        this.sessionManager.cleanup();
+      }
 
       this.isRunning = false;
       logger.info("Bot shutdown completed");
@@ -115,7 +137,6 @@ class BilibiliDiscordBot {
     return {
       running: this.isRunning,
       botStats: this.botClient ? this.botClient.getStats() : null,
-      extractorAvailable: this.extractor !== null,
     };
   }
 }

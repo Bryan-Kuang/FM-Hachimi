@@ -3,9 +3,9 @@
  * Tests audio streaming functionality without Discord integration
  */
 
-const AudioPlayer = require("../../src/audio/player");
-const AudioManager = require("../../src/audio/manager");
-const BilibiliExtractor = require("../../src/audio/extractor");
+const AudioPlayer = require("../../src/playback/audio_player");
+const AudioManager = require("../../src/session/audio_manager");
+const BilibiliExtractor = require("../../src/bilibili/extractor");
 const logger = require("../../src/services/logger_service");
 
 /**

@@ -14,7 +14,7 @@ jest.mock("../../src/services/logger_service", () => ({
 }));
 
 const { spawn } = require("child_process");
-const Extractor = require("../../src/audio/extractor");
+const Extractor = require("../../src/bilibili/extractor");
 
 describe("Extractor", () => {
   let extractor;
