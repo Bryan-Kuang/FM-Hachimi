@@ -85,7 +85,8 @@ describe("AudioPlayer", () => {
 
     test("increments retryCount", async () => {
       jest.useFakeTimers();
-      player.currentTrack = { title: "Test", retryCount: 0, normalizedUrl: null };
+      const Track = require("../../src/models/track");
+      player.currentTrack = new Track({ title: "Test", normalizedUrl: null }, "user");
       // Prevent actual playback attempt by mocking playCurrentTrack
       player.playCurrentTrack = jest.fn().mockResolvedValue(true);
 
@@ -99,7 +100,9 @@ describe("AudioPlayer", () => {
     });
 
     test("skips track after max retries (>2)", async () => {
-      player.currentTrack = { title: "Test", retryCount: 2, normalizedUrl: null };
+      const Track = require("../../src/models/track");
+      player.currentTrack = new Track({ title: "Test", normalizedUrl: null, retryCount: 2 }, "user");
+      player.currentTrack.retryCount = 2; // set after construction
       player.handleTrackEnd = jest.fn();
 
       await player.retryCurrentTrack();
