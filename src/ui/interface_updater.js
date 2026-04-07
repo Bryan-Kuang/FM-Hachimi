@@ -138,8 +138,8 @@ class InterfaceUpdater {
       currentIndex: player.currentIndex,
       queueLength: player.queue ? player.queue.length : 0,
       loopMode: player.loopMode,
-      hasPrevious: player.currentIndex > 0,
-      hasNext: player.queue ? player.currentIndex < player.queue.length - 1 : false
+      hasPrevious: player.canGoBack(),
+      hasNext: player.canSkip()
     }
   }
 }
