@@ -1,9 +1,9 @@
 module.exports = {
   testEnvironment: "node",
+  testPathIgnorePatterns: ["/node_modules/", "/.claude/"],
   collectCoverageFrom: ["src/**/*.js", "!src/index.js", "!src/**/*.test.js"],
   coverageReporters: ["text", "lcov", "html"],
   coverageDirectory: "coverage",
-  testMatch: ["**/__tests__/**/*.js", "**/*.test.js"],
   setupFilesAfterEnv: ["<rootDir>/tests/setup.js"],
   verbose: true,
   collectCoverage: false, // Enable manually with --coverage flag
