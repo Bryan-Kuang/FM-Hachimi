@@ -96,15 +96,18 @@ const mockPlaybackService = {
   skip: jest.fn().mockResolvedValue(true),
   previous: jest.fn().mockResolvedValue(true),
   play: jest.fn().mockResolvedValue(true),
-  addTrack: jest.fn().mockResolvedValue({ title: 'Track' }),
   setUIContext: jest.fn(),
   clearUIContext: jest.fn(),
   hasUIContext: jest.fn(),
   getUIContext: jest.fn(),
   getPlayer: jest.fn().mockReturnValue(mockPlayer),
-  getQueue: jest.fn(),
   getExtractor: jest.fn(),
   notifyState: jest.fn(),
+};
+
+const mockQueueService = {
+  addTrack: jest.fn().mockResolvedValue({ title: 'Track' }),
+  getQueue: jest.fn(),
 };
 
 const SceneFactory = require("../utils/scene_factory");
@@ -445,7 +448,7 @@ describe("Bot Commands Coverage", () => {
   });
 
   describe("Queue Command", () => {
-    const queueCommand = require("../../src/bot/commands/queue")(mockPlaybackService);
+    const queueCommand = require("../../src/bot/commands/queue")(mockPlaybackService, mockQueueService);
 
     const cases = [
       {
@@ -473,11 +476,11 @@ describe("Bot Commands Coverage", () => {
 
     test.each(cases)("%s", async ({ scene, queueResult }) => {
       const { interaction } = SceneFactory.createScene(scene);
-      mockPlaybackService.getQueue.mockReturnValue(queueResult);
+      mockQueueService.getQueue.mockReturnValue(queueResult);
 
       await queueCommand.execute(interaction);
 
-      expect(mockPlaybackService.getQueue).toHaveBeenCalledWith("guild-1");
+      expect(mockQueueService.getQueue).toHaveBeenCalledWith("guild-1");
       const arg = interaction.reply.mock.calls[0][0];
       expect(arg).toEqual(
         expect.objectContaining({
@@ -573,7 +576,7 @@ describe("Bot Commands Coverage", () => {
   });
 
   describe("Play Command", () => {
-    const playCommand = require("../../src/bot/commands/play")(mockPlaybackService);
+    const playCommand = require("../../src/bot/commands/play")(mockPlaybackService, mockQueueService);
     jest.mock("../../src/bilibili/validator", () => ({
       isValidBilibiliUrl: jest.fn(),
     }));
@@ -654,7 +657,7 @@ describe("Bot Commands Coverage", () => {
         },
         setup: () => {
           UrlValidator.isValidBilibiliUrl.mockReturnValue(true);
-          mockPlaybackService.addTrack.mockResolvedValue(null);
+          mockQueueService.addTrack.mockResolvedValue(null);
         },
         expected: { editReplyContains: "Add failed", deferCalled: true },
       },
@@ -668,7 +671,7 @@ describe("Bot Commands Coverage", () => {
         },
         setup: () => {
           UrlValidator.isValidBilibiliUrl.mockReturnValue(true);
-          mockPlaybackService.addTrack.mockResolvedValue({ title: "Track" });
+          mockQueueService.addTrack.mockResolvedValue({ title: "Track" });
           mockPlaybackService.play.mockResolvedValue(true);
         },
         expected: {

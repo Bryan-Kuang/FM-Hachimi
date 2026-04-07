@@ -6,7 +6,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 const logger = require("../../services/logger_service");
 
-module.exports = function createHelpCommand(playbackService) {
+module.exports = function createHelpCommand(_playbackService) {
   return {
     data: new SlashCommandBuilder()
       .setName("help")

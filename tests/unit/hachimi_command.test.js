@@ -59,8 +59,13 @@ describe('hachimi command integration with PlaybackService', () => {
       _notifyState: jest.fn(),
     }
 
+    const mockQueueService = {
+      getExtractor: () => ({ dummy: true }),
+      addTrack: jest.fn().mockResolvedValue({ title: 'Mock Track' }),
+    }
+
     const createHachimiCommand = require('../../src/bot/commands/hachimi')
-    const hachimi = createHachimiCommand(mockPlaybackService)
+    const hachimi = createHachimiCommand(mockPlaybackService, mockQueueService)
 
     const mockInteraction = {
       guild: { id: 'test-guild', name: 'Test Guild' },
