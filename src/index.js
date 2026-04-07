@@ -12,6 +12,7 @@ const InterfaceUpdater = require("./ui/interface_updater");
 const ProgressTracker = require("./ui/progress_tracker");
 const HistoryStore = require("./utils/history_store");
 const PlaybackService = require("./services/playback_service");
+const QueueService = require("./services/queue_service");
 const logger = require("./services/logger_service");
 const TokenPrecheck = require("./utils/token_precheck");
 const Debug = require("./utils/debug");
@@ -71,12 +72,14 @@ class BilibiliDiscordBot {
         extractor,
         historyStore,
       });
+
+      const queueService = new QueueService({ audioManager, extractor });
       Debug.trace("inject.dependencies");
 
       // Bot client
       logger.info("Initializing Discord bot client");
       Debug.trace("client.init");
-      this.botClient = new BotClient(playbackService);
+      this.botClient = new BotClient(playbackService, queueService);
       this.botClient.setExtractor(extractor);
 
       // Initialize bot client (login, load commands, bind UI)

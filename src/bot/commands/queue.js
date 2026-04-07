@@ -8,7 +8,7 @@ const EmbedBuilders = require("../../ui/embeds");
 const ButtonBuilders = require("../../ui/buttons");
 const logger = require("../../services/logger_service");
 
-module.exports = function createQueueCommand(playbackService) {
+module.exports = function createQueueCommand(playbackService, queueService) {
   return {
     data: new SlashCommandBuilder()
       .setName("queue")
@@ -20,8 +20,8 @@ module.exports = function createQueueCommand(playbackService) {
       try {
         const user = interaction.user;
 
-        // Get actual queue from playback service
-        const queueInfo = playbackService.getQueue(interaction.guild.id);
+        // Get actual queue from queue service
+        const queueInfo = queueService.getQueue(interaction.guild.id);
 
         // Create queue embed
         const queueEmbed = EmbedBuilders.createQueueEmbed(

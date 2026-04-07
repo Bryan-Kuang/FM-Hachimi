@@ -15,7 +15,7 @@ const commandQueue = require("../../utils/command_queue");
  */
 const MAX_VIDEO_BATCH_SIZE = 5;
 
-module.exports = function createHachimiCommand(playbackService) {
+module.exports = function createHachimiCommand(playbackService, queueService) {
   const command = {
     data: new SlashCommandBuilder()
       .setName("hachimi")
@@ -153,7 +153,7 @@ module.exports = function createHachimiCommand(playbackService) {
         if (signal?.aborted) return;
 
         // Ensure extractor is available for audio URL resolution
-        const extractor = playbackService.getExtractor();
+        const extractor = queueService.getExtractor();
         if (!extractor) {
           const errorEmbed = EmbedBuilders.createErrorEmbed(
             "Extractor Not Ready",
@@ -230,7 +230,7 @@ module.exports = function createHachimiCommand(playbackService) {
         for (const video of qualifiedVideos) {
           if (signal?.aborted) break;
           try {
-            const _track = await playbackService.addTrack(
+            const _track = await queueService.addTrack(
               interaction.guild.id,
               video.url,
               username

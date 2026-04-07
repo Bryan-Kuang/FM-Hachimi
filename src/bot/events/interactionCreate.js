@@ -9,7 +9,7 @@ const logger = require("../../services/logger_service");
 const Lock = require("../../utils/lock");
 const { MessageFlags } = require("discord.js");
 
-module.exports = function createInteractionHandler(playbackService) {
+module.exports = function createInteractionHandler(playbackService, queueService) {
   return {
     name: "interactionCreate",
 
@@ -156,7 +156,7 @@ module.exports = function createInteractionHandler(playbackService) {
 
       switch (customId) {
         case "queue": {
-          const queueInfo = playbackService.getQueue(interaction.guild.id);
+          const queueInfo = queueService.getQueue(interaction.guild.id);
           responseEmbed = EmbedBuilders.createQueueEmbed(queueInfo.queue, {
             currentTrack: queueInfo.currentTrack,
             page: 1,
@@ -179,7 +179,7 @@ module.exports = function createInteractionHandler(playbackService) {
             "🗑️ The queue has been cleared"
           );
 
-          const queueInfo = playbackService.getQueue(interaction.guild.id);
+          const queueInfo = queueService.getQueue(interaction.guild.id);
           responseButtons = ButtonBuilders.createQueueControls({
             hasQueue: result.player.queueLength > 0,
             queueLength: result.player.queueLength,
@@ -195,7 +195,7 @@ module.exports = function createInteractionHandler(playbackService) {
             "🔀 The queue has been shuffled"
           );
 
-          const queueInfoShuffle = playbackService.getQueue(interaction.guild.id);
+          const queueInfoShuffle = queueService.getQueue(interaction.guild.id);
           responseButtons = ButtonBuilders.createQueueControls({
             hasQueue: result.player.queueLength > 0,
             queueLength: result.player.queueLength,
@@ -221,7 +221,7 @@ module.exports = function createInteractionHandler(playbackService) {
             `${loopEmoji} Loop mode ${loopText}`
           );
 
-          const queueInfoLoop = playbackService.getQueue(interaction.guild.id);
+          const queueInfoLoop = queueService.getQueue(interaction.guild.id);
           responseButtons = ButtonBuilders.createQueueControls({
             hasQueue: result.player.queueLength > 0,
             queueLength: result.player.queueLength,
@@ -237,7 +237,7 @@ module.exports = function createInteractionHandler(playbackService) {
         }
 
         case "queue_remove": {
-          const queueInfo = playbackService.getQueue(interaction.guild.id);
+          const queueInfo = queueService.getQueue(interaction.guild.id);
 
           if (!queueInfo.queue || queueInfo.queue.length === 0) {
             responseEmbed = EmbedBuilders.createErrorEmbed(
@@ -355,7 +355,7 @@ module.exports = function createInteractionHandler(playbackService) {
         let responseButtons;
 
         if (selectedValue === "clear_all" || selectedValue === "remove_all") {
-          result = { success: playbackService.clearQueue(interaction.guild.id) };
+          result = { success: queueService.clearQueue(interaction.guild.id) };
 
           if (!result.success) {
             const errorEmbed = EmbedBuilders.createErrorEmbed(
@@ -401,7 +401,7 @@ module.exports = function createInteractionHandler(playbackService) {
           }
 
           const index = parseInt(indexMatch[1]);
-          const ok = playbackService.removeTrack(interaction.guild.id, index);
+          const ok = queueService.removeTrack(interaction.guild.id, index);
           result = { success: ok };
 
           if (!result.success) {
@@ -423,7 +423,7 @@ module.exports = function createInteractionHandler(playbackService) {
             `🗑️ Track has been removed from the queue`
           );
 
-          const queueInfo = playbackService.getQueue(interaction.guild.id);
+          const queueInfo = queueService.getQueue(interaction.guild.id);
           responseButtons = ButtonBuilders.createQueueControls({
             hasQueue: queueInfo.queue.length > 0,
             queueLength: queueInfo.queue.length,
@@ -435,7 +435,7 @@ module.exports = function createInteractionHandler(playbackService) {
         Lock.release(interaction.guild.id, customId)
 
         // Update the original message with new queue info
-        const queueInfo = playbackService.getQueue(interaction.guild.id);
+        const queueInfo = queueService.getQueue(interaction.guild.id);
         const queueEmbed = EmbedBuilders.createQueueEmbed(queueInfo.queue, {
           currentTrack: queueInfo.currentTrack,
           page: 1,
@@ -484,8 +484,8 @@ module.exports = function createInteractionHandler(playbackService) {
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-        // Handle loop mode change via PlaybackService
-        const result = playbackService.setLoopMode(
+        // Handle loop mode change via QueueService
+        const result = queueService.setLoopMode(
           interaction.guild.id,
           selectedMode
         );
