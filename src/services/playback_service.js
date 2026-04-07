@@ -23,6 +23,16 @@ class PlaybackService extends EventEmitter {
     this.progressTracker = progressTracker
     this.extractor = extractor
     this.historyStore = historyStore || null
+    /** @type {Map<string, AbortController>} Per-guild AbortControllers for running hachimi ops */
+    this._hachimiControllers = new Map()
+  }
+
+  _setHachimiController(guildId, controller) {
+    this._hachimiControllers.set(guildId, controller)
+  }
+
+  _clearHachimiController(guildId) {
+    this._hachimiControllers.delete(guildId)
   }
 
   /**
@@ -172,6 +182,9 @@ class PlaybackService extends EventEmitter {
    */
   async stop(guildId) {
     try {
+      // Abort any in-flight hachimi search/parse for this guild
+      this._hachimiControllers.get(guildId)?.abort()
+      this._hachimiControllers.delete(guildId)
       const result = await this.audioManager.stopPlayback(guildId)
       if (result && result.player) {
         this._emitState(guildId, result.player, null)
