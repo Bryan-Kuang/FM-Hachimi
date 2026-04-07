@@ -9,9 +9,7 @@
 - `src/` - 源代码（按功能模块组织）
 - `tests/` - 完整测试套件
 - `docs/` - 项目文档
-- `setup/` - 快速开始配置
 - `scripts/` - 自动化脚本
-- `config/` - 配置文件
 
 详细结构说明请查看 [PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
 
@@ -152,16 +150,16 @@ cp .env.example .env
 nano .env  # 填入你的 DISCORD_TOKEN
 
 # 2. 一键部署
-./deploy.sh
+./scripts/deploy/deploy.sh
 
 # 3. 查看日志
 docker-compose logs -f
 ```
 
 **完整部署指南**：
-- 📖 [Oracle Cloud 部署教程](./DEPLOYMENT.md) - 详细的云端部署步骤
-- ⚡ [快速开始](./QUICK_START.md) - 30 秒快速部署
-- ✅ [部署检查清单](./DEPLOYMENT_CHECKLIST.md) - 确保万无一失
+- 📖 [Oracle Cloud 部署教程](./docs/DEPLOYMENT.md) - 详细的云端部署步骤
+- ⚡ [快速开始](./docs/QUICK_START.md) - 30 秒快速部署
+- ✅ [部署检查清单](./docs/DEPLOYMENT_CHECKLIST.md) - 确保万无一失
 
 ### 本地开发运行
 

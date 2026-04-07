@@ -8,7 +8,7 @@
     "quick": "node src/index.js",
     "tools": "node scripts/tools/bot-tools.js",
     "dev": "nodemon src/index.js",
-    "docker:dev": "docker compose -f config/docker/compose.dev.yml up",
+    "docker:dev": "docker compose -f docker-compose.dev.yml up",
     "docker:build": "bash scripts/deploy/build.sh",
     "deploy": "bash scripts/deploy/release.sh",
     "test": "jest",
@@ -60,20 +60,6 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  },
-  "jest": {
-    "testEnvironment": "node",
-    "testPathIgnorePatterns": [
-      "/node_modules/",
-      "/.claude/"
-    ],
-    "collectCoverageFrom": [
-      "src/**/*.js",
-      "!src/index.js"
-    ],
-    "setupFilesAfterEnv": [
-      "<rootDir>/tests/setup.js"
-    ]
   },
   "lint-staged": {
     "src/**/*.js": "eslint --fix"

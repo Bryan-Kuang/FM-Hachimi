@@ -114,3 +114,10 @@ $RECYCLE.BIN/
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Project-specific
+docker-compose.override.yml
+yt-dlp
+yt-dlp.exe
+*.pem
+*.key
