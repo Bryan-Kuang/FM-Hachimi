@@ -16,6 +16,7 @@ const { spawn } = require("child_process");
 const logger = require("../services/logger_service");
 const Formatters = require("../utils/formatters");
 const config = require("../config/config");
+const Track = require("../models/track");
 
 class AudioPlayer {
   constructor(extractor) {
@@ -159,7 +160,7 @@ class AudioPlayer {
       });
       // 如果是track loop模式，不计入retry次数
       if (this.loopMode === "track") {
-        this.currentTrack.retryCount = 0;
+        this.currentTrack.resetRetry();
       }
       this.retryCurrentTrack();
     }
@@ -309,12 +310,7 @@ class AudioPlayer {
    * @param {string} requestedBy - User who requested the track
    */
   addToQueue(trackData, requestedBy) {
-    const track = {
-      ...trackData,
-      requestedBy,
-      addedAt: new Date(),
-      id: Date.now() + Math.random(), // Simple unique ID
-    };
+    const track = new Track(trackData, requestedBy);
 
     this.queue.push(track);
 
@@ -427,19 +423,16 @@ class AudioPlayer {
       this.cleanupFFmpegProcess();
 
       // Re-extract audio URL if it's stale (Bilibili CDN URLs expire)
-      if (this.currentTrack.extractedAt && this.currentTrack.normalizedUrl) {
-        const age = Date.now() - new Date(this.currentTrack.extractedAt).getTime();
-        if (age > config.audio.urlRefreshThreshold) {
-          try {
-            if (this.extractor) {
-              const freshUrl = await this.extractor.getAudioStreamUrl(this.currentTrack.normalizedUrl);
-              this.currentTrack.audioUrl = freshUrl;
-              this.currentTrack.extractedAt = new Date().toISOString();
-              logger.info("Refreshed stale audio URL", { title: this.currentTrack.title });
-            }
-          } catch (e) {
-            logger.warn("Failed to refresh audio URL, using cached", { error: e.message });
+      if (this.currentTrack.normalizedUrl && this.currentTrack.isExpired()) {
+        try {
+          if (this.extractor) {
+            const freshUrl = await this.extractor.getAudioStreamUrl(this.currentTrack.normalizedUrl);
+            this.currentTrack.audioUrl = freshUrl;
+            this.currentTrack.extractedAt = new Date().toISOString();
+            logger.info("Refreshed stale audio URL", { title: this.currentTrack.title });
           }
+        } catch (e) {
+          logger.warn("Failed to refresh audio URL, using cached", { error: e.message });
         }
       }
 
@@ -1050,7 +1043,7 @@ class AudioPlayer {
 
     if (this.loopMode === "track" && this.currentTrack) {
       // Repeat current track - reset retry count for loop
-      this.currentTrack.retryCount = 0;
+      this.currentTrack.resetRetry();
       logger.info("Track ended, looping current track", {
         title: this.currentTrack?.title || "Unknown",
         guild: this.currentGuild,
@@ -1167,7 +1160,7 @@ class AudioPlayer {
     });
 
     // 限制重试次数
-    this.currentTrack.retryCount = (this.currentTrack.retryCount || 0) + 1;
+    this.currentTrack.incrementRetry();
     if (this.currentTrack.retryCount > 2) {
       logger.error("Max retry attempts reached, skipping track", {
         title: this.currentTrack?.title || "Unknown",

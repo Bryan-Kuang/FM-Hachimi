@@ -17,9 +17,11 @@ const Debug = require("../utils/debug");
 class BotClient {
   /**
    * @param {Object} playbackService - PlaybackService instance
+   * @param {Object} queueService    - QueueService instance
    */
-  constructor(playbackService) {
+  constructor(playbackService, queueService) {
     this.playbackService = playbackService;
+    this.queueService    = queueService;
 
     // Initialize Discord client with required intents
     this.client = new Client({
@@ -154,7 +156,7 @@ class BotClient {
 
     // Load interaction handlers
     const createInteractionHandler = require("./events/interactionCreate");
-    const interactionHandler = createInteractionHandler(playbackService);
+    const interactionHandler = createInteractionHandler(playbackService, this.queueService);
 
     // Interaction handling (slash commands, buttons, and select menus)
     this.client.on("interactionCreate", async (interaction) => {
@@ -329,8 +331,8 @@ class BotClient {
 
     for (const mod of commandModules) {
       try {
-        // Factory functions return a command object when called with playbackService
-        const command = typeof mod === "function" ? mod(this.playbackService) : mod;
+        // Factory functions receive (playbackService, queueService); plain objects used as-is
+        const command = typeof mod === "function" ? mod(this.playbackService, this.queueService) : mod;
 
         if (command.data && command.execute) {
           this.client.commands.set(command.data.name, command);

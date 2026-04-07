@@ -18,11 +18,11 @@ class PlaybackService extends EventEmitter {
    */
   constructor({ audioManager, interfaceUpdater, progressTracker, extractor, historyStore } = {}) {
     super()
-    this.audioManager = audioManager
+    this.audioManager     = audioManager
     this.interfaceUpdater = interfaceUpdater
-    this.progressTracker = progressTracker
-    this.extractor = extractor
-    this.historyStore = historyStore || null
+    this.progressTracker  = progressTracker
+    this.extractor        = extractor   // kept for getExtractor() used by search / interactionCreate
+    this.historyStore     = historyStore || null
     /** @type {Map<string, AbortController>} Per-guild AbortControllers for running hachimi ops */
     this._hachimiControllers = new Map()
   }
@@ -200,111 +200,6 @@ class PlaybackService extends EventEmitter {
   }
 
   // ---------------------------------------------------------------------------
-  // Queue operations (absorbed from PlaylistManager)
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Add a track to the queue.
-   * Accepts either a video data object or a Bilibili URL string.
-   * @param {string} guildId
-   * @param {Object|string} videoOrUrl - Video data object or Bilibili URL
-   * @param {string} requestedBy - Display name of the requester
-   * @returns {Promise<Object|null>} The track object, or null on failure
-   */
-  async addTrack(guildId, videoOrUrl, requestedBy) {
-    try {
-      const player = this.audioManager.getPlayer(guildId)
-      let videoData = videoOrUrl
-      if (typeof videoOrUrl === 'string') {
-        if (!this.extractor) {
-          throw new Error('Extractor not available')
-        }
-        videoData = await this.extractor.extractAudio(videoOrUrl)
-      }
-      const track = player.addToQueue(videoData, requestedBy)
-      this.emit('playlist_message', { guildId, text: `Added: ${track.title}` })
-      return track
-    } catch (e) {
-      logger.error('Add to playlist failed', { guildId, error: e.message })
-      this.emit('playlist_message', { guildId, text: `Add failed: ${e.message}` })
-      return null
-    }
-  }
-
-  /**
-   * Remove a track from the queue by index.
-   * @param {string} guildId
-   * @param {number} index
-   * @returns {boolean}
-   */
-  removeTrack(guildId, index) {
-    try {
-      const player = this.audioManager.getPlayer(guildId)
-      const ok = player.removeFromQueue(index)
-      this.emit('playlist_message', {
-        guildId,
-        text: ok ? `Removed #${index + 1}` : `Remove failed #${index + 1}`,
-      })
-      return ok
-    } catch (e) {
-      logger.error('Remove from playlist failed', { guildId, index, error: e.message })
-      this.emit('playlist_message', { guildId, text: `Remove failed: ${e.message}` })
-      return false
-    }
-  }
-
-  /**
-   * Clear all tracks from the queue.
-   * @param {string} guildId
-   * @returns {boolean}
-   */
-  clearQueue(guildId) {
-    try {
-      const player = this.audioManager.getPlayer(guildId)
-      player.clearQueue()
-      this.emit('playlist_message', { guildId, text: 'Cleared all tracks' })
-      return true
-    } catch (e) {
-      logger.error('Clear playlist failed', { guildId, error: e.message })
-      this.emit('playlist_message', { guildId, text: `Clear failed: ${e.message}` })
-      return false
-    }
-  }
-
-  /**
-   * Shuffle the queue.
-   * @param {string} guildId
-   * @returns {Object} Result with success flag and player state
-   */
-  shuffleQueue(guildId) {
-    return this.audioManager.shuffleQueue(guildId)
-  }
-
-  // ---------------------------------------------------------------------------
-  // Loop mode
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Set loop mode for a guild.
-   * @param {string} guildId
-   * @param {string} mode - 'none' | 'queue' | 'track'
-   * @returns {Object} Result with success flag
-   */
-  setLoopMode(guildId, mode) {
-    return this.audioManager.setLoopMode(guildId, mode)
-  }
-
-  /**
-   * Get current loop mode for a guild.
-   * @param {string} guildId
-   * @returns {string} Current loop mode
-   */
-  getLoopMode(guildId) {
-    const player = this.audioManager.getPlayer(guildId)
-    return player.loopMode
-  }
-
-  // ---------------------------------------------------------------------------
   // State queries
   // ---------------------------------------------------------------------------
 
@@ -315,15 +210,6 @@ class PlaybackService extends EventEmitter {
    */
   getPlayer(guildId) {
     return this.audioManager.getPlayer(guildId)
-  }
-
-  /**
-   * Get queue info for a guild (formatted for display).
-   * @param {string} guildId
-   * @returns {Object} { queue, currentTrack, state }
-   */
-  getQueue(guildId) {
-    return this.audioManager.getQueue(guildId)
   }
 
   /**

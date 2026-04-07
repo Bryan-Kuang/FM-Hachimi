@@ -7,7 +7,7 @@ const { SlashCommandBuilder, MessageFlags } = require("discord.js");
 const UrlValidator = require("../../bilibili/validator");
 const logger = require("../../services/logger_service");
 
-module.exports = function createPlayCommand(playbackService) {
+module.exports = function createPlayCommand(playbackService, queueService) {
   return {
     data: new SlashCommandBuilder()
       .setName("play")
@@ -79,7 +79,7 @@ module.exports = function createPlayCommand(playbackService) {
             content: "Failed to join voice",
           });
         }
-        const track = await playbackService.addTrack(
+        const track = await queueService.addTrack(
           interaction.guild.id,
           url,
           user.displayName || user.username
