@@ -68,37 +68,38 @@ module.exports = function createHachimiCommand(playbackService) {
       try {
         const queue = commandQueue.getQueue(interaction.guild.id, "hachimi");
 
-        if (queue.isFull()) {
+        if (queue.count > 0) {
           return await interaction.editReply({
-            content: "哈基米队列已满，请稍后再试。",
+            content: "⚠️ 哈基米正在运行中，请等待完成后再试。",
           });
         }
 
-        // Let the user know their request is queued behind a running one
-        if (queue.count > 0) {
-          const waitingEmbed = EmbedBuilders.createLoadingEmbed(
-            "⏳ 等待上一个哈基米完成..."
-          );
-          await interaction.editReply({ embeds: [waitingEmbed] });
-        }
-
         await commandQueue.run(interaction.guild.id, "hachimi", async () => {
-          // Bind playback UI context inside the queued work so it isn't
-          // overwritten by another invocation's early setup
-          playbackService.setUIContext(
-            interaction.guild.id,
-            interaction.channelId
-          );
+          const controller = new AbortController();
+          const { signal } = controller;
+          playbackService._setHachimiController(interaction.guild.id, controller);
 
-          const loadingEmbed = EmbedBuilders.createLoadingEmbed(
-            "🔍 Searching for Hachimi videos that meet quality criteria..."
-          );
-          await interaction.editReply({ embeds: [loadingEmbed] });
+          try {
+            // Bind playback UI context inside the queued work so it isn't
+            // overwritten by another invocation's early setup
+            playbackService.setUIContext(
+              interaction.guild.id,
+              interaction.channelId
+            );
 
-          await command.searchAndAddHachimiVideos(
-            interaction,
-            user.username
-          );
+            const loadingEmbed = EmbedBuilders.createLoadingEmbed(
+              "🔍 Searching for Hachimi videos that meet quality criteria..."
+            );
+            await interaction.editReply({ embeds: [loadingEmbed] });
+
+            await command.searchAndAddHachimiVideos(
+              interaction,
+              user.username,
+              signal
+            );
+          } finally {
+            playbackService._clearHachimiController(interaction.guild.id);
+          }
         });
       } catch (error) {
         logger.error("Error in hachimi command", {
@@ -125,7 +126,7 @@ module.exports = function createHachimiCommand(playbackService) {
      * @param {Object} interaction - Discord interaction object
      * @param {string} username - Username who triggered the command
      */
-    async searchAndAddHachimiVideos(interaction, username) {
+    async searchAndAddHachimiVideos(interaction, username, signal) {
       try {
         const bilibiliApi = require("../../bilibili/api");
 
@@ -147,6 +148,9 @@ module.exports = function createHachimiCommand(playbackService) {
           safeBatchSize,
           interaction.guild.id
         );
+
+        // If stop was clicked while we were searching, bail out now
+        if (signal?.aborted) return;
 
         // Ensure extractor is available for audio URL resolution
         const extractor = playbackService.getExtractor();
@@ -224,6 +228,7 @@ module.exports = function createHachimiCommand(playbackService) {
         let nowPlayingSent = false;
 
         for (const video of qualifiedVideos) {
+          if (signal?.aborted) break;
           try {
             const _track = await playbackService.addTrack(
               interaction.guild.id,
@@ -254,7 +259,7 @@ module.exports = function createHachimiCommand(playbackService) {
 
         // Ensure UI reflects latest state
         try {
-          playbackService._notifyState(interaction.guild.id);
+          playbackService.notifyState(interaction.guild.id);
         } catch (e) {
           logger.warn("Notify state after hachimi add failed", {
             error: e.message,
@@ -320,7 +325,7 @@ module.exports = function createHachimiCommand(playbackService) {
         // Post Now Playing UI and start progress tracking
         if (player.currentTrack && !nowPlayingSent) {
           try {
-            playbackService._notifyState(interaction.guild.id);
+            playbackService.notifyState(interaction.guild.id);
           } catch (e) {
             logger.warn("Notify state failed after nowPlaying check", {
               error: e.message,
