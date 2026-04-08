@@ -37,6 +37,7 @@ class AudioPlayer {
     this._ffmpegChecked = false; // Lazy FFmpeg availability check
     this._cdnRetryPending = false; // Flag for CDN failure retry coordination
     this._manualNavigating = false; // Flag to prevent double-skip from stale Idle events
+    this._trackEndInProgress = false; // Re-entrancy guard for handleTrackEnd
     this._inactivityTimer = null; // Auto-disconnect after 1 min of inactivity
     this.isIdle = false; // True when nothing is playing; idle state owns the inactivity timer
 
@@ -52,7 +53,9 @@ class AudioPlayer {
       this.isPlaying = true;
       this.isPaused = false;
       this.startTime = Date.now(); // Record when playback started
-      this._manualNavigating = false; // New track started, clear navigation guard
+      // Note: _manualNavigating is cleared in playCurrentTrack() after the
+      // resource is fully handed off, not here, to avoid a window where a
+      // spurious Idle event could slip through between Playing and the 1s wait.
 
       logger.info("Audio player started playing", {
         track: this.currentTrack?.title,
@@ -452,8 +455,12 @@ class AudioPlayer {
       // Play the audio
       this.audioPlayer.play(audioResource);
 
-      // Wait a moment to see if playback starts successfully
+      // Hold the navigation guard until after the 1s startup window closes.
+      // If we cleared _manualNavigating in the Playing event, a spurious Idle
+      // that arrives within that first second would bypass the guard and trigger
+      // an unintended retry/skip for the brand-new track.
       await new Promise((resolve) => setTimeout(resolve, 1000));
+      this._manualNavigating = false; // Safe to accept Idle events from this track now
 
       logger.info("Track playback initiated successfully", {
         title: this.currentTrack?.title || "Unknown",
@@ -966,6 +973,7 @@ class AudioPlayer {
       // is suppressed and does not trigger handleTrackEnd / skip.
       this._cdnRetryPending = false;
       this._manualNavigating = true;
+      this._trackEndInProgress = false;
 
       this.audioPlayer.stop();
 
@@ -1041,30 +1049,44 @@ class AudioPlayer {
    * Handle track end
    */
   async handleTrackEnd() {
-    // Add null check to prevent errors when track is cleared
-    if (!this.currentTrack) {
-      logger.warn("handleTrackEnd called but no current track available");
+    // Re-entrancy guard: error event + Idle event can both call handleTrackEnd
+    // for the same track failure. Only the first call should proceed.
+    if (this._trackEndInProgress) {
+      logger.warn("handleTrackEnd called while already in progress, ignoring", {
+        track: this.currentTrack?.title,
+        guild: this.currentGuild,
+      });
       return;
     }
+    this._trackEndInProgress = true;
 
-    if (this.loopMode === "track" && this.currentTrack) {
-      // Repeat current track - reset retry count for loop
-      this.currentTrack.resetRetry();
-      logger.info("Track ended, looping current track", {
-        title: this.currentTrack?.title || "Unknown",
-        guild: this.currentGuild,
-      });
-      await this.playCurrentTrack();
-    } else {
-      // Try to play next track
-      logger.info("Track ended, attempting to skip to next", {
-        title: this.currentTrack?.title || "Unknown",
-        currentIndex: this.currentIndex,
-        queueLength: this.queue.length,
-        loopMode: this.loopMode,
-        guild: this.currentGuild,
-      });
-      await this.skip();
+    try {
+      if (!this.currentTrack) {
+        logger.warn("handleTrackEnd called but no current track available");
+        return;
+      }
+
+      if (this.loopMode === "track" && this.currentTrack) {
+        // Repeat current track - reset retry count for loop
+        this.currentTrack.resetRetry();
+        logger.info("Track ended, looping current track", {
+          title: this.currentTrack?.title || "Unknown",
+          guild: this.currentGuild,
+        });
+        await this.playCurrentTrack();
+      } else {
+        // Try to play next track
+        logger.info("Track ended, attempting to skip to next", {
+          title: this.currentTrack?.title || "Unknown",
+          currentIndex: this.currentIndex,
+          queueLength: this.queue.length,
+          loopMode: this.loopMode,
+          guild: this.currentGuild,
+        });
+        await this.skip();
+      }
+    } finally {
+      this._trackEndInProgress = false;
     }
   }
 
