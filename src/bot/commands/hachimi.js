@@ -317,8 +317,8 @@ module.exports = function createHachimiCommand(playbackService, queueService) {
           } ${capNote}`.trim(),
         });
 
-        // Start playing if not already playing
-        if (!player.isPlaying && !player.isPaused) {
+        // Start playing if not already playing (and first-track play wasn't already triggered)
+        if (!player.isPlaying && !player.isPaused && !nowPlayingSent) {
           await playbackService.play(interaction.guild.id);
         }
 

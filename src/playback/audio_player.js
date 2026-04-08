@@ -68,7 +68,12 @@ class AudioPlayer {
     this.audioPlayer.on(AudioPlayerStatus.Paused, () => {
       this.isPlaying = false;
       this.isPaused = true;
-      this.startTime = null; // Clear start time when paused
+      // Do NOT null startTime here. If a song is paused near its end and resumes
+      // for < 3 s before finishing, _handleIdle() would compute actualPlaybackDuration=0
+      // and incorrectly trigger retryCurrentTrack() — causing the song to replay up to
+      // 3 times. Keeping startTime intact means the full elapsed wall-clock duration
+      // (including pause time) is counted, which is always large enough to be treated
+      // as a normal completion rather than a failure.
 
       logger.info("Audio player paused", {
         track: this.currentTrack?.title,
