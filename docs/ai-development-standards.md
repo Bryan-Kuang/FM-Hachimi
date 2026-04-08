@@ -109,15 +109,15 @@ Thumbs.db
 
 ```
 project/
-├── .env.example          # 环境变量模板
-├── .gitignore           # Git忽略规则
-├── .ai-project-standards.md  # 本文档
 ├── package.json         # 项目依赖
 ├── README.md           # 项目说明
+├── .env.example        # 环境变量模板
+├── .gitignore          # Git忽略规则
 ├── src/                # 源代码
 ├── tests/              # 测试文件
-├── docs/               # 文档
-└── scripts/            # 脚本文件
+├── scripts/            # 脚本文件
+└── docs/               # 文档
+    └── ai-development-standards.md    # 本文档
 ```
 
 ### 不应该存在的文件/目录

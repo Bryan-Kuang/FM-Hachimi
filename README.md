@@ -11,7 +11,7 @@
 - `docs/` - 项目文档
 - `scripts/` - 自动化脚本
 
-详细结构说明请查看 [PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
+详细结构说明请查看 [directory-structure.md](docs/directory-structure.md)
 
 ## 🚀 开发进度
 
@@ -76,23 +76,25 @@ npm run test:discord
 
 ```
 src/
-├── bot/               # Discord机器人实现
-│   ├── client.js      # 客户端管理
-│   └── commands/      # 斜杠命令
-├── audio/             # 音频提取和处理
-│   └── extractor.js   # Bilibili音频提取器
-├── ui/                # 可视化界面组件
-│   ├── embeds.js      # Rich embed生成器
-│   └── buttons.js     # 交互式按钮
-├── utils/             # 工具函数
-└── config/            # 配置管理
+├── bilibili/          # B站相关：解析器、API交互
+├── bot/               # Discord机器人外壳和事件处理
+├── config/            # 配置管理
+├── models/            # 数据模型定义
+├── playback/          # 音频播放核心控制
+├── services/          # 服务层：队列、日志等
+├── session/           # 公会会话状态管理
+├── ui/                # UI组件：Embeds、按钮、进度条
+├── utils/             # 各种工具函数
+└── index.js           # 应用组装和入口点
 
 tests/
-├── manual/            # 手动测试脚本
-└── setup.js           # Jest测试配置
+├── e2e/               # 端到端测试
+├── unit/              # 单元测试
+└── manual/            # 手动测试脚本
 
 scripts/
-└── deploy-commands.js # 命令部署脚本
+├── deploy/            # 部署脚本
+└── tools/             # 开发辅助脚本
 ```
 
 ## 🛠 安装和配置
@@ -157,9 +159,7 @@ docker-compose logs -f
 ```
 
 **完整部署指南**：
-- 📖 [Oracle Cloud 部署教程](./docs/DEPLOYMENT.md) - 详细的云端部署步骤
-- ⚡ [快速开始](./docs/QUICK_START.md) - 30 秒快速部署
-- ✅ [部署检查清单](./docs/DEPLOYMENT_CHECKLIST.md) - 确保万无一失
+- 📖 [部署指南](./docs/deployment-guide.md) - 详细的云端及本地部署步骤
 
 ### 本地开发运行
 

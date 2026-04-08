@@ -63,31 +63,32 @@ src/
 ├── bot/
 │   ├── client.js           # Discord客户端初始化
 │   ├── commands/           # 斜杠命令处理器
-│   │   ├── play.js
-│   │   ├── pause.js
-│   │   ├── resume.js
-│   │   ├── skip.js
-│   │   ├── prev.js
-│   │   ├── queue.js
-│   │   └── nowplaying.js
 │   └── events/             # 事件处理器
-│       ├── ready.js
-│       └── interactionCreate.js
-├── audio/
+├── bilibili/
 │   ├── extractor.js        # Bilibili音频提取
-│   ├── player.js           # 音频播放管理
-│   ├── queue.js            # 队列管理
-│   └── stream.js           # 音频流工具
+│   ├── api.js              # Bilibili API交互
+│   └── validator.js        # B站URL验证
+├── playback/
+│   └── audio_player.js     # 音频播放管理（状态机实现）
+├── session/
+│   ├── session_manager.js  # 会话调度器
+│   ├── guild_session.js    # 单个公会会话封装
+│   └── audio_manager.js    # 音频生命周期管理
+├── services/
+│   ├── playback_service.js # 播放服务层
+│   ├── queue_service.js    # 队列服务层
+│   └── logger_service.js   # 日志中心
+├── models/
+│   └── track.js            # 音分轨数据模型
 ├── ui/
 │   ├── embeds.js           # 富嵌入生成器
 │   ├── buttons.js          # 交互式按钮组件
-│   ├── progressBar.js      # 进度条可视化
-│   └── visualization.js    # 音频波形/频谱（未来功能）
+│   └── progress_tracker.js # 进度条可视化
 ├── utils/
-│   ├── logger.js           # 日志工具
-│   ├── validator.js        # URL验证
-│   ├── errorHandler.js     # 错误处理
-│   └── formatters.js       # 时间和文本格式化
+│   ├── cleanup.js          # 进程退出清理
+│   ├── debug.js            # 调试辅助
+│   ├── formatters.js       # 格式化工具
+│   └── ...                 # 其他工具
 ├── config/
 │   └── config.js           # 配置管理
 └── index.js                # 应用程序入口点
@@ -389,7 +390,7 @@ npm run deploy
 
 ---
 
-**文档版本:** 1.0  
-**最后更新:** 2025 年 9 月 1 日  
-**审核状态:** 草稿  
-**依赖:** PRD v1.0
+**文档版本:** 1.1  
+**最后更新:** 2026 年 4 月 7 日  
+**审核状态:** 已审核  
+**依赖:** PRD v1.1
