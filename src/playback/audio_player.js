@@ -150,6 +150,8 @@ class AudioPlayer {
         actualPlaybackDuration,
         trackDuration: this.currentTrack?.duration,
       });
+      // Reset retry count so if this track comes back via queue loop it gets a fresh budget
+      this.currentTrack?.resetRetry?.();
       this.handleTrackEnd();
     } else if (this.currentTrack) {
       // 播放时间太短，可能是错误，重试当前曲目
@@ -715,6 +717,7 @@ class AudioPlayer {
     if (this.currentIndex < this.queue.length - 1) {
       this.currentIndex++;
       this.currentTrack = this.queue[this.currentIndex];
+      this.currentTrack.resetRetry?.(); // Fresh retry budget for the new track
       // Only attempt to play if we have a voice connection
       if (this.voiceConnection) {
         return await this.playCurrentTrack();
@@ -725,6 +728,7 @@ class AudioPlayer {
       // Loop back to beginning
       this.currentIndex = 0;
       this.currentTrack = this.queue[0];
+      this.currentTrack.resetRetry?.(); // Fresh retry budget after queue loop
       logger.info("Queue loop: restarting from beginning", {
         queueLength: this.queue.length,
         guild: this.currentGuild,
@@ -782,6 +786,7 @@ class AudioPlayer {
     if (this.currentIndex > 0) {
       this.currentIndex--;
       this.currentTrack = this.queue[this.currentIndex];
+      this.currentTrack.resetRetry?.(); // Fresh retry budget when navigating back
       logger.info("Previous track", {
         index: this.currentIndex,
         title: this.currentTrack?.title,
@@ -797,6 +802,7 @@ class AudioPlayer {
     } else if (this.loopMode === "queue" && this.queue.length > 0) {
       this.currentIndex = this.queue.length - 1;
       this.currentTrack = this.queue[this.currentIndex];
+      this.currentTrack.resetRetry?.(); // Fresh retry budget after queue loop wrap-around
       logger.info("Queue loop - previous track", {
         index: this.currentIndex,
         title: this.currentTrack?.title,
