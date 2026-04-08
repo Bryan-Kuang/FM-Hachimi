@@ -136,6 +136,19 @@ class AudioPlayer {
       trackDuration: this.currentTrack?.duration,
     });
 
+    // Check if we played the full track (within 2 seconds of the known duration)
+    const isFullTrack = this.currentTrack?.duration && 
+      (actualPlaybackDuration >= (this.currentTrack.duration - 2) * 1000);
+
+    if (isFullTrack && this._cdnRetryPending) {
+      logger.info("Track reached end of duration, ignoring CDN failure flags", {
+        track: this.currentTrack?.title,
+        actualPlaybackDuration,
+        trackDuration: this.currentTrack?.duration
+      });
+      this._cdnRetryPending = false;
+    }
+
     // 🔧 CDN故障重试：如果FFmpeg因CDN失败退出，优先重试而非跳过
     if (this._cdnRetryPending && this.currentTrack) {
       logger.info("CDN retry pending, retrying instead of skipping", {
@@ -149,9 +162,7 @@ class AudioPlayer {
     // 🔧 修复：使用实际播放时间而不是state.playbackDuration
     // 对于Raw PCM，playbackDuration可能始终为0
     if (
-      actualPlaybackDuration > 3000 ||
-      (this.currentTrack?.duration &&
-        actualPlaybackDuration >= (this.currentTrack.duration - 2) * 1000)
+      isFullTrack || actualPlaybackDuration > 3000
     ) {
       // 正常播放结束（播放超过3秒或接近歌曲总时长）
       logger.info("Track ended normally", {
