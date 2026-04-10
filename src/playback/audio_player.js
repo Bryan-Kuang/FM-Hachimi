@@ -137,14 +137,15 @@ class AudioPlayer {
     });
 
     // Check if we played the full track (within 2 seconds of the known duration)
-    const isFullTrack = this.currentTrack?.duration && 
-      (actualPlaybackDuration >= (this.currentTrack.duration - 2) * 1000);
+    const isFullTrack =
+      this.currentTrack?.duration &&
+      actualPlaybackDuration >= (this.currentTrack.duration - 2) * 1000;
 
     if (isFullTrack && this._cdnRetryPending) {
       logger.info("Track reached end of duration, ignoring CDN failure flags", {
         track: this.currentTrack?.title,
         actualPlaybackDuration,
-        trackDuration: this.currentTrack?.duration
+        trackDuration: this.currentTrack?.duration,
       });
       this._cdnRetryPending = false;
     }
@@ -161,9 +162,7 @@ class AudioPlayer {
 
     // 🔧 修复：使用实际播放时间而不是state.playbackDuration
     // 对于Raw PCM，playbackDuration可能始终为0
-    if (
-      isFullTrack || actualPlaybackDuration > 3000
-    ) {
+    if (isFullTrack || actualPlaybackDuration > 3000) {
       // 正常播放结束（播放超过3秒或接近歌曲总时长）
       logger.info("Track ended normally", {
         actualPlaybackDuration,
@@ -195,7 +194,7 @@ class AudioPlayer {
    */
   async joinVoiceChannel(voiceChannel, retryCount = 0) {
     const maxRetries = 3;
-    
+
     try {
       logger.info("Attempting to join voice channel", {
         channelId: voiceChannel.id,
@@ -249,22 +248,26 @@ class AudioPlayer {
         attempt: retryCount + 1,
         maxRetries: maxRetries,
       });
-      
+
       // 如果是连接超时且还有重试次数，则重试
-      if (retryCount < maxRetries && 
-          (error.message.includes("timeout") || 
-           error.message.includes("connection"))) {
+      if (
+        retryCount < maxRetries &&
+        (error.message.includes("timeout") ||
+          error.message.includes("connection"))
+      ) {
         logger.info("Retrying voice connection", {
           channelId: voiceChannel.id,
           nextAttempt: retryCount + 2,
           delay: (retryCount + 1) * 2000,
         });
-        
+
         // 等待递增延迟后重试
-        await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 2000));
+        await new Promise((resolve) =>
+          setTimeout(resolve, (retryCount + 1) * 2000),
+        );
         return await this.joinVoiceChannel(voiceChannel, retryCount + 1);
       }
-      
+
       return false;
     }
   }
@@ -298,10 +301,10 @@ class AudioPlayer {
         clearTimeout(timeout);
         this.voiceConnection.removeAllListeners(VoiceConnectionStatus.Ready);
         this.voiceConnection.removeAllListeners(
-          VoiceConnectionStatus.Disconnected
+          VoiceConnectionStatus.Disconnected,
         );
         this.voiceConnection.removeAllListeners(
-          VoiceConnectionStatus.Destroyed
+          VoiceConnectionStatus.Destroyed,
         );
       };
 
@@ -434,7 +437,7 @@ class AudioPlayer {
           await this.waitForVoiceConnection();
         } catch (connectionError) {
           throw new Error(
-            `Voice connection failed: ${connectionError.message}`
+            `Voice connection failed: ${connectionError.message}`,
           );
         }
       }
@@ -447,20 +450,26 @@ class AudioPlayer {
       if (this.currentTrack.normalizedUrl && this.currentTrack.isExpired()) {
         try {
           if (this.extractor) {
-            const freshUrl = await this.extractor.getAudioStreamUrl(this.currentTrack.normalizedUrl);
+            const freshUrl = await this.extractor.getAudioStreamUrl(
+              this.currentTrack.normalizedUrl,
+            );
             this.currentTrack.audioUrl = freshUrl;
             this.currentTrack.extractedAt = new Date().toISOString();
-            logger.info("Refreshed stale audio URL", { title: this.currentTrack.title });
+            logger.info("Refreshed stale audio URL", {
+              title: this.currentTrack.title,
+            });
           }
         } catch (e) {
-          logger.warn("Failed to refresh audio URL, using cached", { error: e.message });
+          logger.warn("Failed to refresh audio URL, using cached", {
+            error: e.message,
+          });
         }
       }
 
       // Create audio resource from URL
       logger.debug("Creating audio resource for playback");
       const audioResource = await this.createAudioResource(
-        this.currentTrack.audioUrl
+        this.currentTrack.audioUrl,
       );
 
       if (!audioResource) {
@@ -515,7 +524,11 @@ class AudioPlayer {
         const ffmpegCheck = spawn("ffmpeg", ["-version"]);
         ffmpegCheck.on("error", (error) => {
           logger.error("FFmpeg not available", { error: error.message });
-          reject(new Error("FFmpeg is not installed. Please install FFmpeg to enable audio playback."));
+          reject(
+            new Error(
+              "FFmpeg is not installed. Please install FFmpeg to enable audio playback.",
+            ),
+          );
         });
         ffmpegCheck.on("close", (code) => {
           if (code !== 0) {
@@ -542,18 +555,30 @@ class AudioPlayer {
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           "-referer",
           "https://www.bilibili.com/",
-          "-reconnect", "1",           // 启用重连
-          "-reconnect_streamed", "1", // 对流媒体启用重连
-          "-reconnect_delay_max", "5", // 最大重连延迟5秒
-          "-reconnect_at_eof", "1",   // 在EOF时重连
-          "-rw_timeout", "60000000",   // 读写超时60秒
-          "-timeout", "60000000",     // 连接超时60秒
-          "-headers", "Connection: keep-alive",
-          "-analyzeduration", "10000000", // 10秒分析时间
-          "-probesize", "50000000",   // 50MB探测大小
-          "-fflags", "+genpts+discardcorrupt", // 生成PTS并丢弃损坏帧
+          "-reconnect",
+          "1", // 启用重连
+          "-reconnect_streamed",
+          "1", // 对流媒体启用重连
+          "-reconnect_delay_max",
+          "5", // 最大重连延迟5秒
+          "-reconnect_at_eof",
+          "1", // 在EOF时重连
+          "-rw_timeout",
+          "60000000", // 读写超时60秒
+          "-timeout",
+          "60000000", // 连接超时60秒
+          "-headers",
+          "Connection: keep-alive",
+          "-analyzeduration",
+          "10000000", // 10秒分析时间
+          "-probesize",
+          "50000000", // 50MB探测大小
+          "-fflags",
+          "+genpts+discardcorrupt", // 生成PTS并丢弃损坏帧
           "-i",
           audioUrl,
+          "-af",
+          "loudnorm=I=-16:TP=-1.5:LRA=11", // 🔧 增加音频标准化滤镜，保持音量稳定
           "-f",
           "s16le", // Raw PCM 16-bit signed little-endian
           "-ar",
@@ -563,7 +588,8 @@ class AudioPlayer {
           "-vn",
           "-loglevel",
           "warning", // 改为warning级别以获取更多调试信息
-          "-bufsize", "2048k", // 增加缓冲区大小
+          "-bufsize",
+          "2048k", // 增加缓冲区大小
           "pipe:1",
         ]);
 
@@ -592,10 +618,13 @@ class AudioPlayer {
 
             // 如果进程真的卡死了，尝试优雅关闭
             if (timeSinceLastData > killThreshold) {
-              logger.error(`FFmpeg process inactive for over ${killThreshold/1000} seconds, terminating`, {
-                guild: this.currentGuild,
-                timeSinceLastData,
-              });
+              logger.error(
+                `FFmpeg process inactive for over ${killThreshold / 1000} seconds, terminating`,
+                {
+                  guild: this.currentGuild,
+                  timeSinceLastData,
+                },
+              );
               clearInterval(activityMonitor);
 
               if (ffmpegProcess.stdin && !ffmpegProcess.stdin.destroyed) {
@@ -604,7 +633,7 @@ class AudioPlayer {
 
               setTimeout(() => {
                 if (!ffmpegProcess.killed) {
-                  ffmpegProcess.kill('SIGKILL');
+                  ffmpegProcess.kill("SIGKILL");
                 }
               }, 2000);
 
@@ -689,8 +718,8 @@ class AudioPlayer {
           });
           reject(
             new Error(
-              `Failed to create audio resource: ${createError.message}`
-            )
+              `Failed to create audio resource: ${createError.message}`,
+            ),
           );
         }
       } catch (error) {
@@ -888,7 +917,7 @@ class AudioPlayer {
     }
 
     const removedTrack = this.queue[index];
-    
+
     // Safety check for track data
     if (!removedTrack) {
       logger.warn("Track at index is undefined", {
@@ -898,7 +927,7 @@ class AudioPlayer {
       });
       return false;
     }
-    
+
     this.queue.splice(index, 1);
 
     // Adjust current index if necessary
@@ -907,7 +936,7 @@ class AudioPlayer {
     }
 
     logger.info("Track removed from queue", {
-      removedTrack: removedTrack.title || 'Unknown Track',
+      removedTrack: removedTrack.title || "Unknown Track",
       index,
       newQueueLength: this.queue.length,
       newCurrentIndex: this.currentIndex,
@@ -926,7 +955,7 @@ class AudioPlayer {
     // Remove current track from shuffle
     const currentTrack = this.currentTrack;
     const remainingTracks = this.queue.filter(
-      (_, index) => index !== this.currentIndex
+      (_, index) => index !== this.currentIndex,
     );
 
     // Shuffle remaining tracks
@@ -1022,7 +1051,9 @@ class AudioPlayer {
     this._cancelInactivityTimer();
     if (!this.voiceConnection) return; // nothing to disconnect
     this._inactivityTimer = setTimeout(() => {
-      logger.info("Auto-disconnecting due to inactivity", { guild: this.currentGuild });
+      logger.info("Auto-disconnecting due to inactivity", {
+        guild: this.currentGuild,
+      });
       this._doDisconnect();
     }, 60 * 1000);
   }
@@ -1047,7 +1078,9 @@ class AudioPlayer {
     if (this.voiceConnection) {
       try {
         this.voiceConnection.destroy();
-      } catch (_) { /* connection may already be destroyed */ }
+      } catch (_) {
+        /* connection may already be destroyed */
+      }
       this.voiceConnection = null;
     }
     const guildId = this.currentGuild;
@@ -1056,7 +1089,9 @@ class AudioPlayer {
     if (guildId) {
       const AudioManager = require("./manager");
       AudioManager.players.delete(guildId);
-      logger.info("Audio player instance removed after idle timeout", { guild: guildId });
+      logger.info("Audio player instance removed after idle timeout", {
+        guild: guildId,
+      });
     }
     logger.info("Disconnected from voice channel");
   }
@@ -1217,13 +1252,19 @@ class AudioPlayer {
     if (this.currentTrack.normalizedUrl) {
       try {
         if (this.extractor) {
-          const freshUrl = await this.extractor.getAudioStreamUrl(this.currentTrack.normalizedUrl);
+          const freshUrl = await this.extractor.getAudioStreamUrl(
+            this.currentTrack.normalizedUrl,
+          );
           this.currentTrack.audioUrl = freshUrl;
           this.currentTrack.extractedAt = new Date().toISOString();
-          logger.info("Refreshed audio URL for retry", { title: this.currentTrack.title });
+          logger.info("Refreshed audio URL for retry", {
+            title: this.currentTrack.title,
+          });
         }
       } catch (e) {
-        logger.warn("Failed to refresh audio URL for retry", { error: e.message });
+        logger.warn("Failed to refresh audio URL for retry", {
+          error: e.message,
+        });
       }
     }
 
@@ -1260,34 +1301,33 @@ class AudioPlayer {
     if (this.ffmpegProcess && !this.ffmpegProcess.killed) {
       const processToCleanup = this.ffmpegProcess;
       const pidToCleanup = processToCleanup.pid;
-      
+
       logger.info("Cleaning up FFmpeg process", {
         pid: pidToCleanup,
         guild: this.currentGuild,
       });
-      
+
       // 立即清空引用，防止新进程被误杀
       this.ffmpegProcess = null;
-      
+
       try {
         // 先尝试优雅地关闭stdin
         if (processToCleanup.stdin && !processToCleanup.stdin.destroyed) {
           processToCleanup.stdin.end();
         }
-        
+
         // 然后终止进程
-        processToCleanup.kill('SIGTERM');
-        
+        processToCleanup.kill("SIGTERM");
+
         // 如果进程没有在合理时间内退出，强制杀死 (.unref() so it doesn't block process exit)
         setTimeout(() => {
           if (processToCleanup && !processToCleanup.killed) {
             logger.warn("Force killing FFmpeg process", {
               pid: pidToCleanup,
             });
-            processToCleanup.kill('SIGKILL');
+            processToCleanup.kill("SIGKILL");
           }
         }, 1000).unref();
-        
       } catch (error) {
         logger.warn("Error cleaning up FFmpeg process", {
           error: error.message,
