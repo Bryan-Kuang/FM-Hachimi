@@ -137,9 +137,11 @@ class AudioPlayer {
     });
 
     // Check if we played the full track (within 2 seconds of the known duration)
+    // 对于未知时长(duration=0)或时长不准的歌曲，只要播放时间大于一个合理的阈值（如超过15秒），我们也视作基本完整的播放，以防无限重试
     const isFullTrack =
-      this.currentTrack?.duration &&
-      actualPlaybackDuration >= (this.currentTrack.duration - 2) * 1000;
+      this.currentTrack?.duration
+        ? actualPlaybackDuration >= (this.currentTrack.duration - 2) * 1000
+        : actualPlaybackDuration > 15000;
 
     if (isFullTrack && this._cdnRetryPending) {
       logger.info("Track reached end of duration, ignoring CDN failure flags", {
@@ -561,8 +563,6 @@ class AudioPlayer {
           "1", // 对流媒体启用重连
           "-reconnect_delay_max",
           "5", // 最大重连延迟5秒
-          "-reconnect_at_eof",
-          "1", // 在EOF时重连
           "-rw_timeout",
           "60000000", // 读写超时60秒
           "-timeout",
