@@ -17,6 +17,7 @@ const logger = require("../services/logger_service");
 const Formatters = require("../utils/formatters");
 const config = require("../config/config");
 const Track = require("../models/track");
+const { createShadowRunner } = require("../app/shadow_runner_bridge");
 
 class AudioPlayer {
   constructor(extractor) {
@@ -40,6 +41,8 @@ class AudioPlayer {
     this._trackEndInProgress = false; // Re-entrancy guard for handleTrackEnd
     this._inactivityTimer = null; // Auto-disconnect after 1 min of inactivity
     this.isIdle = false; // True when nothing is playing; idle state owns the inactivity timer
+    // Phase 1 shadow mode: disabled stub unless SHADOW_MODE_ENABLED=true + build artifact present.
+    this._shadow = createShadowRunner(this.currentGuild || "unknown", logger);
 
     // Set up audio player event handlers
     this.setupAudioPlayerEvents();
@@ -99,6 +102,27 @@ class AudioPlayer {
   }
 
   /**
+   * Convert a legacy Track JS object into the minimal shape the shadow
+   * reducer reads (id / retryCount / title / duration). The reducer only
+   * needs `id` for stale-event rejection and `retryCount` for MAX_RETRIES
+   * gating; title/duration are included for log clarity.
+   *
+   * Safe under SHADOW_MODE_ENABLED=false too: the disabled stub ignores
+   * the payload, but the arguments are still evaluated, so this must not
+   * throw on null/partial tracks.
+   */
+  _toShadowTrack(legacyTrack) {
+    if (!legacyTrack) return null;
+    const nativeId = legacyTrack.bvid || legacyTrack.nativeId || "unknown";
+    return {
+      id: `bilibili:${nativeId}`,
+      retryCount: legacyTrack.retryCount || 0,
+      title: legacyTrack.title || "unknown",
+      duration: legacyTrack.duration || 0,
+    };
+  }
+
+  /**
    * Handle AudioPlayerStatus.Idle event.
    * Extracted for testability; also guards against the double-skip race condition:
    * when skip()/previous() kills the old FFmpeg process, a stale Idle event can
@@ -111,6 +135,22 @@ class AudioPlayer {
     // 🔧 修复：清理FFmpeg进程避免"Broken pipe"错误
     this.cleanupFFmpegProcess();
 
+    // Shadow mode: calculate the duration *first* so the shadow sees the same
+    // STREAM_ENDED semantics as the real path below, then report whatever
+    // outcome the legacy code picks.
+    const actualPlaybackDuration = this.startTime
+      ? Date.now() - this.startTime
+      : 0;
+    const shadowTrack = this.currentTrack ? this._toShadowTrack(this.currentTrack) : null;
+    if (shadowTrack) {
+      this._shadow.dispatch({
+        type: "STREAM_ENDED",
+        trackId: shadowTrack.id,
+        reason: this._cdnRetryPending ? "cdn_failure" : "complete",
+        playedMs: actualPlaybackDuration,
+      });
+    }
+
     // Guard: if a manual skip/prev is in progress, the Idle event is a side-effect
     // of killing the old FFmpeg — ignore it so we don't advance the queue twice.
     if (this._manualNavigating) {
@@ -119,13 +159,9 @@ class AudioPlayer {
         guild: this.currentGuild,
       });
       this._manualNavigating = false;
+      this._shadow.compareOutcome({ kind: "advance_to_next" });
       return;
     }
-
-    // Calculate actual playback duration using startTime
-    const actualPlaybackDuration = this.startTime
-      ? Date.now() - this.startTime
-      : 0;
 
     logger.info("Audio player became idle", {
       track: this.currentTrack?.title,
@@ -154,6 +190,7 @@ class AudioPlayer {
 
     // 🔧 CDN故障重试：如果FFmpeg因CDN失败退出，优先重试而非跳过
     if (this._cdnRetryPending && this.currentTrack) {
+      this._shadow.compareOutcome({ kind: "retry" });
       logger.info("CDN retry pending, retrying instead of skipping", {
         track: this.currentTrack?.title,
         actualPlaybackDuration,
@@ -166,6 +203,7 @@ class AudioPlayer {
     // 对于Raw PCM，playbackDuration可能始终为0
     if (isFullTrack || actualPlaybackDuration > config.audio.shortPlaybackRetryThresholdMs) {
       // 正常播放结束（播放超过3秒或接近歌曲总时长）
+      this._shadow.compareOutcome({ kind: "advance_to_next" });
       logger.info("Track ended normally", {
         actualPlaybackDuration,
         trackDuration: this.currentTrack?.duration,
@@ -175,6 +213,7 @@ class AudioPlayer {
       this.handleTrackEnd();
     } else if (this.currentTrack) {
       // 播放时间太短，可能是错误，重试当前曲目
+      this._shadow.compareOutcome({ kind: "retry" });
       logger.warn("Playback duration too short, retrying current track", {
         actualPlaybackDuration,
         track: this.currentTrack?.title,
@@ -414,6 +453,12 @@ class AudioPlayer {
     }
     this._cancelInactivityTimer();
     this.isIdle = false;
+
+    // Shadow mode observation: report PLAY_REQUESTED
+    this._shadow.dispatch({
+      type: "PLAY_REQUESTED",
+      track: this._toShadowTrack(this.currentTrack),
+    });
 
     if (!this.voiceConnection) {
       logger.warn("No voice connection available");
@@ -769,6 +814,11 @@ class AudioPlayer {
       this.currentIndex++;
       this.currentTrack = this.queue[this.currentIndex];
       this.currentTrack.resetRetry?.(); // Fresh retry budget for the new track
+      // Shadow mode observation: SKIP_REQUESTED to next track
+      this._shadow.dispatch({
+        type: "SKIP_REQUESTED",
+        target: this._toShadowTrack(this.currentTrack),
+      });
       // Only attempt to play if we have a voice connection
       if (this.voiceConnection) {
         return await this.playCurrentTrack();
@@ -838,6 +888,11 @@ class AudioPlayer {
       this.currentIndex--;
       this.currentTrack = this.queue[this.currentIndex];
       this.currentTrack.resetRetry?.(); // Fresh retry budget when navigating back
+      // Shadow mode observation: SKIP_REQUESTED backward
+      this._shadow.dispatch({
+        type: "SKIP_REQUESTED",
+        target: this._toShadowTrack(this.currentTrack),
+      });
       logger.info("Previous track", {
         index: this.currentIndex,
         title: this.currentTrack?.title,

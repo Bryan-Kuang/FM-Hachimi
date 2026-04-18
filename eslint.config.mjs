@@ -43,6 +43,7 @@ export default [
   },
   {
     files: ["src/**/*.ts", "tests/**/*.ts"],
+    ignores: ["**/*.test.ts", "**/__tests__/**/*.ts"],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
@@ -52,6 +53,30 @@ export default [
       },
       globals: {
         ...globals.node,
+      },
+    },
+    plugins: {
+      "@typescript-eslint": tsPlugin,
+    },
+    rules: {
+      ...tsPlugin.configs.recommended.rules,
+      "no-unused-vars": "off",
+      "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+      "@typescript-eslint/explicit-function-return-type": "off",
+      "@typescript-eslint/no-explicit-any": "warn",
+    },
+  },
+  {
+    files: ["**/*.test.ts", "**/__tests__/**/*.ts"],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        ecmaVersion: "latest",
+        sourceType: "module",
+      },
+      globals: {
+        ...globals.node,
+        ...globals.jest,
       },
     },
     plugins: {
