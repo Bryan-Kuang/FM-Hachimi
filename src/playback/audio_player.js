@@ -141,7 +141,7 @@ class AudioPlayer {
     const isFullTrack =
       this.currentTrack?.duration
         ? actualPlaybackDuration >= (this.currentTrack.duration - 2) * 1000
-        : actualPlaybackDuration > 15000;
+        : actualPlaybackDuration > config.audio.fullTrackThresholdMs;
 
     if (isFullTrack && this._cdnRetryPending) {
       logger.info("Track reached end of duration, ignoring CDN failure flags", {
@@ -164,7 +164,7 @@ class AudioPlayer {
 
     // 🔧 修复：使用实际播放时间而不是state.playbackDuration
     // 对于Raw PCM，playbackDuration可能始终为0
-    if (isFullTrack || actualPlaybackDuration > 3000) {
+    if (isFullTrack || actualPlaybackDuration > config.audio.shortPlaybackRetryThresholdMs) {
       // 正常播放结束（播放超过3秒或接近歌曲总时长）
       logger.info("Track ended normally", {
         actualPlaybackDuration,
@@ -257,16 +257,15 @@ class AudioPlayer {
         (error.message.includes("timeout") ||
           error.message.includes("connection"))
       ) {
+        const backoffMs = (retryCount + 1) * config.retry.voiceJoinBaseBackoffMs;
         logger.info("Retrying voice connection", {
           channelId: voiceChannel.id,
           nextAttempt: retryCount + 2,
-          delay: (retryCount + 1) * 2000,
+          delay: backoffMs,
         });
 
         // 等待递增延迟后重试
-        await new Promise((resolve) =>
-          setTimeout(resolve, (retryCount + 1) * 2000),
-        );
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
         return await this.joinVoiceChannel(voiceChannel, retryCount + 1);
       }
 
@@ -297,7 +296,7 @@ class AudioPlayer {
           guild: this.currentGuild,
         });
         reject(new Error("Voice connection timeout"));
-      }, 15000); // 增加到15秒
+      }, config.voice.connectionTimeoutMs);
 
       const cleanup = () => {
         clearTimeout(timeout);
@@ -482,11 +481,11 @@ class AudioPlayer {
       // Play the audio
       this.audioPlayer.play(audioResource);
 
-      // Hold the navigation guard until after the 1s startup window closes.
+      // Hold the navigation guard until after the startup window closes.
       // If we cleared _manualNavigating in the Playing event, a spurious Idle
-      // that arrives within that first second would bypass the guard and trigger
+      // that arrives within that window would bypass the guard and trigger
       // an unintended retry/skip for the brand-new track.
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, config.voice.handoffWaitMs));
       this._manualNavigating = false; // Safe to accept Idle events from this track now
 
       logger.info("Track playback initiated successfully", {
@@ -635,7 +634,7 @@ class AudioPlayer {
                 if (!ffmpegProcess.killed) {
                   ffmpegProcess.kill("SIGKILL");
                 }
-              }, 2000);
+              }, config.audio.ffmpegHangForceKillMs);
 
               // Set CDN retry flag so idle handler retries instead of skipping
               this._cdnRetryPending = true;
@@ -1055,7 +1054,7 @@ class AudioPlayer {
         guild: this.currentGuild,
       });
       this._doDisconnect();
-    }, 60 * 1000);
+    }, config.voice.autoDisconnectIdleMs);
   }
 
   _cancelInactivityTimer() {
@@ -1277,7 +1276,7 @@ class AudioPlayer {
         });
         this.handleTrackEnd();
       });
-    }, 2000).unref();
+    }, config.retry.trackRetryDelayMs).unref();
   }
 
   /**
@@ -1327,7 +1326,7 @@ class AudioPlayer {
             });
             processToCleanup.kill("SIGKILL");
           }
-        }, 1000).unref();
+        }, config.audio.killGracePeriodMs).unref();
       } catch (error) {
         logger.warn("Error cleaning up FFmpeg process", {
           error: error.message,

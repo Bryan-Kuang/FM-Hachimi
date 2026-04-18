@@ -3,7 +3,7 @@
  * Composition root: all dependencies are instantiated here and wired together.
  */
 
-const config = require("./config/config");
+const { validateEnv } = require("./config/env_validator");
 const BotClient = require("./bot/client");
 const BilibiliExtractor = require("./bilibili/extractor");
 const SessionManager = require("./session/session_manager");
@@ -16,11 +16,13 @@ const QueueService = require("./services/queue_service");
 const logger = require("./services/logger_service");
 const TokenPrecheck = require("./utils/token_precheck");
 const Debug = require("./utils/debug");
+const { startMetricsServerFromEnv } = require("./infra/observability/metrics_server");
 
 class BilibiliDiscordBot {
   constructor() {
     this.botClient = null;
     this.sessionManager = null;
+    this.metricsServer = null;
     this.isRunning = false;
   }
 
@@ -32,11 +34,14 @@ class BilibiliDiscordBot {
       logger.info("Starting Bilibili Discord Bot");
       Debug.trace("start.begin");
 
-      if (!config.discord.token) {
-        throw new Error(
-          "Discord token is not configured. Please set DISCORD_TOKEN in your environment."
-        );
+      const envCheck = validateEnv();
+      for (const w of envCheck.warnings) logger.warn(w);
+      if (!envCheck.ok) {
+        for (const e of envCheck.errors) logger.error(e);
+        throw new Error(`Environment validation failed: ${envCheck.errors.join("; ")}`);
       }
+
+      this.metricsServer = startMetricsServerFromEnv();
 
       const tokenCheck = await TokenPrecheck.validate();
       if (!tokenCheck.valid) {
@@ -122,6 +127,11 @@ class BilibiliDiscordBot {
       // Cleanup all guild sessions (players, progress trackers, UI contexts)
       if (this.sessionManager) {
         this.sessionManager.cleanup();
+      }
+
+      if (this.metricsServer) {
+        await this.metricsServer.stop().catch(() => {});
+        this.metricsServer = null;
       }
 
       this.isRunning = false;

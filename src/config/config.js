@@ -16,6 +16,21 @@ module.exports = {
     ffmpegInactiveKillThreshold: parseInt(process.env.FFMPEG_INACTIVE_KILL_THRESHOLD) || 60000, // 60秒
     enableUnlimitedLength: process.env.ENABLE_UNLIMITED_LENGTH !== "false", // 默认启用无限长度播放
     urlRefreshThreshold: parseInt(process.env.URL_REFRESH_THRESHOLD) || 20 * 60 * 1000, // Bilibili CDN URL 刷新阈值（默认20分钟）
+    // 播放判定阈值 — 用于 Idle 事件到达时判断是否视作"完整播放结束"
+    fullTrackThresholdMs: parseInt(process.env.AUDIO_FULL_TRACK_THRESHOLD_MS) || 15000, // 未知时长(duration=0)时，超过 15s 视为完整播放
+    shortPlaybackRetryThresholdMs: parseInt(process.env.AUDIO_SHORT_PLAYBACK_RETRY_THRESHOLD_MS) || 3000, // 播放时间 <3s 且未达结尾则视作异常，触发重试
+    // FFmpeg 终止优雅期：SIGTERM 发出后等待多久再发 SIGKILL
+    killGracePeriodMs: parseInt(process.env.AUDIO_KILL_GRACE_PERIOD_MS) || 1000, // cleanupFFmpegProcess
+    ffmpegHangForceKillMs: parseInt(process.env.AUDIO_FFMPEG_HANG_FORCE_KILL_MS) || 2000, // activityMonitor 检测到挂起后的硬 kill 延迟
+  },
+  voice: {
+    connectionTimeoutMs: parseInt(process.env.VOICE_CONNECTION_TIMEOUT_MS) || 15000, // waitForVoiceConnection 超时
+    handoffWaitMs: parseInt(process.env.VOICE_HANDOFF_WAIT_MS) || 1000, // play() 后保持 _manualNavigating 的 startup window
+    autoDisconnectIdleMs: parseInt(process.env.VOICE_AUTO_DISCONNECT_IDLE_MS) || 60 * 1000, // 无播放自动断开
+  },
+  retry: {
+    voiceJoinBaseBackoffMs: parseInt(process.env.RETRY_VOICE_JOIN_BASE_BACKOFF_MS) || 2000, // joinVoiceChannel 递增退避基数：(attempt+1) * base
+    trackRetryDelayMs: parseInt(process.env.RETRY_TRACK_DELAY_MS) || 2000, // retryCurrentTrack 前的等待
   },
   logging: {
     level: process.env.LOG_LEVEL || "info",

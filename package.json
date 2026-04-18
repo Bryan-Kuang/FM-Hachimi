@@ -8,6 +8,10 @@
     "quick": "node src/index.js",
     "tools": "node scripts/tools/bot-tools.js",
     "dev": "nodemon src/index.js",
+    "dev:ts": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "build:watch": "tsc -p tsconfig.build.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "docker:dev": "docker compose -f docker-compose.dev.yml up",
     "docker:build": "bash scripts/deploy/build.sh",
     "deploy": "bash scripts/deploy/release.sh",
@@ -51,12 +55,20 @@
   },
   "devDependencies": {
     "@eslint/config-helpers": "^0.4.0",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.12.12",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
     "eslint": "^8.57.1",
     "husky": "^9.1.7",
     "jest": "^29.7.0",
     "lint-staged": "^16.2.7",
     "nodemon": "^3.0.2",
-    "standard": "^17.1.2"
+    "standard": "^17.1.2",
+    "ts-jest": "^29.1.5",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.4.5"
   },
   "engines": {
     "node": ">=18.0.0"
