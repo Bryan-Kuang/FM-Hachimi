@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   bilibili-bot:
     build:
@@ -11,6 +9,17 @@ services:
     # Environment variables from .env file
     env_file:
       - .env
+
+    # Expose the in-container metrics server to the host's loopback only.
+    # The metrics server must also be told to bind on all interfaces inside
+    # the container (not 127.0.0.1), otherwise the port forward has no one
+    # to connect to. Set METRICS_HOST=0.0.0.0 in .env.
+    #
+    # Security: binding to 127.0.0.1:9090 on the host means the port is only
+    # reachable from inside the VPS (e.g. over SSH tunnel), never from the
+    # public internet — /metrics and /healthz should not be exposed publicly.
+    ports:
+      - "127.0.0.1:9090:9090"
 
     # Logging configuration
     logging:
