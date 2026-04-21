@@ -30,7 +30,13 @@ module.exports = {
   },
   retry: {
     voiceJoinBaseBackoffMs: parseInt(process.env.RETRY_VOICE_JOIN_BASE_BACKOFF_MS) || 2000, // joinVoiceChannel 递增退避基数：(attempt+1) * base
-    trackRetryDelayMs: parseInt(process.env.RETRY_TRACK_DELAY_MS) || 2000, // retryCurrentTrack 前的等待
+    trackRetryDelayMs: parseInt(process.env.RETRY_TRACK_DELAY_MS) || 2000, // retryCurrentTrack 前的等待（legacy；CDN 失败现走 cdnBackoff*）
+    // CDN failure 专用指数退避：观察到 bilibili 风控会对同一 URL 反复返回 403 ~30s；
+    // 固定 2s 重试 → 3 次全部撞同一签名 → track 被跳过。退避到 3s/15s 后重试，
+    // 给 yt-dlp 足够冷却时间拿到新签名。attempt 从 1 计数。
+    cdnBackoffBaseMs: parseInt(process.env.RETRY_CDN_BACKOFF_BASE_MS) || 3000, // 第 1 次重试前等待（ms）
+    cdnBackoffMultiplier: parseInt(process.env.RETRY_CDN_BACKOFF_MULTIPLIER) || 5, // 每次乘数：3s → 15s → 75s（被 max 截断）
+    cdnBackoffMaxMs: parseInt(process.env.RETRY_CDN_BACKOFF_MAX_MS) || 30000, // 上限：单次退避不超过 30s
   },
   logging: {
     level: process.env.LOG_LEVEL || "info",

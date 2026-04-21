@@ -1303,7 +1303,17 @@ class AudioPlayer {
   }
 
   /**
-   * Retry current track (when playback fails immediately)
+   * Retry current track (when playback fails immediately).
+   *
+   * For CDN failures we run an exponential backoff BEFORE refreshing the URL:
+   * Bilibili's risk-control layer locks the signed URL for ~30s after it
+   * trips a 403, and yt-dlp often returns the same locked URL if queried
+   * within that window. Sleeping 3s → 15s before re-querying gives the lock
+   * time to release so we actually get a fresh signature back.
+   *
+   * Observation window guard: the user may hit /skip or /stop during our
+   * sleep. We capture the track reference up front and bail if it has
+   * changed, so we don't restart a stale track on top of the new one.
    */
   async retryCurrentTrack() {
     this._cdnRetryPending = false; // Clear CDN retry flag
@@ -1313,32 +1323,65 @@ class AudioPlayer {
       return;
     }
 
+    const trackAtStart = this.currentTrack;
+
     logger.info("Retrying current track", {
-      title: this.currentTrack?.title || "Unknown",
-      attempt: (this.currentTrack.retryCount || 0) + 1,
+      title: trackAtStart?.title || "Unknown",
+      attempt: (trackAtStart.retryCount || 0) + 1,
     });
 
     // 限制重试次数
-    this.currentTrack.incrementRetry();
-    if (this.currentTrack.retryCount > 2) {
+    trackAtStart.incrementRetry();
+    if (trackAtStart.retryCount > 2) {
       logger.error("Max retry attempts reached, skipping track", {
-        title: this.currentTrack?.title || "Unknown",
+        title: trackAtStart?.title || "Unknown",
       });
       this.handleTrackEnd();
       return;
     }
 
-    // Force refresh audio URL on retry since it likely expired
-    if (this.currentTrack.normalizedUrl) {
+    // Exponential backoff BEFORE URL refresh so Bilibili risk control has
+    // time to release the signed-URL lock. attempt is 1-indexed after the
+    // incrementRetry() above.
+    const attempt = trackAtStart.retryCount;
+    const backoffMs = this._computeCdnBackoffMs(attempt);
+    if (backoffMs > 0) {
+      logger.info("CDN retry backoff", {
+        attempt,
+        backoffMs,
+        track: trackAtStart.title,
+      });
+      await this._sleep(backoffMs);
+    }
+
+    // If the user skipped / stopped during the sleep, abort the retry —
+    // otherwise we'd restart a stale track on top of the current one.
+    if (this.currentTrack !== trackAtStart) {
+      logger.info("Track changed during CDN backoff; aborting retry", {
+        original: trackAtStart?.title,
+      });
+      return;
+    }
+
+    // Force refresh audio URL on retry since it likely expired / was locked
+    if (trackAtStart.normalizedUrl) {
       try {
         if (this.extractor) {
           const freshUrl = await this.extractor.getAudioStreamUrl(
-            this.currentTrack.normalizedUrl,
+            trackAtStart.normalizedUrl,
           );
-          this.currentTrack.audioUrl = freshUrl;
-          this.currentTrack.extractedAt = new Date().toISOString();
+          // Re-check after the await: user may have skipped during the
+          // extractor call too.
+          if (this.currentTrack !== trackAtStart) {
+            logger.info("Track changed during URL refresh; aborting retry", {
+              original: trackAtStart?.title,
+            });
+            return;
+          }
+          trackAtStart.audioUrl = freshUrl;
+          trackAtStart.extractedAt = new Date().toISOString();
           logger.info("Refreshed audio URL for retry", {
-            title: this.currentTrack.title,
+            title: trackAtStart.title,
           });
         }
       } catch (e) {
@@ -1348,16 +1391,38 @@ class AudioPlayer {
       }
     }
 
-    // 等待一下再重试 (.unref() so it doesn't block process exit)
-    setTimeout(() => {
-      this.playCurrentTrack().catch((error) => {
-        logger.error("Retry failed", {
-          error: error.message,
-          title: this.currentTrack?.title,
-        });
-        this.handleTrackEnd();
+    if (this.currentTrack !== trackAtStart) return; // one last check
+
+    try {
+      await this.playCurrentTrack();
+    } catch (error) {
+      logger.error("Retry failed", {
+        error: error.message,
+        title: this.currentTrack?.title,
       });
-    }, config.retry.trackRetryDelayMs).unref();
+      this.handleTrackEnd();
+    }
+  }
+
+  /**
+   * Compute exponential backoff for CDN retry. attempt is 1-indexed.
+   * Returns 0 under Jest (NODE_ENV=test) so unit tests stay fast.
+   */
+  _computeCdnBackoffMs(attempt) {
+    if (process.env.NODE_ENV === "test") return 0;
+    const base = config.retry.cdnBackoffBaseMs;
+    const multiplier = config.retry.cdnBackoffMultiplier;
+    const max = config.retry.cdnBackoffMaxMs;
+    const exp = Math.max(0, attempt - 1);
+    const computed = base * Math.pow(multiplier, exp);
+    return Math.min(computed, max);
+  }
+
+  _sleep(ms) {
+    return new Promise((resolve) => {
+      const t = setTimeout(resolve, ms);
+      if (typeof t.unref === "function") t.unref();
+    });
   }
 
   /**
