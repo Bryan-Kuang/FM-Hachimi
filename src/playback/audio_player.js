@@ -1152,28 +1152,40 @@ class AudioPlayer {
     logger.info("Player entered idle state", { guild: this.currentGuild });
   }
 
-  /** Destroy the voice connection and remove the player from AudioManager. */
+  /**
+   * Destroy the voice connection. Resets local state; does NOT touch
+   * AudioManager — the previous attempt to do that called
+   * `require("./manager")`, a path that has never existed in this codebase
+   * (real AudioManager is at ../session/audio_manager and isn't even a
+   * singleton with a `players` Map). Each inactivity timeout therefore
+   * threw "Cannot find module './manager'" inside a setTimeout, propagated
+   * past the missing try/catch, became an uncaughtException, and aborted
+   * cleanup mid-flight — leaving the bot stuck in the voice channel even
+   * though `voiceConnection.destroy()` had already run (or silently
+   * failed and got swallowed below).
+   *
+   * Player-instance recycling, if we want it later, belongs in the layer
+   * that owns the SessionManager — not in the player itself.
+   */
   _doDisconnect() {
     this._cancelInactivityTimer();
     if (this.voiceConnection) {
       try {
         this.voiceConnection.destroy();
-      } catch (_) {
-        /* connection may already be destroyed */
+      } catch (err) {
+        // Don't swallow silently — surfacing the error gives us a chance
+        // to spot future "bot still in channel" regressions in logs.
+        logger.warn("voiceConnection.destroy() threw during disconnect", {
+          guild: this.currentGuild,
+          error: err && err.message,
+        });
       }
       this.voiceConnection = null;
     }
     const guildId = this.currentGuild;
     this.currentGuild = null;
     this.isIdle = false;
-    if (guildId) {
-      const AudioManager = require("./manager");
-      AudioManager.players.delete(guildId);
-      logger.info("Audio player instance removed after idle timeout", {
-        guild: guildId,
-      });
-    }
-    logger.info("Disconnected from voice channel");
+    logger.info("Disconnected from voice channel", { guild: guildId });
   }
 
   /**
@@ -1285,10 +1297,19 @@ class AudioPlayer {
   }
 
   /**
-   * Check if FFmpeg stderr indicates a CDN/network failure that can be retried
+   * Check if FFmpeg stderr indicates a CDN/network failure that can be retried.
+   *
+   * Exit-code rationale (observed on production VPS, 2026-04-21):
+   *   - 255 → historical "input open failure" (FFmpeg <7)
+   *   - 8   → modern HTTP-protocol-side failures: 16/24 of today's 403s
+   *           returned this code instead of 255
+   *   - 251 → AVERROR(EIO) family on TLS/I/O collapse
+   * All three are reachable via Bilibili CDN failure modes; 0/1/137 (SIGKILL)
+   * are not, so we explicitly allow-list the retry-worthy codes.
    */
   isCdnFailure(code, stderr) {
-    if (code !== 255) return false;
+    const retryableCodes = new Set([255, 8, 251]);
+    if (!retryableCodes.has(code)) return false;
     const cdnPatterns = [
       /End of file/i,
       /Server returned 4\d{2}/i,
@@ -1298,6 +1319,7 @@ class AudioPlayer {
       /Connection timed out/i,
       /I\/O error/i,
       /HTTP error/i,
+      /403 Forbidden/i,
     ];
     return cdnPatterns.some((p) => p.test(stderr));
   }
