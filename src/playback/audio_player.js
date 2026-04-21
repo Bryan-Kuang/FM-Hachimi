@@ -66,6 +66,20 @@ class AudioPlayer {
         voiceConnectionStatus: this.voiceConnection?.state?.status,
         subscribed: this.voiceConnection?.state?.subscription !== null,
       });
+
+      // Shadow mode observation: STREAM_STARTED lets the reducer advance
+      // `loading → playing` so subsequent STREAM_ENDED events compare
+      // against the right state. Without this dispatch the shadow stays
+      // pinned at `connecting` and every idle-time compareOutcome() shows
+      // a spurious divergence.
+      const shadowTrack = this.currentTrack ? this._toShadowTrack(this.currentTrack) : null;
+      if (shadowTrack) {
+        this._shadow.dispatch({
+          type: "STREAM_STARTED",
+          trackId: shadowTrack.id,
+          at: new Date(),
+        });
+      }
     });
 
     this.audioPlayer.on(AudioPlayerStatus.Paused, () => {
@@ -253,6 +267,8 @@ class AudioPlayer {
       ) {
         logger.info("Already connected to target voice channel");
         this.voiceConnection = existingConnection;
+        this.currentGuild = voiceChannel.guild.id;
+        this._shadow.setGuildId(voiceChannel.guild.id);
 
         // 🔧 关键修复：重新订阅音频播放器到现有连接
         logger.info("Re-subscribing audio player to existing voice connection");
@@ -269,6 +285,9 @@ class AudioPlayer {
       });
 
       this.currentGuild = voiceChannel.guild.id;
+      // Attach the real guildId to the shadow runner now that we know it.
+      // Until this point every shadow log line would be tagged `unknown`.
+      this._shadow.setGuildId(voiceChannel.guild.id);
 
       // Wait for connection to be ready
       await this.waitForVoiceConnection();
@@ -487,6 +506,13 @@ class AudioPlayer {
           );
         }
       }
+
+      // Shadow mode observation: VOICE_CONNECTED advances the reducer from
+      // `connecting` to `loading`. We dispatch it here (not inside
+      // joinVoiceChannel) because PLAY_REQUESTED was emitted earlier in
+      // this function — dispatching earlier would fire VOICE_CONNECTED
+      // from an idle state where the reducer would drop it.
+      this._shadow.dispatch({ type: "VOICE_CONNECTED" });
 
       // 🔧 修复：在创建新的音频资源前先清理旧的FFmpeg进程
       // 这可以防止在queue loop模式下播放前几秒旧内容的问题

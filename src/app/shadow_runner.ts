@@ -64,7 +64,7 @@ export type ObservedOutcome =
  */
 export class ShadowRunner {
   private state: PlaybackState = { kind: "idle" };
-  private readonly guildId: string;
+  private guildId: string;
   private readonly logger: ShadowLogger;
   private readonly observer?: ShadowObserver;
   readonly enabled: boolean;
@@ -74,6 +74,20 @@ export class ShadowRunner {
     this.guildId = opts.guildId;
     this.logger = opts.logger;
     this.observer = opts.observer;
+  }
+
+  /**
+   * Attach the real guildId after construction. AudioPlayer creates its
+   * runner in the constructor — before `currentGuild` is known — so the
+   * initial id is a placeholder. Without this setter every log line and
+   * metric label would read `guildId: "unknown"`, which is useless for
+   * aggregation. Callers invoke this on voice join, once the id is
+   * resolved, so every subsequent event carries the correct attribution.
+   * No-op on empty input so accidental calls cannot blank the id.
+   */
+  setGuildId(guildId: string): void {
+    if (!guildId) return;
+    this.guildId = guildId;
   }
 
   /** Reset the shadow state — e.g. on guild leave. */

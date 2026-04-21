@@ -132,6 +132,52 @@ describe("ShadowRunner — enabled", () => {
   });
 });
 
+describe("ShadowRunner — setGuildId attribution", () => {
+  beforeEach(() => resetMetrics());
+
+  test("setGuildId replaces the placeholder before the first event", () => {
+    const logger = mkLogger();
+    const sr = new ShadowRunner({ enabled: true, guildId: "unknown", logger });
+    sr.setGuildId("guild-42");
+    sr.dispatch({ type: "PLAY_REQUESTED", track: mkTrack("a") });
+    sr.compareOutcome({ kind: "retry" }); // force a warn for inspection
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "shadow divergence",
+      expect.objectContaining({ guildId: "guild-42" }),
+    );
+    // The old "unknown" label should not leak into any warn call.
+    for (const call of logger.warn.mock.calls) {
+      expect(call[1]?.guildId).not.toBe("unknown");
+    }
+  });
+
+  test("setGuildId on an empty string is a no-op (cannot blank attribution)", () => {
+    const logger = mkLogger();
+    const sr = new ShadowRunner({ enabled: true, guildId: "guild-42", logger });
+    sr.setGuildId("");
+    sr.dispatch({ type: "PLAY_REQUESTED", track: mkTrack("a") });
+    sr.compareOutcome({ kind: "retry" });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "shadow divergence",
+      expect.objectContaining({ guildId: "guild-42" }),
+    );
+  });
+
+  test("later setGuildId wins — attribution updates on channel switch", () => {
+    const logger = mkLogger();
+    const sr = new ShadowRunner({ enabled: true, guildId: "unknown", logger });
+    sr.setGuildId("guild-a");
+    sr.setGuildId("guild-b");
+    sr.dispatch({ type: "PLAY_REQUESTED", track: mkTrack("t") });
+    sr.compareOutcome({ kind: "retry" });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "shadow divergence",
+      expect.objectContaining({ guildId: "guild-b" }),
+    );
+  });
+});
+
 describe("ShadowRunner — the 'stale Idle after skip' race", () => {
   beforeEach(() => resetMetrics());
 

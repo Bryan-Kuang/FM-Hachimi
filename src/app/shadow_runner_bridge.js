@@ -22,6 +22,7 @@ function createDisabledRunner() {
     compareOutcome() { /* no-op */ },
     reset() { /* no-op */ },
     getState() { return { kind: "idle" }; },
+    setGuildId() { /* no-op */ },
   };
 }
 
@@ -71,7 +72,7 @@ function wrapSafe(runner, logger) {
   const safe = {
     get enabled() { return runner.enabled === true; },
   };
-  for (const method of ["dispatch", "compareOutcome", "reset", "getState"]) {
+  for (const method of ["dispatch", "compareOutcome", "reset", "getState", "setGuildId"]) {
     safe[method] = function (...args) {
       try {
         return runner[method](...args);
