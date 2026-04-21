@@ -51,6 +51,33 @@ describe("shadow_runner_bridge — safety guarantees", () => {
     expect(() => r.compareOutcome({ kind: "idle" })).not.toThrow();
     expect(() => r.reset()).not.toThrow();
     expect(() => r.getState()).not.toThrow();
+    expect(() => r.setGuildId("g1")).not.toThrow();
+  });
+
+  test("disabled stub exposes setGuildId so callers never need to branch", () => {
+    // audio_player.js calls _shadow.setGuildId() unconditionally on voice
+    // join. If the stub were missing this method the legacy path would
+    // throw TypeError — exactly what the bridge's defense-in-depth story
+    // exists to prevent.
+    const r = bridge.createDisabledRunner();
+    expect(typeof r.setGuildId).toBe("function");
+  });
+
+  test("wrapSafe proxies setGuildId to the underlying runner", () => {
+    const setGuildId = jest.fn();
+    const fakeMod = {
+      createShadowRunner: () => ({
+        enabled: true,
+        dispatch: () => ({ kind: "idle" }),
+        compareOutcome: () => {},
+        reset: () => {},
+        getState: () => ({ kind: "idle" }),
+        setGuildId,
+      }),
+    };
+    const r = bridge.createShadowRunner("unknown", mkLogger(), { SHADOW_MODE_ENABLED: "true" }, () => fakeMod);
+    r.setGuildId("guild-xyz");
+    expect(setGuildId).toHaveBeenCalledWith("guild-xyz");
   });
 
   test("compareOutcome is a no-op on the disabled stub", () => {
