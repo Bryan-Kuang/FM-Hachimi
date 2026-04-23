@@ -31,6 +31,9 @@ jobs:
   deploy:
     needs: ci
     runs-on: ubuntu-latest
+    # Backstop: if any step below hangs (stuck SSH, stuck git pull, stuck
+    # docker build), GitHub kills the job at 20 min instead of the default 6h.
+    timeout-minutes: 20
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Deploy to Oracle Cloud
@@ -39,8 +42,31 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          # SSH-session-level timeouts. `timeout` is the TCP connect phase;
+          # `command_timeout` bounds the whole remote script. Both guard
+          # against the Oracle VPS silently dropping the connection mid-run.
+          timeout: 30s
+          command_timeout: 15m
           script: |
+            set -euo pipefail
             cd ~/bilibili-bot
-            git pull origin main
-            docker-compose up -d --build
-            docker image prune -f
+
+            # `timeout` wraps each network-bound step so a stuck git or
+            # docker build fails loudly in under N seconds instead of
+            # keeping a CD worker wedged. Exit code 124 = timed out.
+            echo "[deploy] fetching origin/main..."
+            timeout 120 git fetch --prune origin main
+
+            # --ff-only refuses to clobber unexpected local commits on the
+            # VPS (e.g. someone hand-edited for a hotfix). Surfaces the
+            # divergence as a visible failure rather than a silent merge.
+            echo "[deploy] fast-forward pulling..."
+            timeout 60 git pull --ff-only origin main
+
+            echo "[deploy] rebuilding containers..."
+            timeout 600 docker-compose up -d --build
+
+            echo "[deploy] pruning unused images..."
+            timeout 60 docker image prune -f
+
+            echo "[deploy] done."
