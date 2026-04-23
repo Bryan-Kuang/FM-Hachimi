@@ -223,6 +223,143 @@ describe("regression: ProgressTracker cadence + dedup", () => {
     tracker.stopTracking("g1");
   });
 
+  // Helper: inject a ready-to-use tracker state object directly into the
+  // session, bypassing startTracking()'s timer scheduling. This lets these
+  // tests exercise updateProgress() in isolation without racing against a
+  // background setTimeout chain.
+  function injectTracker(sm, guildId, { edit, getState, overrides = {} }) {
+    const state = {
+      message: { edit },
+      guildId,
+      getPlayerState: getState,
+      stopped: false,
+      timer: null,
+      lastSignature: null,
+      nextTickAt: Date.now() + 1000,
+      consecutiveSlowEdits: 0,
+      cooldownUntil: 0,
+      slowEditThresholdMs: 1500,
+      slowEditStreakLimit: 3,
+      cooldownMs: 5000,
+      ...overrides,
+    };
+    sm.get(guildId).progressTracker = state;
+    return state;
+  }
+
+  test("back-pressure cooldown: slow-edit streak sets cooldown window", async () => {
+    // Simulates the user-reported failure:
+    //   "bar refreshed every second at the start, then after a while
+    //    started refreshing every few seconds."
+    // Root cause: once Discord's rate-limit bucket is drained, each
+    // `message.edit()` takes >1s, the absolute-time scheduler keeps
+    // scheduling delay=0 ticks, and we pile new edits into an already-
+    // stuck queue — unbounded runaway.
+    //
+    // Defense: after N consecutive slow edits we stop sending any edit
+    // for `cooldownMs`, letting the bucket and queue drain.
+    //
+    // White-box test: drive updateProgress() directly and assert the
+    // state-machine fields. We need real wall-clock timing for the edit
+    // latency measurement, but bypass startTracking()'s background loop
+    // so it doesn't interfere.
+    jest.useRealTimers();
+
+    const sm = mkSessionManager();
+    const tracker = new ProgressTracker(sm);
+
+    // Each edit takes 2000ms — well above the 1500ms slow threshold.
+    const slowEdit = jest
+      .fn()
+      .mockImplementation(
+        () => new Promise((r) => setTimeout(r, 2000)),
+      );
+
+    let t = 0;
+    const getState = () => mkPlayerState({ currentTime: ++t });
+    const trackerState = injectTracker(sm, "g1", {
+      edit: slowEdit,
+      getState,
+    });
+
+    // Drive 3 direct updateProgress calls — each records a slow edit.
+    // The 3rd hits the streak limit and arms cooldown.
+    await tracker.updateProgress("g1");
+    expect(trackerState.consecutiveSlowEdits).toBe(1);
+    expect(trackerState.cooldownUntil).toBe(0);
+
+    await tracker.updateProgress("g1");
+    expect(trackerState.consecutiveSlowEdits).toBe(2);
+    expect(trackerState.cooldownUntil).toBe(0);
+
+    await tracker.updateProgress("g1");
+    // After hitting the streak limit: streak resets, cooldown armed.
+    expect(trackerState.consecutiveSlowEdits).toBe(0);
+    expect(trackerState.cooldownUntil).toBeGreaterThan(Date.now());
+
+    // While cooldown is active, updateProgress must NOT call edit again.
+    const editsBefore = slowEdit.mock.calls.length;
+    await tracker.updateProgress("g1");
+    await tracker.updateProgress("g1");
+    expect(slowEdit.mock.calls.length).toBe(editsBefore);
+
+    jest.useFakeTimers(); // restore for afterEach contract
+  }, 15000);
+
+  test("cooldown recovers: after cooldownUntil passes, edits resume", async () => {
+    const sm = mkSessionManager();
+    const tracker = new ProgressTracker(sm);
+
+    const fastEdit = jest.fn().mockResolvedValue(undefined);
+    let t = 0;
+    const getState = () => mkPlayerState({ currentTime: ++t });
+    const trackerState = injectTracker(sm, "g1", {
+      edit: fastEdit,
+      getState,
+    });
+
+    // A past-deadline cooldown is inactive — updateProgress should proceed.
+    trackerState.cooldownUntil = Date.now() - 1;
+    await tracker.updateProgress("g1");
+    expect(fastEdit).toHaveBeenCalledTimes(1);
+
+    // A future-deadline cooldown IS active — updateProgress must skip.
+    trackerState.cooldownUntil = Date.now() + 10_000;
+    await tracker.updateProgress("g1");
+    expect(fastEdit).toHaveBeenCalledTimes(1);
+  });
+
+  test("slow-edit counter resets on a fast edit (one-off latency spike is noise)", async () => {
+    // A single slow edit (e.g. transient network jitter) should NOT
+    // latch us toward cooldown. The streak must reset on any fast edit.
+    jest.useRealTimers();
+
+    const sm = mkSessionManager();
+    const tracker = new ProgressTracker(sm);
+
+    let call = 0;
+    const edit = jest.fn().mockImplementation(() => {
+      call += 1;
+      // alternate: slow, fast, slow, fast — streak never reaches 3
+      if (call % 2 === 1) return new Promise((r) => setTimeout(r, 2000));
+      return Promise.resolve();
+    });
+
+    let t = 0;
+    const getState = () => mkPlayerState({ currentTime: ++t });
+    const trackerState = injectTracker(sm, "g1", { edit, getState });
+
+    for (let i = 0; i < 6; i++) {
+      await tracker.updateProgress("g1");
+    }
+
+    // After 6 alternating edits, streak should be 0 or 1, never hit 3.
+    expect(trackerState.consecutiveSlowEdits).toBeLessThan(3);
+    expect(trackerState.cooldownUntil).toBe(0);
+
+    jest.useFakeTimers();
+  }, 20000);
+
   test("stopTracking cancels an in-flight schedule", async () => {
     const sm = mkSessionManager();
     const tracker = new ProgressTracker(sm);

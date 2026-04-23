@@ -38,6 +38,24 @@
  *      (rather than `Date.now() + intervalMs`) so a slow edit doesn't push
  *      every subsequent tick late. If the edit ran long, we schedule the
  *      next tick with `max(0, nextTickAt - now)` — catches up instantly.
+ *
+ *   6. Back-pressure cooldown (this file's KEY defense against runaway).
+ *      If `message.edit()` takes longer than the slow-edit threshold it
+ *      usually means Discord's per-channel bucket is drained and
+ *      discord.js's REST client is holding our request. At that point the
+ *      absolute-time scheduler will keep scheduling delay=0 ticks, each of
+ *      which enqueues another edit into the already-stuck queue —
+ *      classic runaway. That matches the user-reported "progress bar
+ *      refreshed every second at the start of playback, then started
+ *      refreshing every few seconds after a while" failure.
+ *
+ *      Defense: count consecutive slow edits, and after N in a row enter
+ *      a cooldown window during which the tick loop keeps running BUT
+ *      does not call `message.edit` at all. That lets the rate-limit
+ *      bucket and discord.js's REST queue drain. When the cooldown ends
+ *      we resume normal 1s updates. UX trade-off agreed with the user:
+ *      the bar may visibly freeze for a few seconds under back-pressure,
+ *      then snaps back to 1/s cadence.
  */
 
 const EmbedBuilders = require("./embeds");
@@ -114,6 +132,9 @@ class ProgressTracker {
     }
 
     const intervalMs = config.ui?.progressIntervalMs || 1000;
+    const slowEditThresholdMs = config.ui?.slowEditThresholdMs || 1500;
+    const slowEditStreakLimit = config.ui?.slowEditStreakLimit || 3;
+    const cooldownMs = config.ui?.cooldownMs || 5000;
 
     const tracker = {
       message,
@@ -127,6 +148,17 @@ class ProgressTracker {
       // Absolute wall-clock target for the next tick; drives the
       // "schedule next relative to the planned tick, not to `now`" behavior.
       nextTickAt: Date.now() + intervalMs,
+      // Back-pressure state. `consecutiveSlowEdits` resets on any fast
+      // edit; `cooldownUntil` is a wall-clock deadline after which edits
+      // resume. While `Date.now() < cooldownUntil` the tick loop still
+      // fires but skips `message.edit` entirely.
+      consecutiveSlowEdits: 0,
+      cooldownUntil: 0,
+      // Thresholds pinned at startTracking time so config reloads don't
+      // mutate a running tracker mid-flight.
+      slowEditThresholdMs,
+      slowEditStreakLimit,
+      cooldownMs,
     };
     session.progressTracker = tracker;
 
@@ -195,6 +227,18 @@ class ProgressTracker {
     const tracker = session.progressTracker;
     if (!tracker) return;
 
+    // Back-pressure cooldown: the previous stretch of edits was slow, so
+    // we're giving discord.js's REST queue and the channel's rate-limit
+    // bucket time to drain. Tick keeps firing (so we notice when playback
+    // ends, state changes, etc.) but we don't send anything.
+    if (Date.now() < tracker.cooldownUntil) {
+      logger.debug("Progress tick skipped (cooldown)", {
+        guild: guildId,
+        remainingMs: tracker.cooldownUntil - Date.now(),
+      });
+      return;
+    }
+
     try {
       const { message, getPlayerState } = tracker;
 
@@ -224,10 +268,7 @@ class ProgressTracker {
       });
 
       // Content-hash dedup — if the visible progress content hasn't changed
-      // since our last edit, skip the Discord round-trip entirely. For a
-      // 20-segment bar and a 60s track, each segment holds for 3 seconds, so
-      // two-thirds of ticks dedup away. This is what keeps us well below
-      // Discord's 5-edits/5s per-channel rate limit.
+      // since our last edit, skip the Discord round-trip entirely.
       const signature = computeProgressSignature(updatedEmbed);
       if (signature === tracker.lastSignature) {
         logger.debug("Progress tick skipped (unchanged)", {
@@ -237,20 +278,39 @@ class ProgressTracker {
         return;
       }
 
-      // Intentionally NOT sending `components` on tick edits. Button state
-      // (play/pause glyph, loop mode, enabled flags) changes on user action,
-      // not per-second, and InterfaceUpdater.handleUpdate sends a full edit
-      // — including components — on every PlayerControl state transition.
-      // Sending components here just burned rate-limit budget for no UX gain.
+      // Intentionally NOT sending `components` on tick edits (handled by
+      // InterfaceUpdater's state-change path — see file-header comment).
+      const editStartedAt = Date.now();
       await message.edit({
         embeds: [updatedEmbed],
       });
+      const editDuration = Date.now() - editStartedAt;
       tracker.lastSignature = signature;
+
+      // Back-pressure detection: a single slow edit is normal noise
+      // (network jitter, a one-off rate-limit hit). A streak of slow
+      // edits means the bucket is drained and we're piling requests into
+      // discord.js's REST queue. Enter cooldown to let it drain.
+      if (editDuration >= tracker.slowEditThresholdMs) {
+        tracker.consecutiveSlowEdits += 1;
+        if (tracker.consecutiveSlowEdits >= tracker.slowEditStreakLimit) {
+          tracker.cooldownUntil = Date.now() + tracker.cooldownMs;
+          tracker.consecutiveSlowEdits = 0;
+          logger.warn("Progress tracker entering cooldown (edit back-pressure)", {
+            guild: guildId,
+            editDuration,
+            cooldownMs: tracker.cooldownMs,
+          });
+        }
+      } else {
+        tracker.consecutiveSlowEdits = 0;
+      }
 
       logger.debug("Progress updated", {
         guild: guildId,
         currentTime: Math.floor(currentTime),
         duration: track.duration,
+        editDuration,
       });
     } catch (error) {
       logger.error("Failed to update progress", {
