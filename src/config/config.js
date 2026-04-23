@@ -43,6 +43,18 @@ module.exports = {
     file: process.env.LOG_FILE || "bot.log",
     toFile: process.env.LOG_TO_FILE !== "false",
   },
+  ui: {
+    // ProgressTracker tick interval (ms). Each tick checks whether the
+    // progress bar string changed vs. last sent edit; if identical we skip
+    // the Discord call entirely (content-hash dedup).
+    //
+    // Why 1000ms: the bar has 20 segments, so for a 60s track each segment
+    // is 3s. Dedup naturally caps real edits at ~1 per segment. Setting this
+    // lower than 1000 risks Discord's 5-edits-per-5s per-channel rate limit
+    // when multiple guilds play simultaneously; setting higher makes short
+    // tracks (<40s) visibly lag between segment flips.
+    progressIntervalMs: parseInt(process.env.UI_PROGRESS_INTERVAL_MS) || 1000,
+  },
   bilibili: {
     likeRateThreshold: parseFloat(process.env.BILIBILI_LIKE_RATE_THRESHOLD) || 0.05,
     viewCountThreshold: parseInt(process.env.BILIBILI_VIEW_COUNT_THRESHOLD) || 10000,
