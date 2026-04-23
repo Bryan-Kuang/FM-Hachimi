@@ -17,6 +17,7 @@ const logger = require("../services/logger_service");
 const Formatters = require("../utils/formatters");
 const config = require("../config/config");
 const Track = require("../models/track");
+const cdnRetry = require("./cdn_retry");
 
 class AudioPlayer {
   constructor(extractor) {
@@ -1227,20 +1228,7 @@ class AudioPlayer {
    * are not, so we explicitly allow-list the retry-worthy codes.
    */
   isCdnFailure(code, stderr) {
-    const retryableCodes = new Set([255, 8, 251]);
-    if (!retryableCodes.has(code)) return false;
-    const cdnPatterns = [
-      /End of file/i,
-      /Server returned 4\d{2}/i,
-      /Server returned 5\d{2}/i,
-      /Connection reset/i,
-      /Connection refused/i,
-      /Connection timed out/i,
-      /I\/O error/i,
-      /HTTP error/i,
-      /403 Forbidden/i,
-    ];
-    return cdnPatterns.some((p) => p.test(stderr));
+    return cdnRetry.isCdnFailure(code, stderr);
   }
 
   /**
@@ -1345,25 +1333,12 @@ class AudioPlayer {
     }
   }
 
-  /**
-   * Compute exponential backoff for CDN retry. attempt is 1-indexed.
-   * Returns 0 under Jest (NODE_ENV=test) so unit tests stay fast.
-   */
   _computeCdnBackoffMs(attempt) {
-    if (process.env.NODE_ENV === "test") return 0;
-    const base = config.retry.cdnBackoffBaseMs;
-    const multiplier = config.retry.cdnBackoffMultiplier;
-    const max = config.retry.cdnBackoffMaxMs;
-    const exp = Math.max(0, attempt - 1);
-    const computed = base * Math.pow(multiplier, exp);
-    return Math.min(computed, max);
+    return cdnRetry.computeCdnBackoffMs(attempt, config.retry);
   }
 
   _sleep(ms) {
-    return new Promise((resolve) => {
-      const t = setTimeout(resolve, ms);
-      if (typeof t.unref === "function") t.unref();
-    });
+    return cdnRetry.sleep(ms);
   }
 
   /**
