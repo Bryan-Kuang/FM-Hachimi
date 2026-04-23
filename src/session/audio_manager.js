@@ -42,7 +42,12 @@ class AudioManager {
   getPlayer(guildId) {
     const session = this.sessionManager.get(guildId);
     if (!session.player) {
-      session.player = new AudioPlayer();
+      // CRITICAL: must forward the extractor so retryCurrentTrack() and
+      // playCurrentTrack()'s URL-refresh branches in AudioPlayer are reachable.
+      // Without this, `this.extractor` is null and every `if (this.extractor)`
+      // silently falls through — a stale audioUrl gets replayed forever on
+      // CDN failures (prod 2026-04-22: 600 × 403 with zero URL refreshes).
+      session.player = new AudioPlayer(this.extractor);
       logger.info("Created new audio player for guild", { guildId });
     }
     return session.player;
