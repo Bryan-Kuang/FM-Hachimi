@@ -43,6 +43,31 @@ module.exports = {
     file: process.env.LOG_FILE || "bot.log",
     toFile: process.env.LOG_TO_FILE !== "false",
   },
+  ui: {
+    // ProgressTracker tick interval (ms). Each tick checks whether the
+    // progress bar string changed vs. last sent edit; if identical we skip
+    // the Discord call entirely (content-hash dedup).
+    progressIntervalMs: parseInt(process.env.UI_PROGRESS_INTERVAL_MS) || 1000,
+    // Back-pressure detection for the progress tracker. If a single
+    // `message.edit()` takes longer than `slowEditThresholdMs` we call that
+    // edit "slow" — it usually means Discord's per-channel rate-limit bucket
+    // is drained and discord.js's REST client is holding our request. After
+    // `slowEditStreakLimit` consecutive slow edits we enter a cooldown of
+    // `cooldownMs` during which the tracker keeps ticking on schedule but
+    // DOES NOT send any edit at all. That lets the rate-limit bucket and
+    // any queued edits drain. When the cooldown ends the tracker resumes
+    // normal 1s updates.
+    //
+    // Why this matters: without a cooldown, a slow edit makes the
+    // self-clocking loop schedule the next tick at delay=0, which just
+    // enqueues another edit into the already-stuck queue — a classic
+    // runaway. The user-visible symptom is "the progress bar refreshed
+    // every second at the start of playback, then started refreshing every
+    // few seconds after a while" (issue #12 residual).
+    slowEditThresholdMs: parseInt(process.env.UI_SLOW_EDIT_THRESHOLD_MS) || 1500,
+    slowEditStreakLimit: parseInt(process.env.UI_SLOW_EDIT_STREAK_LIMIT) || 3,
+    cooldownMs: parseInt(process.env.UI_COOLDOWN_MS) || 5000,
+  },
   bilibili: {
     likeRateThreshold: parseFloat(process.env.BILIBILI_LIKE_RATE_THRESHOLD) || 0.05,
     viewCountThreshold: parseInt(process.env.BILIBILI_VIEW_COUNT_THRESHOLD) || 10000,
