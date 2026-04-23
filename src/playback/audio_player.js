@@ -32,7 +32,14 @@ class AudioPlayer {
     this.volume = 0.5;
     this.loopMode = "queue"; // none, track, queue - 🎵 默认为queue loop
     this.currentGuild = null;
-    this.startTime = null; // Track start time for progress calculation
+    this.startTime = null; // Wall-clock at last Playing transition; used by _handleIdle for early-exit retry math (kept through pause; see Paused handler)
+    // Pause-aware audio-position accounting — separate from `startTime` because
+    // pause/resume must not reset the progress bar. `_accumulatedPlayMs` is the
+    // time counted while we were Playing *before* the current Playing session.
+    // `_currentPlayStartedAt` is the wall-clock when the current Playing session
+    // began, or null if currently paused/idle.
+    this._accumulatedPlayMs = 0;
+    this._currentPlayStartedAt = null;
     this.progressInterval = null; // Interval for progress updates
     this.ffmpegProcess = null; // 🔧 添加：跟踪当前FFmpeg进程
     this._ffmpegChecked = false; // Lazy FFmpeg availability check
@@ -53,7 +60,14 @@ class AudioPlayer {
     this.audioPlayer.on(AudioPlayerStatus.Playing, () => {
       this.isPlaying = true;
       this.isPaused = false;
-      this.startTime = Date.now(); // Record when playback started
+      this.startTime = Date.now(); // Wall-clock for _handleIdle's early-exit retry math
+      // Start (or resume) the audio-position clock. If `_currentPlayStartedAt`
+      // is already non-null we're already running — don't reset, that would
+      // backdate the progress bar on spurious Playing re-entries (e.g. a quick
+      // AutoPaused → Playing cycle from a buffer underrun).
+      if (this._currentPlayStartedAt === null) {
+        this._currentPlayStartedAt = Date.now();
+      }
       // Note: _manualNavigating is cleared in playCurrentTrack() after the
       // resource is fully handed off, not here, to avoid a window where a
       // spurious Idle event could slip through between Playing and the 1s wait.
@@ -69,6 +83,13 @@ class AudioPlayer {
     this.audioPlayer.on(AudioPlayerStatus.Paused, () => {
       this.isPlaying = false;
       this.isPaused = true;
+      // Freeze the audio-position clock: fold elapsed session time into the
+      // accumulator, then clear the session start. getCurrentTime() will now
+      // return a frozen value until the next Playing event resumes the clock.
+      if (this._currentPlayStartedAt !== null) {
+        this._accumulatedPlayMs += Date.now() - this._currentPlayStartedAt;
+        this._currentPlayStartedAt = null;
+      }
       // Do NOT null startTime here. If a song is paused near its end and resumes
       // for < 3 s before finishing, _handleIdle() would compute actualPlaybackDuration=0
       // and incorrectly trigger retryCurrentTrack() — causing the song to replay up to
@@ -479,6 +500,11 @@ class AudioPlayer {
       }
 
       logger.debug("Playing audio resource");
+      // Reset pause-aware progress counters so the new track starts at 0:00.
+      // Safe against any code path that reached playCurrentTrack() without
+      // going through skip/previous/stop (e.g. autoplay after handleTrackEnd).
+      this._accumulatedPlayMs = 0;
+      this._currentPlayStartedAt = null;
       // Play the audio
       this.audioPlayer.play(audioResource);
 
@@ -764,6 +790,8 @@ class AudioPlayer {
     // from triggering handleTrackEnd() and advancing the queue a second time.
     this._manualNavigating = true;
     this.startTime = null;
+    this._accumulatedPlayMs = 0;
+    this._currentPlayStartedAt = null;
 
     // Check if we can skip to next track
     if (this.currentIndex < this.queue.length - 1) {
@@ -834,6 +862,8 @@ class AudioPlayer {
     // Set guard flag — same race condition as skip()
     this._manualNavigating = true;
     this.startTime = null;
+    this._accumulatedPlayMs = 0;
+    this._currentPlayStartedAt = null;
 
     if (this.currentIndex > 0) {
       this.currentIndex--;
@@ -983,15 +1013,24 @@ class AudioPlayer {
   }
 
   /**
-   * Get current playback time in seconds
-   * @returns {number} - Current playback time
+   * Get current playback time in seconds (pause-aware audio position).
+   *
+   * Sums `_accumulatedPlayMs` (frozen from previous Playing sessions) plus the
+   * live elapsed time of the current Playing session if we're running. This
+   * deliberately does NOT key off wall-clock `startTime` — that field is reset
+   * on every Playing transition (including resume / AutoPaused recovery) and
+   * would cause the progress bar to jump backward. When paused,
+   * `_currentPlayStartedAt === null` so we return the frozen accumulator.
+   *
+   * @returns {number} - Current playback time in seconds, clamped to duration
    */
   getCurrentTime() {
-    if (!this.isPlaying || !this.startTime || !this.currentTrack) {
-      return 0;
-    }
-
-    const elapsed = (Date.now() - this.startTime) / 1000;
+    if (!this.currentTrack) return 0;
+    const liveMs =
+      this._currentPlayStartedAt !== null
+        ? Date.now() - this._currentPlayStartedAt
+        : 0;
+    const elapsed = (this._accumulatedPlayMs + liveMs) / 1000;
     return Math.min(elapsed, this.currentTrack.duration || 0);
   }
 
@@ -1028,6 +1067,8 @@ class AudioPlayer {
       this.isPlaying = false;
       this.isPaused = false;
       this.startTime = null;
+      this._accumulatedPlayMs = 0;
+      this._currentPlayStartedAt = null;
 
       this._enterIdle();
 
@@ -1212,6 +1253,8 @@ class AudioPlayer {
     this.isPlaying = false;
     this.isPaused = false;
     this.startTime = null;
+    this._accumulatedPlayMs = 0;
+    this._currentPlayStartedAt = null;
     this._doDisconnect();
     logger.info("Left voice channel");
   }

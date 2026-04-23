@@ -50,16 +50,18 @@ class EmbedBuilders {
       embed.setThumbnail(videoData.thumbnail);
     }
 
-    // Simplified progress display with arrow indicator
+    // Progress bar: `█` for played, `░` for remaining (matches README docs).
     if (videoData.duration > 0) {
       const currentTimeStr = Formatters.formatTime(currentTime);
       const totalTimeStr = Formatters.formatTime(videoData.duration);
-      const progress = Math.min(Math.round((currentTime / videoData.duration) * 20), 20);
-      const emptyProgress = 20 - progress;
-      
-      // Create progress bar with arrow indicator
-      const progressBar = "━".repeat(progress) + ">" + "━".repeat(Math.max(0, emptyProgress - 1));
-      
+      const BAR_WIDTH = 20;
+      const filled = Math.min(
+        Math.round((currentTime / videoData.duration) * BAR_WIDTH),
+        BAR_WIDTH,
+      );
+      const empty = BAR_WIDTH - filled;
+      const progressBar = "█".repeat(filled) + "░".repeat(empty);
+
       embed.addFields({
         name: "⏱️ Progress",
         value: `\`${currentTimeStr}\` ${progressBar} \`${totalTimeStr}\``,

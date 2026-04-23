@@ -29,20 +29,57 @@ class ProgressTracker {
     const session = this.sessionManager.get(guildId);
 
     if (process.env.NODE_ENV === "test") {
-      session.progressTracker = { message, guildId, interval: null, getPlayerState };
+      session.progressTracker = {
+        message,
+        guildId,
+        getPlayerState,
+        stopped: false,
+        timer: null,
+      };
       this.updateProgress(guildId);
       return;
     }
 
-    session.progressTracker = {
+    const tracker = {
       message,
       guildId,
       getPlayerState,
-      updating: false,
-      interval: setInterval(() => {
-        this.updateProgress(guildId);
-      }, 1000),
+      stopped: false,
+      timer: null,
     };
+    session.progressTracker = tracker;
+
+    // Self-clocking loop instead of setInterval:
+    //   - A fixed setInterval(1000) fires regardless of whether the previous
+    //     edit finished, so under Discord rate-limit backpressure we'd either
+    //     queue edits (worsening the stall) or skip them via a guard flag
+    //     (the progress bar would visibly slow down and drift further out of
+    //     sync — issue #12).
+    //   - Here we schedule the next tick AFTER the previous updateProgress
+    //     settles, at `max(0, 1000 - elapsed)`. Fast path = 1s cadence; slow
+    //     path = catch up immediately when Discord finally responds.
+    const scheduleNext = (delay) => {
+      if (tracker.stopped) return;
+      tracker.timer = setTimeout(tick, delay);
+      if (typeof tracker.timer.unref === "function") tracker.timer.unref();
+    };
+    const tick = async () => {
+      if (tracker.stopped) return;
+      const startedAt = Date.now();
+      try {
+        await this.updateProgress(guildId);
+      } catch (err) {
+        // updateProgress already logs; swallow so the loop never dies.
+        logger.debug("Progress tick swallowed error", {
+          guild: guildId,
+          error: err?.message,
+        });
+      }
+      if (tracker.stopped) return;
+      const elapsed = Date.now() - startedAt;
+      scheduleNext(Math.max(0, 1000 - elapsed));
+    };
+    scheduleNext(1000);
 
     logger.info("Started progress tracking", { guild: guildId });
   }
@@ -55,7 +92,8 @@ class ProgressTracker {
     const session = this.sessionManager.get(guildId);
     const tracker = session.progressTracker;
     if (tracker) {
-      if (tracker.interval) clearInterval(tracker.interval);
+      tracker.stopped = true;
+      if (tracker.timer) clearTimeout(tracker.timer);
       session.progressTracker = null;
       logger.info("Stopped progress tracking", { guild: guildId });
     }
@@ -70,9 +108,9 @@ class ProgressTracker {
     const tracker = session.progressTracker;
     if (!tracker) return;
 
-    // Skip if previous edit is still in flight (prevents rate limit queue buildup)
-    if (tracker.updating) return;
-    tracker.updating = true;
+    // Re-entrancy is prevented by the self-clocking loop in startTracking:
+    // the next tick is scheduled only after `await updateProgress` resolves.
+    // No `updating` flag is needed here.
 
     try {
       const { message, getPlayerState } = tracker;
@@ -135,10 +173,6 @@ class ProgressTracker {
       if (error.code === 10008 || error.code === 50001) {
         this.stopTracking(guildId);
       }
-    } finally {
-      // Re-read tracker from session in case stopTracking was called during await
-      const currentTracker = this.sessionManager.get(guildId).progressTracker;
-      if (currentTracker) currentTracker.updating = false;
     }
   }
 
