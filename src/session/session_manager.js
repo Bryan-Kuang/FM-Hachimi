@@ -45,10 +45,18 @@ class SessionManager {
     const session = this.sessions.get(guildId);
     if (!session) return false;
 
-    // 1. Stop progress tracking interval
-    if (session.progressTracker && session.progressTracker.interval) {
+    // 1. Stop progress tracking timer.
+    // Field name changed from `.interval` (setInterval era) to `.timer`
+    // (self-clocking setTimeout chain era — see progress_tracker.js header).
+    // We mark the tracker stopped BEFORE clearing so any in-flight tick that
+    // has already passed its initial `if (tracker.stopped) return` exits at
+    // the post-update stopped-check instead of rescheduling.
+    if (session.progressTracker) {
       try {
-        clearInterval(session.progressTracker.interval);
+        session.progressTracker.stopped = true;
+        if (session.progressTracker.timer) {
+          clearTimeout(session.progressTracker.timer);
+        }
       } catch (_) { /* ignore */ }
       session.progressTracker = null;
     }

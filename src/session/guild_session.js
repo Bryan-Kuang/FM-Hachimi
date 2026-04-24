@@ -9,7 +9,7 @@ class GuildSession {
     this.player = null;          // AudioPlayer instance
     this.uiContext = null;       // { channelId, messageId }
     this.uiSeq = 0;             // UI update sequence number
-    this.progressTracker = null; // { message, interval, updating, getPlayerState }
+    this.progressTracker = null; // see progress_tracker.js for shape — { message, timer, stopped, lastSignature, nextTickAt, cooldownUntil, ... }
     this.history = new Set();    // Play history bvids (for dedup)
     this.historyLimit = 50;      // Max history entries before eviction
   }
