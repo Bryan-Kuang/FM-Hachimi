@@ -30,20 +30,12 @@ Add some tracks to get started!",
 
 exports[`Bot Commands Coverage Queue Command { description: '非空队列', scene: [Object], queueResult: [Object] } 1`] = `
 {
-  "description": "🎵 **Now Playing:**
-\`▶️\` A
+  "description": "▶️ **Now Playing**
+A
 
-📊 **Queue Overview:**
-• **2** tracks total
-• Page **1** of **1**
-
-🎶 **Up Next:**
-\`01.\` **A**
-     👤 U1
-
-\`02.\` **B**
-     👤 U2
-
+🎶 **Up Next**
+\`1.\` A
+\`2.\` B
 ",
   "title": "📋 Music Queue",
 }

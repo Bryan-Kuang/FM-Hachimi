@@ -64,7 +64,7 @@ class ButtonBuilders {
     
     const loopButton = new ButtonBuilder()
       .setCustomId("loop")
-      .setLabel(`Loop: ${loopMode === "none" ? "Off" : loopMode === "track" ? "Track" : "Queue"}`)
+      .setLabel(`Loop: ${loopMode === "none" ? "Off" : loopMode === "track" ? "Single" : "Queue"}`)
       .setEmoji(loopEmojis[loopMode])
       .setStyle(loopMode === "none" ? ButtonStyle.Secondary : ButtonStyle.Success);
 

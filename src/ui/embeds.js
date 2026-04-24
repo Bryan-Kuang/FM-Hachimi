@@ -94,7 +94,7 @@ class EmbedBuilders {
     // Loop mode indicator (f ix display issue)
     const loopEmojis = {
       none: "➡️ Off",
-      track: "🔂 Track", 
+      track: "🔂 Single",
       queue: "🔁 Queue"
     };
     
@@ -140,85 +140,50 @@ class EmbedBuilders {
       .setColor(0x5865F2) // Discord blurple
       .setTimestamp();
 
-    if (queue.length === 0) {
+    if (queue.length === 0 && !currentTrack) {
       embed.setDescription("🎵 **Queue is empty**\nAdd some tracks to get started!");
       embed.setColor(0x6C757D); // Gray for empty state
       return embed;
     }
 
-    // Calculate display range
+    let description = "";
+
+    // Now Playing section
+    if (currentTrack) {
+      const title = Formatters.escapeMarkdown(currentTrack.title || "Unknown");
+      const bv = currentTrack.videoId || currentTrack.bvid || "";
+      description += `▶️ **Now Playing**\n`;
+      description += `${title}`;
+      if (bv) description += ` • \`${bv}\``;
+      description += "\n";
+    }
+
+    // Up Next section — subsequent tracks on this page
     const startIndex = (page - 1) * itemsPerPage;
     const endIndex = Math.min(startIndex + itemsPerPage, queue.length);
     const displayQueue = queue.slice(startIndex, endIndex);
 
-    // Enhanced queue description with current track info
-    let description = "";
-    if (currentTrack) {
-      description += `🎵 **Now Playing:**\n\`▶️\` ${Formatters.escapeMarkdown(currentTrack.title)}\n\n`;
+    if (displayQueue.length > 0) {
+      description += "\n🎶 **Up Next**\n";
+      displayQueue.forEach((video, index) => {
+        const pos = startIndex + index + 1;
+        const title = Formatters.escapeMarkdown(video.title || "Unknown");
+        const bv = video.videoId || video.bvid || "";
+        description += `\`${pos}.\` ${title}`;
+        if (bv) description += ` • \`${bv}\``;
+        description += "\n";
+      });
     }
 
-    description += `📊 **Queue Overview:**\n`;
-    description += `• **${queue.length}** tracks total\n`;
-    description += `• Page **${page}** of **${totalPages}**\n\n`;
-
-    // Enhanced track listing with better formatting
-    description += "🎶 **Up Next:**\n";
-    
-    displayQueue.forEach((video, index) => {
-      const globalIndex = startIndex + index + 1;
-      const position = globalIndex.toString().padStart(2, '0');
-      const title = Formatters.escapeMarkdown(video.title);
-      const uploader = video.uploader ? Formatters.escapeMarkdown(video.uploader) : "Unknown";
-      
-      // Use different formatting for different positions
-      if (globalIndex <= 3) {
-        // Highlight top 3 tracks
-        description += `\`${position}.\` **${title}**\n`;
-        description += `     👤 ${uploader}\n\n`;
-      } else {
-        // Compact format for other tracks
-        description += `\`${position}.\` ${title}\n`;
-      }
-    });
-
-    // Add pagination info if needed
+    // Page info
     if (totalPages > 1) {
-      description += `\n📄 **Navigation:**\n`;
-      description += `Use queue controls to navigate between pages\n`;
-      if (page < totalPages) {
-        description += `${queue.length - endIndex} more tracks...`;
-      }
+      description += `\n📄 Page **${page}** / **${totalPages}**`;
     }
 
     embed.setDescription(description);
 
-    // Add queue statistics as fields
-    const stats = [];
-    
-    // Show unique uploaders count
-    const uniqueUploaders = new Set(queue.filter(track => track.uploader).map(track => track.uploader));
-    if (uniqueUploaders.size > 0) {
-      stats.push({
-        name: "👥 Unique Creators",
-        value: `\`${uniqueUploaders.size}\``,
-        inline: true,
-      });
-    }
-
-    // Show page info
-    stats.push({
-      name: "📄 Page Info",
-      value: `\`${page}/${totalPages}\``,
-      inline: true,
-    });
-
-    if (stats.length > 0) {
-      embed.addFields(...stats);
-    }
-
-    // Enhanced footer
     embed.setFooter({
-      text: `🎵 Bilibili Player • Showing ${startIndex + 1}-${endIndex} of ${queue.length} tracks`,
+      text: `🎵 Bilibili Player • ${queue.length} track${queue.length !== 1 ? "s" : ""} in queue`,
       iconURL: "https://cdn.discordapp.com/emojis/741605543046807626.png"
     });
 
