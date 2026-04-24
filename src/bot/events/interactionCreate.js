@@ -41,27 +41,28 @@ module.exports = function createInteractionHandler(playbackService, queueService
         guild: interaction.guild?.name,
       });
 
-      // Immediately defer reply for all button interactions to avoid 3-second timeout
-      if (["pause_resume", "skip", "prev", "stop"].includes(customId)) {
+      // Immediately defer to beat Discord's 3-second timeout.
+      // Control buttons use deferUpdate() so the original now-playing embed
+      // is NOT replaced — any subsequent editReply() would overwrite it.
+      // All other buttons use deferReply(ephemeral) so their responses
+      // (queue list, loop confirmation, etc.) are only visible to the presser
+      // and never clobber the now-playing embed.
+      const controlButtons = ["pause_resume", "skip", "prev", "stop"];
+      const isControlButton = controlButtons.includes(customId);
+
+      if (isControlButton) {
         await interaction.deferUpdate();
       } else {
-        await interaction.deferReply();
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       }
 
-      // Check if user is in a voice channel for control buttons
-      const controlButtons = ["pause_resume", "skip", "prev", "stop"];
-      if (controlButtons.includes(customId)) {
+      // Check if user is in a voice channel for control buttons.
+      // Use followUp (not editReply) so the original embed stays intact.
+      if (isControlButton) {
         if (!interaction.member.voice.channel) {
-          const errorEmbed = EmbedBuilders.createErrorEmbed(
-            "Voice Channel Required",
-            "You need to be in a voice channel to control playback!",
-            {
-              suggestion: "Join the voice channel where music is playing.",
-            }
-          );
-
-          return await interaction.editReply({
-            embeds: [errorEmbed],
+          return await interaction.followUp({
+            content: "🔇 Join the voice channel where music is playing first.",
+            flags: MessageFlags.Ephemeral,
           });
         }
       }
@@ -214,7 +215,7 @@ module.exports = function createInteractionHandler(playbackService, queueService
               ? "disabled"
               : loopMode === "queue"
               ? "enabled (queue)"
-              : "enabled (track)";
+              : "enabled (single)";
 
           responseEmbed = EmbedBuilders.createSuccessEmbed(
             "Loop Mode Changed",
@@ -303,11 +304,25 @@ module.exports = function createInteractionHandler(playbackService, queueService
         }
       );
 
+      // Control buttons (pause/skip/prev/stop) used deferUpdate(), so editReply()
+      // would overwrite the now-playing embed. Use followUp() instead to keep the
+      // embed intact and send the error only to the button presser.
+      const isCtrlButton = ["pause_resume", "skip", "prev", "stop"].includes(
+        interaction.customId
+      );
+
       try {
         if (interaction.replied || interaction.deferred) {
-          await interaction.editReply({
-            embeds: [errorEmbed],
-          });
+          if (isCtrlButton) {
+            await interaction.followUp({
+              embeds: [errorEmbed],
+              flags: MessageFlags.Ephemeral,
+            });
+          } else {
+            await interaction.editReply({
+              embeds: [errorEmbed],
+            });
+          }
         } else {
           await interaction.reply({
             embeds: [errorEmbed],
@@ -511,7 +526,7 @@ module.exports = function createInteractionHandler(playbackService, queueService
             ? "disabled"
             : selectedMode === "queue"
             ? "enabled (queue)"
-            : "enabled (track)";
+            : "enabled (single)";
 
         const successEmbed = EmbedBuilders.createSuccessEmbed(
           "Loop Mode Changed",
