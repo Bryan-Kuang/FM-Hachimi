@@ -363,7 +363,7 @@ module.exports = function createInteractionHandler(playbackService, queueService
           guild: interaction.guild?.name,
         });
 
-        await interaction.deferReply();
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         let result;
         let responseEmbed;

@@ -215,6 +215,21 @@ describe("BilibiliAPI", () => {
       ["哈基米TOP10名曲", true],
       ["哈基米音乐排行榜", true],
       ["第01-24话 哈基米", true],
+      // Chinese-numeral ranking patterns (e.g. "十大神曲" = top-10 songs)
+      ["哈基米十大神曲，全都听过的，网瘾很大了", true],
+      ["鬼畜五大神曲盘点", true],
+      ["哈基米百大名曲", true],
+      // Arabic-numeral ranking (e.g. "10大")
+      ["哈基米10大必听歌曲", true],
+      // 大全 (comprehensive collection)
+      ["哈基米音乐大全", true],
+      // 合辑 (compilation album)
+      ["哈基米合辑精选", true],
+      // 几百/几千首 — "hundreds/thousands of songs" meta-videos
+      ["顶流版哈基米金曲，三个字怎么能创作出几千首歌", true],
+      ["哈基米几百首神曲精选", true],
+      // 100+ explicit track count
+      ["哈基米100首精选", true],
     ])("rejects compilation title: %s", (title, shouldReject) => {
       const videos = [{ bvid: "1", title }];
       const result = BilibiliAPI.filterCompilations(videos);
@@ -226,6 +241,7 @@ describe("BilibiliAPI", () => {
       ["【哈基米】神曲翻唱"],
       ["你真的了解哈基米吗"],
       ["第24话 哈基米"],  // single episode, not a range
+      ["哈基米大冒险"],   // 大 as part of a non-ranking word
     ])("passes non-compilation title: %s", (title) => {
       const videos = [{ bvid: "1", title }];
       expect(BilibiliAPI.filterCompilations(videos)).toHaveLength(1);
