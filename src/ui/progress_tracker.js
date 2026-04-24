@@ -242,8 +242,16 @@ class ProgressTracker {
     try {
       const { message, getPlayerState } = tracker;
 
-      // Get current player state via callback
+      // Get current player state via callback. `getPlayerState` is
+      // InterfaceUpdater._getPlayerState, which returns `null` when the
+      // AudioManager has no player for this guild (e.g. the guild's session
+      // was torn down between startTracking and this tick). Treat that
+      // identically to "nothing playing" — early-return so we never try to
+      // read `.currentTrack` / `.isPlaying` off `null`.
       const playerState = getPlayerState();
+      if (!playerState) {
+        return;
+      }
 
       // Only update if currently playing
       const track = playerState.currentTrack;
