@@ -241,6 +241,62 @@ class BilibiliAPI {
   }
 
   /**
+   * Filter videos by duration.
+   * Rejects anything shorter than hachimiMinDurationSec (clips/previews) or
+   * longer than hachimiMaxDurationSec (compilations / long edits).
+   * Videos with duration === 0 (API didn't return it or parsing failed) are
+   * passed through — we don't penalise valid content for missing metadata.
+   * @param {Array} videos
+   * @returns {Array}
+   */
+  filterByDuration(videos) {
+    if (!Array.isArray(videos)) return [];
+    const max = config.bilibili.hachimiMaxDurationSec;
+    const min = config.bilibili.hachimiMinDurationSec;
+    return videos.filter(v => {
+      const d = Number(v.duration || 0);
+      if (d === 0) return true; // unknown duration — give benefit of the doubt
+      return d >= min && d <= max;
+    });
+  }
+
+  /**
+   * Filter out obvious compilation / summary / off-topic videos by title.
+   * Targets patterns that appear in 总集/合集 uploads but almost never in
+   * standalone music or 鬼畜 clips.
+   * @param {Array} videos
+   * @returns {Array}
+   */
+  filterCompilations(videos) {
+    if (!Array.isArray(videos)) return [];
+    // "合集" / "总集" / "全集" — obvious compilation markers
+    // "第X-Y话/集/期" — episode-range notation (e.g. "第01-24话")
+    // "盘点" / "精选集" — list/ranking videos
+    // "TOP\d+" / "排行榜" — chart/ranking videos
+    const COMPILATION_RE = /合集|总集|全集|精选集|盘点|TOP\s*\d+|排行榜|第\s*\d+\s*[-~—至]\s*\d+\s*[集话期]/;
+    return videos.filter(v => !COMPILATION_RE.test(v.title || ""));
+  }
+
+  /**
+   * Keep only videos that are genuinely about 哈基米.
+   * At least one of title or tag must contain the keyword "哈基米".
+   * Using the search query "哈基米" already biases results, but random
+   * page sampling (pages 2-10) can surface drift content that happens to
+   * rank for the term without being hachimi-related. This hard filter
+   * prevents those from reaching the queue.
+   * @param {Array} videos
+   * @returns {Array}
+   */
+  filterHachimiRelevance(videos) {
+    if (!Array.isArray(videos)) return [];
+    return videos.filter(v => {
+      const title = v.title || "";
+      const tag = v.tag || "";
+      return title.includes("哈基米") || tag.includes("哈基米");
+    });
+  }
+
+  /**
    * Search for Hachimi videos with quality filtering (Redesigned)
    * @param {number} maxResults - Maximum number of results to return (default: 5)
    * @returns {Promise<Array>} Array of qualified video objects
@@ -340,7 +396,13 @@ class BilibiliAPI {
 
     // Partition filter: only allow 鬼畜区 and 音乐区
     const partitionFiltered = this.filterByPartition(deduped, config.bilibili.hachimiAllowedTids);
-    const qualified = this.filterQualityVideos(partitionFiltered);
+    // Relevance filter: at least one of title / tag must contain "哈基米"
+    const relevanceFiltered = this.filterHachimiRelevance(partitionFiltered);
+    // Duration filter: ≥ hachimiMinDurationSec and ≤ hachimiMaxDurationSec
+    const durationFiltered = this.filterByDuration(relevanceFiltered);
+    // Compilation filter: reject obvious 合集/总集/排行 videos by title pattern
+    const compilationFiltered = this.filterCompilations(durationFiltered);
+    const qualified = this.filterQualityVideos(compilationFiltered);
     const afterHistory = this.historyStore ? this.historyStore.filter(guildId, qualified) : qualified;
     const softFallback = afterHistory.length === 0 && qualified.length > 0;
     const pool = softFallback ? qualified : afterHistory;
@@ -360,6 +422,9 @@ class BilibiliAPI {
         totalRaw: (rawList || []).length,
         dedupedCount: deduped.length,
         partitionFilteredCount: partitionFiltered.length,
+        relevanceFilteredCount: relevanceFiltered.length,
+        durationFilteredCount: durationFiltered.length,
+        compilationFilteredCount: compilationFiltered.length,
         qualifiedCount: qualified.length,
         excludedByHistory: qualified.length - afterHistory.length,
         softFallbackApplied: softFallback,

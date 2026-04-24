@@ -77,6 +77,10 @@ module.exports = {
     cookiesFile: process.env.BILIBILI_COOKIES_FILE || "",
     // Hachimi partition filter: only 鬼畜区 (119) and 音乐区 (3) sub-partitions allowed
     hachimiAllowedTids: [3, 22, 26, 28, 29, 30, 31, 59, 119, 126, 130, 193, 216, 243],
+    // Hachimi duration filter (seconds). Videos with duration=0 (API didn't return it) are
+    // passed through so we don't silently drop otherwise-valid results.
+    hachimiMaxDurationSec: parseInt(process.env.HACHIMI_MAX_DURATION_SEC) || 360,  // 6 min
+    hachimiMinDurationSec: parseInt(process.env.HACHIMI_MIN_DURATION_SEC) || 60,   // 1 min
   },
   test: {
     mode: process.env.TEST_MODE === "true",
