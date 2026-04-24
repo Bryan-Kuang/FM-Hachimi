@@ -121,3 +121,6 @@ yt-dlp
 yt-dlp.exe
 *.pem
 *.key
+
+# Daily Hachimi runtime data
+data/*.json

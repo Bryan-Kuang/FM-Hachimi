@@ -8,7 +8,7 @@ const config = require("../src/config/config");
 const logger = require("../src/services/logger_service");
 
 // Import all commands
-const commands = [
+const commandModules = [
   require("../src/bot/commands/play"),
   require("../src/bot/commands/pause"),
   require("../src/bot/commands/resume"),
@@ -20,6 +20,7 @@ const commands = [
   require("../src/bot/commands/help"),
   require("../src/bot/commands/search"),
   require("../src/bot/commands/hachimi"),
+  require("../src/bot/commands/daily_hachimi"),
 ];
 
 async function deployCommands() {
@@ -28,6 +29,11 @@ async function deployCommands() {
     if (!config.discord.token || !config.discord.clientId) {
       throw new Error("Discord token or client ID is not configured");
     }
+
+    // Factory functions receive (playbackService, queueService, ...) — pass null for deploy-only use
+    const commands = commandModules.map((mod) =>
+      typeof mod === "function" ? mod(null, null, null) : mod
+    );
 
     // Extract command data
     const commandData = commands.map((command) => command.data.toJSON());

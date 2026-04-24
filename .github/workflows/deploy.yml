@@ -27,6 +27,8 @@ jobs:
         env:
           TEST_MODE: true
           NODE_ENV: test
+          # Disable husky hooks in CI
+          HUSKY: 0
 
   deploy:
     needs: ci
@@ -68,5 +70,27 @@ jobs:
 
             echo "[deploy] pruning unused images..."
             timeout 60 docker image prune -f
+
+            # Health check: give the container up to 30 seconds to reach
+            # running state. If it crashes on startup (bad config, missing
+            # env var, etc.) we catch it here instead of silently failing.
+            echo "[deploy] waiting for container to be healthy..."
+            CONTAINER=$(docker-compose ps -q 2>/dev/null | head -1)
+            if [ -n "$CONTAINER" ]; then
+              for i in $(seq 1 6); do
+                STATUS=$(docker inspect --format='{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo "unknown")
+                if [ "$STATUS" = "running" ]; then
+                  echo "[deploy] container is running."
+                  break
+                fi
+                if [ "$STATUS" = "exited" ] || [ "$STATUS" = "dead" ]; then
+                  echo "[deploy] container exited unexpectedly (status: $STATUS)."
+                  docker-compose logs --tail=50
+                  exit 1
+                fi
+                echo "[deploy] container status: $STATUS, waiting... ($i/6)"
+                sleep 5
+              done
+            fi
 
             echo "[deploy] done."

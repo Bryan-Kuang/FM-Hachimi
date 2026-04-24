@@ -16,12 +16,14 @@ const Debug = require("../utils/debug");
 
 class BotClient {
   /**
-   * @param {Object} playbackService - PlaybackService instance
-   * @param {Object} queueService    - QueueService instance
+   * @param {Object} playbackService      - PlaybackService instance
+   * @param {Object} queueService         - QueueService instance
+   * @param {Object} dailyHachimiService  - DailyHachimiService instance (optional)
    */
-  constructor(playbackService, queueService) {
-    this.playbackService = playbackService;
-    this.queueService    = queueService;
+  constructor(playbackService, queueService, dailyHachimiService) {
+    this.playbackService     = playbackService;
+    this.queueService        = queueService;
+    this.dailyHachimiService = dailyHachimiService || null;
 
     // Initialize Discord client with required intents
     this.client = new Client({
@@ -327,12 +329,15 @@ class BotClient {
       require("./commands/help"),
       require("./commands/search"),
       require("./commands/hachimi"),
+      require("./commands/daily_hachimi"),
     ];
 
     for (const mod of commandModules) {
       try {
-        // Factory functions receive (playbackService, queueService); plain objects used as-is
-        const command = typeof mod === "function" ? mod(this.playbackService, this.queueService) : mod;
+        // Factory functions receive (playbackService, queueService[, dailyHachimiService]); plain objects used as-is
+        const command = typeof mod === "function"
+          ? mod(this.playbackService, this.queueService, this.dailyHachimiService)
+          : mod;
 
         if (command.data && command.execute) {
           this.client.commands.set(command.data.name, command);

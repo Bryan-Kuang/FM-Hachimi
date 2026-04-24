@@ -67,6 +67,33 @@ module.exports = function createInteractionHandler(playbackService, queueService
         }
       }
 
+      // daily_play_<bvid>: triggered from daily hachimi recommendation cards
+      // deferReply(ephemeral) was already called above (not a control button)
+      if (customId.startsWith("daily_play_")) {
+        if (!interaction.member.voice.channel) {
+          return await interaction.editReply({
+            content: "🔇 请先加入一个语音频道再点击聆听。",
+          });
+        }
+
+        const bvid = customId.slice("daily_play_".length);
+        if (!bvid) {
+          return await interaction.editReply({ content: "❌ 无效的视频 ID。" });
+        }
+
+        const videoUrl = `https://www.bilibili.com/video/${bvid}`;
+        const result = await playbackService.playBilibiliVideo(interaction, videoUrl);
+
+        if (!result || !result.success) {
+          return await interaction.editReply({
+            content: `❌ 无法播放视频：${result?.error || "未知错误"}`,
+          });
+        }
+
+        await interaction.editReply({ content: "✅ 已加入队列！" });
+        return;
+      }
+
       // Route control buttons through PlaybackService
       if (["pause_resume", "skip", "prev", "stop"].includes(customId)) {
         playbackService.setUIContext(

@@ -1,0 +1,46 @@
+name: Deploy Discord Commands
+
+# 触发方式：
+# 1. 手动从 GitHub Actions 页面点 "Run workflow"
+# 2. push 到 main 时，如果命令定义文件发生变化，自动触发
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deploy target (guild = fast dev, global = up to 1h propagation)'
+        required: false
+        default: 'guild'
+        type: choice
+        options:
+          - guild
+          - global
+
+  push:
+    branches: [main]
+    paths:
+      - 'src/bot/commands/**'
+      - 'scripts/deploy-commands.js'
+
+jobs:
+  deploy-commands:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy slash commands to Discord
+        run: node scripts/deploy-commands.js
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          # GUILD_ID 有值 → 部署到指定服务器（即时生效，适合开发/测试）
+          # GUILD_ID 为空 → 全局部署（最多 1 小时生效）
+          GUILD_ID: ${{ secrets.GUILD_ID }}
