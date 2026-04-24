@@ -154,6 +154,133 @@ describe("BilibiliAPI", () => {
     });
   });
 
+  // ─── filterByDuration ───────────────────────────────────────
+
+  describe("filterByDuration", () => {
+    test("passes video within range", () => {
+      const videos = [{ bvid: "1", duration: 180 }]; // 3 min
+      expect(BilibiliAPI.filterByDuration(videos)).toHaveLength(1);
+    });
+
+    test("passes video at exact max boundary (360s)", () => {
+      const videos = [{ bvid: "1", duration: 360 }];
+      expect(BilibiliAPI.filterByDuration(videos)).toHaveLength(1);
+    });
+
+    test("rejects video over max (361s)", () => {
+      const videos = [{ bvid: "1", duration: 361 }];
+      expect(BilibiliAPI.filterByDuration(videos)).toHaveLength(0);
+    });
+
+    test("passes video at exact min boundary (60s)", () => {
+      const videos = [{ bvid: "1", duration: 60 }];
+      expect(BilibiliAPI.filterByDuration(videos)).toHaveLength(1);
+    });
+
+    test("rejects video under min (59s)", () => {
+      const videos = [{ bvid: "1", duration: 59 }];
+      expect(BilibiliAPI.filterByDuration(videos)).toHaveLength(0);
+    });
+
+    test("passes video with unknown duration (0) — benefit of the doubt", () => {
+      const videos = [{ bvid: "1", duration: 0 }];
+      expect(BilibiliAPI.filterByDuration(videos)).toHaveLength(1);
+    });
+
+    test("passes video with missing duration field", () => {
+      const videos = [{ bvid: "1" }];
+      expect(BilibiliAPI.filterByDuration(videos)).toHaveLength(1);
+    });
+
+    test("filters mix correctly", () => {
+      const videos = [
+        { bvid: "short", duration: 30 },   // too short
+        { bvid: "ok",    duration: 200 },   // fine
+        { bvid: "long",  duration: 1000 },  // too long
+        { bvid: "unkn",  duration: 0 },     // unknown → pass
+      ];
+      const result = BilibiliAPI.filterByDuration(videos);
+      expect(result.map(v => v.bvid)).toEqual(["ok", "unkn"]);
+    });
+  });
+
+  // ─── filterCompilations ─────────────────────────────────────
+
+  describe("filterCompilations", () => {
+    test.each([
+      ["哈基米歌曲合集 第1-100期", true],
+      ["哈基米总集编", true],
+      ["哈基米全集合辑", true],
+      ["2024鬼畜盘点", true],
+      ["哈基米TOP10名曲", true],
+      ["哈基米音乐排行榜", true],
+      ["第01-24话 哈基米", true],
+    ])("rejects compilation title: %s", (title, shouldReject) => {
+      const videos = [{ bvid: "1", title }];
+      const result = BilibiliAPI.filterCompilations(videos);
+      expect(result).toHaveLength(shouldReject ? 0 : 1);
+    });
+
+    test.each([
+      ["哈基米 remix（original）"],
+      ["【哈基米】神曲翻唱"],
+      ["你真的了解哈基米吗"],
+      ["第24话 哈基米"],  // single episode, not a range
+    ])("passes non-compilation title: %s", (title) => {
+      const videos = [{ bvid: "1", title }];
+      expect(BilibiliAPI.filterCompilations(videos)).toHaveLength(1);
+    });
+
+    test("handles empty title", () => {
+      const videos = [{ bvid: "1", title: "" }];
+      expect(BilibiliAPI.filterCompilations(videos)).toHaveLength(1);
+    });
+  });
+
+  // ─── filterHachimiRelevance ──────────────────────────────────
+
+  describe("filterHachimiRelevance", () => {
+    test("passes video with 哈基米 in title", () => {
+      const videos = [{ bvid: "1", title: "哈基米神曲", tag: "" }];
+      expect(BilibiliAPI.filterHachimiRelevance(videos)).toHaveLength(1);
+    });
+
+    test("passes video with 哈基米 in tag", () => {
+      const videos = [{ bvid: "1", title: "随便一首歌", tag: "哈基米 鬼畜 音乐" }];
+      expect(BilibiliAPI.filterHachimiRelevance(videos)).toHaveLength(1);
+    });
+
+    test("passes video with 哈基米 in both title and tag", () => {
+      const videos = [{ bvid: "1", title: "哈基米最强神曲", tag: "哈基米 remix" }];
+      expect(BilibiliAPI.filterHachimiRelevance(videos)).toHaveLength(1);
+    });
+
+    test("rejects video with neither title nor tag containing 哈基米", () => {
+      const videos = [{ bvid: "1", title: "随机鬼畜视频", tag: "鬼畜 音乐" }];
+      expect(BilibiliAPI.filterHachimiRelevance(videos)).toHaveLength(0);
+    });
+
+    test("rejects video with empty title and tag", () => {
+      const videos = [{ bvid: "1", title: "", tag: "" }];
+      expect(BilibiliAPI.filterHachimiRelevance(videos)).toHaveLength(0);
+    });
+
+    test("rejects video with missing title/tag fields", () => {
+      const videos = [{ bvid: "1" }];
+      expect(BilibiliAPI.filterHachimiRelevance(videos)).toHaveLength(0);
+    });
+
+    test("filters mix correctly", () => {
+      const videos = [
+        { bvid: "a", title: "哈基米歌曲",   tag: "" },          // pass (title)
+        { bvid: "b", title: "不相关视频",     tag: "搞笑" },     // reject
+        { bvid: "c", title: "鬼畜视频",       tag: "哈基米 remix" }, // pass (tag)
+      ];
+      const result = BilibiliAPI.filterHachimiRelevance(videos);
+      expect(result.map(v => v.bvid)).toEqual(["a", "c"]);
+    });
+  });
+
   // ─── _fallbackSearch ────────────────────────────────────────
 
   describe("_fallbackSearch", () => {

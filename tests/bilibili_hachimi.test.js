@@ -102,8 +102,8 @@ describe("BilibiliAPI Hachimi Logic", () => {
   test("regression: processCandidates does not filter out fallback results (tid=0)", () => {
     // _fallbackSearch returns videos without partition info — tid defaults to 0
     const fallbackResults = [
-      { bvid: "fb1", tid: 0, view: 20000, like: 1000, url: "https://bilibili.com/video/BVfb1" },
-      { bvid: "fb2", tid: 0, view: 50000, like: 3000, url: "https://bilibili.com/video/BVfb2" },
+      { bvid: "fb1", tid: 0, title: "哈基米神曲", tag: "", view: 20000, like: 1000, url: "https://bilibili.com/video/BVfb1" },
+      { bvid: "fb2", tid: 0, title: "哈基米remix", tag: "", view: 50000, like: 3000, url: "https://bilibili.com/video/BVfb2" },
     ];
     const { results, meta } = BilibiliAPI.processCandidates(fallbackResults, null, 10);
     // Must NOT be filtered out just because tid=0 (unknown partition)
@@ -113,10 +113,10 @@ describe("BilibiliAPI Hachimi Logic", () => {
 
   test("processCandidates excludes videos not in 鬼畜/音乐 partitions", () => {
     const rawList = [
-      { bvid: "keep1", tid: 22, view: 20000, like: 1000, url: "https://bilibili.com/video/BVkeep1" },
-      { bvid: "keep2", tid: 3,  view: 50000, like: 3000, url: "https://bilibili.com/video/BVkeep2" },
-      { bvid: "drop1", tid: 1,  view: 20000, like: 1000, url: "https://bilibili.com/video/BVdrop1" },
-      { bvid: "drop2", tid: 17, view: 20000, like: 1000, url: "https://bilibili.com/video/BVdrop2" },
+      { bvid: "keep1", tid: 22, title: "哈基米调教",  tag: "", view: 20000, like: 1000, url: "https://bilibili.com/video/BVkeep1" },
+      { bvid: "keep2", tid: 3,  title: "哈基米音乐",  tag: "", view: 50000, like: 3000, url: "https://bilibili.com/video/BVkeep2" },
+      { bvid: "drop1", tid: 1,  title: "哈基米动画",  tag: "", view: 20000, like: 1000, url: "https://bilibili.com/video/BVdrop1" },
+      { bvid: "drop2", tid: 17, title: "哈基米游戏",  tag: "", view: 20000, like: 1000, url: "https://bilibili.com/video/BVdrop2" },
     ];
     const { results } = BilibiliAPI.processCandidates(rawList, null, 10);
     const ids = results.map(v => v.bvid);
