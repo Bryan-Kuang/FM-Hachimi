@@ -269,11 +269,15 @@ class BilibiliAPI {
    */
   filterCompilations(videos) {
     if (!Array.isArray(videos)) return [];
-    // "合集" / "总集" / "全集" — obvious compilation markers
+    // "合集" / "总集" / "全集" / "合辑" — obvious compilation markers
     // "第X-Y话/集/期" — episode-range notation (e.g. "第01-24话")
     // "盘点" / "精选集" — list/ranking videos
-    // "TOP\d+" / "排行榜" — chart/ranking videos
-    const COMPILATION_RE = /合集|总集|全集|精选集|盘点|TOP\s*\d+|排行榜|第\s*\d+\s*[-~—至]\s*\d+\s*[集话期]/;
+    // "TOP\d+" / "排行榜" / "大全" — chart/ranking videos
+    // "[一二三四五六七八九十百千]+大" — Chinese-numeral ranking: 十大, 五大, 百大, etc.
+    // "\d+大" — Arabic-numeral ranking: 10大, 5大, etc.
+    // "几[百千万][首曲歌]" — "hundreds/thousands of songs": 几百首, 几千首歌, etc.
+    // "\d{3,}[首曲]" — explicit large counts: 100首, 500曲, etc.
+    const COMPILATION_RE = /合集|总集|全集|合辑|精选集|盘点|大全|TOP\s*\d+|排行榜|第\s*\d+\s*[-~—至]\s*\d+\s*[集话期]|[一二三四五六七八九十百千]+大|\d+大|几[百千万][首曲歌]|\d{3,}[首曲]/;
     return videos.filter(v => !COMPILATION_RE.test(v.title || ""));
   }
 
