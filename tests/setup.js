@@ -22,6 +22,9 @@ jest.mock("discord.js", () => ({
     setTitle: jest.fn().mockReturnThis(),
     setDescription: jest.fn().mockReturnThis(),
     setThumbnail: jest.fn().mockReturnThis(),
+    setImage: jest.fn().mockReturnThis(),
+    setURL: jest.fn().mockReturnThis(),
+    setFooter: jest.fn().mockReturnThis(),
     addFields: jest.fn().mockReturnThis(),
     setColor: jest.fn().mockReturnThis(),
     setTimestamp: jest.fn().mockReturnThis(),
@@ -32,18 +35,29 @@ jest.mock("discord.js", () => ({
       color: 0x00ae86,
     }),
   })),
-  ActionRowBuilder: jest.fn().mockImplementation(() => ({
-    addComponents: jest.fn().mockReturnThis(),
-    toJSON: jest.fn().mockReturnValue({
+  ActionRowBuilder: jest.fn().mockImplementation(() => {
+    const self = {
       components: [],
-    }),
-  })),
-  ButtonBuilder: jest.fn().mockImplementation(() => ({
-    setCustomId: jest.fn().mockReturnThis(),
-    setLabel: jest.fn().mockReturnThis(),
-    setStyle: jest.fn().mockReturnThis(),
-    setDisabled: jest.fn().mockReturnThis(),
-  })),
+      addComponents: jest.fn().mockImplementation(function(...comps) {
+        self.components.push(...comps);
+        return self;
+      }),
+      toJSON: jest.fn().mockReturnValue({ components: [] }),
+    };
+    return self;
+  }),
+  ButtonBuilder: jest.fn().mockImplementation(() => {
+    const btn = {
+      data: {},
+      setCustomId: jest.fn().mockImplementation(function(id) { btn.data.custom_id = id; return btn; }),
+      setLabel: jest.fn().mockReturnThis(),
+      setStyle: jest.fn().mockReturnThis(),
+      setDisabled: jest.fn().mockReturnThis(),
+      setEmoji: jest.fn().mockReturnThis(),
+      setURL: jest.fn().mockReturnThis(),
+    };
+    return btn;
+  }),
   ButtonStyle: {
     Primary: 1,
     Secondary: 2,

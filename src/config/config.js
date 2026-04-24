@@ -82,6 +82,12 @@ module.exports = {
     hachimiMaxDurationSec: parseInt(process.env.HACHIMI_MAX_DURATION_SEC) || 360,  // 6 min
     hachimiMinDurationSec: parseInt(process.env.HACHIMI_MIN_DURATION_SEC) || 60,   // 1 min
   },
+  dailyHachimi: {
+    dataFile: process.env.DAILY_HACHIMI_DATA_FILE
+      || require("path").join(process.cwd(), "data", "daily_hachimi.json"),
+    defaultTimezone: "America/Toronto",
+    defaultCount: 1,
+  },
   test: {
     mode: process.env.TEST_MODE === "true",
     guildId: process.env.TEST_GUILD_ID,

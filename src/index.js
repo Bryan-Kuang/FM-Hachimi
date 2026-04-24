@@ -13,6 +13,7 @@ const ProgressTracker = require("./ui/progress_tracker");
 const HistoryStore = require("./utils/history_store");
 const PlaybackService = require("./services/playback_service");
 const QueueService = require("./services/queue_service");
+const DailyHachimiService = require("./services/daily_hachimi_service");
 const logger = require("./services/logger_service");
 const TokenPrecheck = require("./utils/token_precheck");
 const Debug = require("./utils/debug");
@@ -79,16 +80,22 @@ class BilibiliDiscordBot {
       });
 
       const queueService = new QueueService({ audioManager, extractor });
+
+      const config = require("./config/config");
+      const dailyHachimiService = new DailyHachimiService(config);
       Debug.trace("inject.dependencies");
 
       // Bot client
       logger.info("Initializing Discord bot client");
       Debug.trace("client.init");
-      this.botClient = new BotClient(playbackService, queueService);
+      this.botClient = new BotClient(playbackService, queueService, dailyHachimiService);
       this.botClient.setExtractor(extractor);
 
       // Initialize bot client (login, load commands, bind UI)
       await this.botClient.initialize(interfaceUpdater);
+
+      // Initialize daily hachimi service after bot is ready (needs Discord client)
+      dailyHachimiService.initialize(this.botClient.getClient(), bilibiliApi);
       Debug.trace("client.initialize.done");
 
       this.isRunning = true;
