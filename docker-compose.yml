@@ -46,10 +46,13 @@ services:
       retries: 3
       start_period: 40s
 
-    # Volumes for persistent data (logs) and cookies
+    # Volumes for persistent data (logs), cookies, and daily schedule config.
+    # data/ must be a host-mounted volume so daily_hachimi.json survives
+    # container rebuilds — without this the cron schedule is lost on every deploy.
     volumes:
       - ./logs:/app/logs
       - ./cookies.txt:/app/cookies.txt
+      - ./data:/app/data
 
     # Network mode
     network_mode: bridge

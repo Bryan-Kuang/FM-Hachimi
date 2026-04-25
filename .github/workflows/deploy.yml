@@ -65,6 +65,12 @@ jobs:
             echo "[deploy] fast-forward pulling..."
             timeout 60 git pull --ff-only origin main
 
+            # Ensure host-mounted directories exist before docker-compose
+            # creates them — Docker auto-creates missing bind-mount sources as
+            # root-owned directories which the node user inside the container
+            # cannot write to.
+            mkdir -p data logs
+
             echo "[deploy] rebuilding containers..."
             timeout 600 docker-compose up -d --build
 
