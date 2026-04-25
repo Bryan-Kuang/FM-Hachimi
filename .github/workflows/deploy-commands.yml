@@ -41,6 +41,10 @@ jobs:
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
-          # GUILD_ID 有值 → 部署到指定服务器（即时生效，适合开发/测试）
-          # GUILD_ID 为空 → 全局部署（最多 1 小时生效）
-          GUILD_ID: ${{ secrets.GUILD_ID }}
+          # GUILD_ID 逻辑：
+          #   workflow_dispatch environment=global  → 强制空值，走全局部署
+          #   workflow_dispatch environment=guild   → 使用 secret，走指定服务器
+          #   push 自动触发（inputs.environment 为空）→ 使用 secret（与 guild 模式相同）
+          # 空值 → 全局部署（最多 1 小时生效）
+          # 有值 → 仅部署到指定服务器（即时生效，适合开发/测试）
+          GUILD_ID: ${{ inputs.environment != 'global' && secrets.GUILD_ID || '' }}
