@@ -82,6 +82,10 @@ module.exports = function createInteractionHandler(playbackService, queueService
         }
 
         const videoUrl = `https://www.bilibili.com/video/${bvid}`;
+
+        // Tell InterfaceUpdater which channel to post the Now Playing embed in,
+        // then play. Without setUIContext the embed has nowhere to go.
+        playbackService.setUIContext(interaction.guild.id, interaction.channelId);
         const result = await playbackService.playBilibiliVideo(interaction, videoUrl);
 
         if (!result || !result.success) {
@@ -91,6 +95,9 @@ module.exports = function createInteractionHandler(playbackService, queueService
         }
 
         await interaction.editReply({ content: "✅ 已加入队列！" });
+
+        // Fire the Now Playing UI (same as playbackService.play() does internally).
+        playbackService.notifyState(interaction.guild.id);
         return;
       }
 

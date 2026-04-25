@@ -52,6 +52,7 @@ function makePlayback(overrides = {}) {
     handleButtonInteraction: jest.fn().mockResolvedValue({ success: true }),
     getPlayer: jest.fn().mockReturnValue({ isPlaying: false, isPaused: false }),
     setUIContext: jest.fn(),
+    notifyState: jest.fn(),
     pause: jest.fn(),
     resume: jest.fn(),
     skip: jest.fn().mockResolvedValue({}),
@@ -125,6 +126,17 @@ describe("daily_play_ button handler", () => {
     expect(playback.playBilibiliVideo).not.toHaveBeenCalled();
   });
 
+  test("calls setUIContext before playBilibiliVideo so Now Playing embed has a channel", async () => {
+    const interaction = makeDailyPlayInteraction({ bvid: "BV1abc", inVoice: true });
+    await handler.execute(interaction);
+
+    expect(playback.setUIContext).toHaveBeenCalledWith("guild1", "ch1");
+    // setUIContext must be called before playBilibiliVideo
+    const setOrder = playback.setUIContext.mock.invocationCallOrder[0];
+    const playOrder = playback.playBilibiliVideo.mock.invocationCallOrder[0];
+    expect(setOrder).toBeLessThan(playOrder);
+  });
+
   test("calls playBilibiliVideo with a correctly formed bilibili URL", async () => {
     const interaction = makeDailyPlayInteraction({ bvid: "BV1abc", inVoice: true });
     await handler.execute(interaction);
@@ -133,6 +145,24 @@ describe("daily_play_ button handler", () => {
       interaction,
       "https://www.bilibili.com/video/BV1abc"
     );
+  });
+
+  test("calls notifyState after successful playback to trigger Now Playing UI", async () => {
+    const interaction = makeDailyPlayInteraction({ bvid: "BV1abc", inVoice: true });
+    playback.playBilibiliVideo.mockResolvedValue({ success: true });
+
+    await handler.execute(interaction);
+
+    expect(playback.notifyState).toHaveBeenCalledWith("guild1");
+  });
+
+  test("does NOT call notifyState when playback fails", async () => {
+    const interaction = makeDailyPlayInteraction({ bvid: "BV1abc", inVoice: true });
+    playback.playBilibiliVideo.mockResolvedValue({ success: false, error: "Network error" });
+
+    await handler.execute(interaction);
+
+    expect(playback.notifyState).not.toHaveBeenCalled();
   });
 
   test("editReplies with success message when playback succeeds", async () => {
