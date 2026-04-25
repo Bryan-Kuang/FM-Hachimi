@@ -237,7 +237,10 @@ class DailyHachimiService {
       .setURL(video.url || `https://www.bilibili.com/video/${video.bvid}`);
 
     if (video.pic) {
-      embed.setImage(video.pic);
+      // Bilibili returns protocol-relative URLs (//i0.hdslb.com/...).
+      // Discord requires a full https:// URL.
+      const picUrl = video.pic.startsWith("//") ? `https:${video.pic}` : video.pic;
+      embed.setImage(picUrl);
     }
 
     return embed;
