@@ -176,6 +176,74 @@ describe("getStatus", () => {
   });
 });
 
+// ─── _buildVideoEmbed ────────────────────────────────────────
+
+describe("_buildVideoEmbed", () => {
+  // The global setup.js mock tracks EmbedBuilder instances via mock.results.
+  // jest.clearAllMocks() in beforeEach resets the call list, so results[0]
+  // is always the embed created by the current test.
+  const { EmbedBuilder } = require("discord.js");
+
+  test("normalizes protocol-relative pic URL to https://", () => {
+    const service = makeService();
+    service._buildVideoEmbed({
+      bvid: "BV1abc",
+      title: "Test",
+      duration: 90,
+      pic: "//i0.hdslb.com/bfs/archive/test.jpg",
+      url: "https://www.bilibili.com/video/BV1abc",
+    });
+
+    const embed = EmbedBuilder.mock.results[0].value;
+    expect(embed.setImage).toHaveBeenCalledWith(
+      "https://i0.hdslb.com/bfs/archive/test.jpg"
+    );
+  });
+
+  test("keeps a full https:// pic URL unchanged", () => {
+    const service = makeService();
+    service._buildVideoEmbed({
+      bvid: "BV1abc",
+      title: "Test",
+      duration: 90,
+      pic: "https://i0.hdslb.com/bfs/archive/test.jpg",
+      url: "https://www.bilibili.com/video/BV1abc",
+    });
+
+    const embed = EmbedBuilder.mock.results[0].value;
+    expect(embed.setImage).toHaveBeenCalledWith(
+      "https://i0.hdslb.com/bfs/archive/test.jpg"
+    );
+  });
+
+  test("does not call setImage when pic is empty", () => {
+    const service = makeService();
+    service._buildVideoEmbed({
+      bvid: "BV1abc",
+      title: "Test",
+      duration: 90,
+      pic: "",
+      url: "https://www.bilibili.com/video/BV1abc",
+    });
+
+    const embed = EmbedBuilder.mock.results[0].value;
+    expect(embed.setImage).not.toHaveBeenCalled();
+  });
+
+  test("does not call setImage when pic is missing", () => {
+    const service = makeService();
+    service._buildVideoEmbed({
+      bvid: "BV1abc",
+      title: "Test",
+      duration: 90,
+      url: "https://www.bilibili.com/video/BV1abc",
+    });
+
+    const embed = EmbedBuilder.mock.results[0].value;
+    expect(embed.setImage).not.toHaveBeenCalled();
+  });
+});
+
 // ─── _fire ──────────────────────────────────────────────────
 
 describe("_fire", () => {
