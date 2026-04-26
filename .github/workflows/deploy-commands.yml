@@ -45,9 +45,8 @@ jobs:
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
-          # global → 空值，全局部署
           # guild / clear_guild → 优先用手动输入的 guild_id，否则用 secret
-          # push 自动触发（inputs 为空）→ 空值，全局部署
-          GUILD_ID: ${{ (inputs.environment == 'guild' || inputs.environment == 'clear_guild') && (inputs.guild_id || secrets.GUILD_ID) || '' }}
+          # global / push 自动触发 → 传入 secret（作为自动去重的参考 guild，若存在则清除 guild-scoped 命令）
+          GUILD_ID: ${{ (inputs.environment == 'guild' || inputs.environment == 'clear_guild') && (inputs.guild_id || secrets.GUILD_ID) || secrets.GUILD_ID || '' }}
           # clear_guild 模式：向 Discord 发送空命令列表来清除 guild-scoped 命令
           CLEAR_GUILD_COMMANDS: ${{ inputs.environment == 'clear_guild' && 'true' || '' }}

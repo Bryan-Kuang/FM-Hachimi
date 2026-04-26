@@ -92,6 +92,24 @@ async function deployCommands() {
       });
 
       logger.info("Successfully deployed global commands");
+
+      // Auto-cleanup: if a guild ID is set (e.g. the dev/test server), clear its
+      // guild-scoped commands so global + guild duplicates never accumulate.
+      if (config.discord.guildId) {
+        logger.info("Auto-clearing guild commands after global deploy (duplicate prevention)", {
+          guildId: config.discord.guildId,
+        });
+        await rest.put(
+          Routes.applicationGuildCommands(
+            config.discord.clientId,
+            config.discord.guildId
+          ),
+          { body: [] }
+        );
+        logger.info("Guild commands cleared — no duplicates expected in test server", {
+          guildId: config.discord.guildId,
+        });
+      }
     }
 
     // Log deployed commands
