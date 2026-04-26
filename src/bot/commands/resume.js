@@ -10,7 +10,7 @@ module.exports = function createResumeCommand(playbackService) {
   return {
     data: new SlashCommandBuilder()
       .setName("resume")
-      .setDescription("Resume the paused audio playback"),
+      .setDescription("继续播放已暂停的音乐"),
 
     cooldown: 2,
 

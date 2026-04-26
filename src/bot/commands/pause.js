@@ -10,7 +10,7 @@ module.exports = function createPauseCommand(playbackService) {
   return {
     data: new SlashCommandBuilder()
       .setName("pause")
-      .setDescription("Pause the currently playing audio"),
+      .setDescription("暂停当前播放"),
 
     cooldown: 2,
 

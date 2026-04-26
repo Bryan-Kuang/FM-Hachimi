@@ -46,6 +46,28 @@ async function deployCommands() {
     // Create REST client
     const rest = new REST({ version: "10" }).setToken(config.discord.token);
 
+    // clear_guild mode: wipe all guild-scoped commands from a specific server.
+    // Use this to fix duplicate commands when switching from guild to global deploy.
+    if (process.env.CLEAR_GUILD_COMMANDS === "true") {
+      if (!config.discord.guildId) {
+        throw new Error("GUILD_ID is required for clear_guild mode");
+      }
+      logger.info("Clearing guild-scoped commands", {
+        guildId: config.discord.guildId,
+      });
+      await rest.put(
+        Routes.applicationGuildCommands(
+          config.discord.clientId,
+          config.discord.guildId
+        ),
+        { body: [] }
+      );
+      logger.info("Guild commands cleared — duplicates should be gone within seconds", {
+        guildId: config.discord.guildId,
+      });
+      return;
+    }
+
     if (config.discord.guildId) {
       // Deploy to specific guild (faster for development)
       logger.info("Deploying commands to guild", {

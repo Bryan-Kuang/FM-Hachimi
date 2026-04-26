@@ -10,7 +10,7 @@ module.exports = function createPrevCommand(playbackService) {
   return {
     data: new SlashCommandBuilder()
       .setName("prev")
-      .setDescription("Go back to the previous track in the queue"),
+      .setDescription("播放队列中的上一首"),
 
     cooldown: 3,
 

@@ -20,7 +20,7 @@ module.exports = function createHachimiCommand(playbackService, queueService) {
     data: new SlashCommandBuilder()
       .setName("hachimi")
       .setDescription(
-        `Auto-play ${MAX_VIDEO_BATCH_SIZE} Bilibili videos with 哈基米 tag that meet quality criteria`
+        `自动播放 ${MAX_VIDEO_BATCH_SIZE} 首符合质量标准的哈基米视频`
       ),
 
     cooldown: 30, // 30 seconds cooldown to prevent spam

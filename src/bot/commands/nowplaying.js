@@ -12,7 +12,7 @@ module.exports = function createNowPlayingCommand(playbackService) {
   return {
     data: new SlashCommandBuilder()
       .setName("nowplaying")
-      .setDescription("Show information about the currently playing track"),
+      .setDescription("显示当前正在播放的歌曲信息"),
 
     cooldown: 3,
 

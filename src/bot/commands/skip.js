@@ -10,7 +10,7 @@ module.exports = function createSkipCommand(playbackService) {
   return {
     data: new SlashCommandBuilder()
       .setName("skip")
-      .setDescription("Skip to the next track in the queue"),
+      .setDescription("跳过当前歌曲，播放下一首"),
 
     cooldown: 3,
 

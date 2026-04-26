@@ -11,11 +11,11 @@ module.exports = function createPlayCommand(playbackService, queueService) {
   return {
     data: new SlashCommandBuilder()
       .setName("play")
-      .setDescription("Play audio from a Bilibili video URL or keyword")
+      .setDescription("播放 Bilibili 视频（链接或关键词搜索）")
       .addStringOption((option) =>
         option
           .setName("query")
-          .setDescription("Bilibili video URL or search keyword")
+          .setDescription("Bilibili 视频链接或搜索关键词")
           .setRequired(true)
       ),
 
