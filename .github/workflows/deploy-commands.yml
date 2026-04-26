@@ -7,13 +7,17 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Deploy target (guild = fast dev, global = up to 1h propagation)'
+        description: 'Deploy target: guild=指定服务器(即时) global=全局(1h) clear_guild=清除指定服务器的Guild命令(修重复)'
         required: false
-        default: 'guild'
+        default: 'global'
         type: choice
         options:
-          - guild
           - global
+          - guild
+          - clear_guild
+      guild_id:
+        description: 'guild / clear_guild 模式的服务器 ID（留空则用 GUILD_ID secret）'
+        required: false
 
   push:
     branches: [main]
@@ -41,6 +45,8 @@ jobs:
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
-          # GUILD_ID 有值 → 部署到指定服务器（即时生效，适合开发/测试）
-          # GUILD_ID 为空 → 全局部署（最多 1 小时生效）
-          GUILD_ID: ${{ secrets.GUILD_ID }}
+          # guild / clear_guild → 优先用手动输入的 guild_id，否则用 secret
+          # global / push 自动触发 → 传入 secret（作为自动去重的参考 guild，若存在则清除 guild-scoped 命令）
+          GUILD_ID: ${{ (inputs.environment == 'guild' || inputs.environment == 'clear_guild') && (inputs.guild_id || secrets.GUILD_ID) || secrets.GUILD_ID || '' }}
+          # clear_guild 模式：向 Discord 发送空命令列表来清除 guild-scoped 命令
+          CLEAR_GUILD_COMMANDS: ${{ inputs.environment == 'clear_guild' && 'true' || '' }}

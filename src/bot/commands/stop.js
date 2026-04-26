@@ -10,7 +10,7 @@ module.exports = function createStopCommand(playbackService) {
   return {
     data: new SlashCommandBuilder()
       .setName("stop")
-      .setDescription("Stop playback, clear queue, and leave voice channel"),
+      .setDescription("停止播放，清空队列并退出语音频道"),
 
     cooldown: 3, // 3 seconds cooldown
 

@@ -12,17 +12,17 @@ module.exports = function createSearchCommand(playbackService) {
   return {
     data: new SlashCommandBuilder()
       .setName("search")
-      .setDescription("Search for Bilibili videos by keyword")
+      .setDescription("搜索 Bilibili 视频")
       .addStringOption((option) =>
         option
           .setName("keyword")
-          .setDescription("Search keyword")
+          .setDescription("搜索关键词")
           .setRequired(true)
       )
       .addIntegerOption((option) =>
         option
           .setName("results")
-          .setDescription("Number of results to show (1-10)")
+          .setDescription("显示结果数量（1-10）")
           .setMinValue(1)
           .setMaxValue(10)
           .setRequired(false)

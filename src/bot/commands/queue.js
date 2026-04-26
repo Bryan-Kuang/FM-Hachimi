@@ -12,7 +12,7 @@ module.exports = function createQueueCommand(playbackService, queueService) {
   return {
     data: new SlashCommandBuilder()
       .setName("queue")
-      .setDescription("Display the current music queue"),
+      .setDescription("显示当前播放队列"),
 
     cooldown: 3,
 
