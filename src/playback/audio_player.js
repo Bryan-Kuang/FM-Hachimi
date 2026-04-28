@@ -233,15 +233,39 @@ class AudioPlayer {
         existingConnection &&
         existingConnection.joinConfig.channelId === voiceChannel.id
       ) {
-        logger.info("Already connected to target voice channel");
-        this.voiceConnection = existingConnection;
-        this.currentGuild = voiceChannel.guild.id;
+        const status = existingConnection.state.status;
+        // Only reuse a healthy connection. A Disconnected/Destroyed connection
+        // (e.g. from being manually kicked out of the voice channel) will never
+        // transition back to Ready — reusing it strands /play in waitForVoiceConnection.
+        const reusable =
+          status === VoiceConnectionStatus.Ready ||
+          status === VoiceConnectionStatus.Signalling ||
+          status === VoiceConnectionStatus.Connecting;
+        if (reusable) {
+          logger.info("Already connected to target voice channel", { status });
+          this.voiceConnection = existingConnection;
+          this.currentGuild = voiceChannel.guild.id;
 
-        // 🔧 关键修复：重新订阅音频播放器到现有连接
-        logger.info("Re-subscribing audio player to existing voice connection");
-        this.voiceConnection.subscribe(this.audioPlayer);
+          // 🔧 关键修复：重新订阅音频播放器到现有连接
+          logger.info("Re-subscribing audio player to existing voice connection");
+          this.voiceConnection.subscribe(this.audioPlayer);
 
-        return true;
+          return true;
+        }
+        // Stale connection — destroy and recreate.
+        logger.warn("Existing voice connection is stale, recreating", {
+          status,
+          channelId: voiceChannel.id,
+        });
+        try {
+          existingConnection.destroy();
+        } catch (err) {
+          // Already destroyed is fine — just log and proceed.
+          logger.debug("destroy() on stale connection threw (likely already destroyed)", {
+            error: err && err.message,
+          });
+        }
+        this.voiceConnection = null;
       }
 
       // Create new voice connection

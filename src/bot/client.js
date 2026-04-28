@@ -139,12 +139,16 @@ class BotClient {
         let currentTrack = null;
 
         if (player) {
-          // Capture current track before stopping
+          // Capture current track before tearing down — sendDisconnectMessage uses it
           currentTrack = player.currentTrack;
-          player.stop();
+          // Use leaveVoiceChannel (not stop) so this.voiceConnection is cleared
+          // immediately. stop() only schedules a 60s inactivity disconnect, which
+          // leaves a stale VoiceConnection cached in the player; a subsequent /play
+          // within that window would reuse the dead connection and never reach Ready.
+          player.leaveVoiceChannel();
           playbackService.clearUIContext(oldState.guild.id);
 
-          logger.info("Player stopped due to voice disconnect", {
+          logger.info("Player torn down due to voice disconnect", {
             guild: oldState.guild.name,
           });
         }
