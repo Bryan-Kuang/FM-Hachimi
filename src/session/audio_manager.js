@@ -405,27 +405,33 @@ class AudioManager {
   }
 
   /**
-   * Stop playback and leave voice channel
+   * Stop playback and leave voice channel immediately.
+   *
+   * Semantics: /stop means "I'm done" — the bot disconnects right away rather
+   * than lingering for the 60s idle timer. The idle timer is reserved for
+   * natural end-of-queue cases. /pause is the command that keeps the bot in
+   * the channel without playing.
+   *
    * @param {string} guildId - Discord guild ID
    * @returns {Object} - Result object
    */
   async stopPlayback(guildId) {
     const player = this.getPlayer(guildId);
-    const stopped = await player.stop();
+    // leaveVoiceChannel cancels any pending inactivity timer, stops the audio
+    // player, clears queue/state, and synchronously calls _doDisconnect to tear
+    // down the voice connection — so unlike player.stop() there is no 60s gap
+    // during which a stale connection lingers in the player.
+    player.leaveVoiceChannel();
     const state = player.getState();
 
-    // Do NOT remove the player from the map here. The inactivity timer lives
-    // on this instance; deleting it orphans the timer so _cancelInactivityTimer()
-    // on the next play request has no effect — the old timer fires 60 s later
-    // and destroys the shared voice connection mid-playback.
-    // The player stays alive; if no new play arrives within 60 s the inactivity
-    // timer fires on the correct instance and _doDisconnect() tears down cleanly.
+    // We intentionally keep the player instance in the session map. The
+    // AudioPlayer is reusable across play sessions; recreating it would lose
+    // bound listeners. leaveVoiceChannel has already nulled voiceConnection,
+    // so the next /play will create a fresh connection cleanly.
 
     return {
-      success: stopped,
-      message: stopped
-        ? "Stopped playback, will auto-disconnect if idle for 1 minute"
-        : "Failed to stop playback",
+      success: true,
+      message: "Stopped playback and left voice channel",
       player: state,
     };
   }
