@@ -103,6 +103,30 @@ class AudioPlayer {
       });
     });
 
+    // AutoPaused fires when @discordjs/voice physically pauses the audio
+    // resource — typically a buffer underrun (CDN jitter, FFmpeg stall, or
+    // the voice connection briefly losing its subscriber). Audio is silent
+    // during AutoPaused, so we must freeze the audio-position clock the same
+    // way Paused does. Without this, wall-clock time during every buffer
+    // stall is counted as if the song were playing, drifting the progress
+    // bar progressively ahead of the actual audio (5-min songs over a flaky
+    // network commonly accumulate 20–40 s of drift this way).
+    //
+    // Intentionally NOT touching isPlaying/isPaused — those track explicit
+    // user-driven pause state, not transient buffering. AutoPaused → Playing
+    // recovers automatically; the Playing handler's null-guard then resumes
+    // the clock cleanly.
+    this.audioPlayer.on(AudioPlayerStatus.AutoPaused, () => {
+      if (this._currentPlayStartedAt !== null) {
+        this._accumulatedPlayMs += Date.now() - this._currentPlayStartedAt;
+        this._currentPlayStartedAt = null;
+      }
+      logger.debug("Audio player auto-paused (buffer underrun); progress clock frozen", {
+        track: this.currentTrack?.title,
+        guild: this.currentGuild,
+      });
+    });
+
     this.audioPlayer.on(AudioPlayerStatus.Idle, () => this._handleIdle());
 
     this.audioPlayer.on("error", (error) => {

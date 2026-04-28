@@ -241,6 +241,8 @@ describe("regression: ProgressTracker cadence + dedup", () => {
       slowEditThresholdMs: 1500,
       slowEditStreakLimit: 3,
       cooldownMs: 5000,
+      cooldownStreak: 0,
+      lastCooldownEndedAt: 0,
       ...overrides,
     };
     sm.get(guildId).progressTracker = state;
@@ -359,6 +361,114 @@ describe("regression: ProgressTracker cadence + dedup", () => {
 
     jest.useFakeTimers();
   }, 20000);
+
+  test("dedup-skip resets consecutiveSlowEdits (skipped tick is not 'slow')", async () => {
+    // Bug history: a dedup-skipped tick used to leave `consecutiveSlowEdits`
+    // untouched, so the pattern (slow, slow, dedup-skip, slow) would trip the
+    // 3-strike streak detector even though only 3 of those 4 ticks actually
+    // pressured Discord's rate-limit bucket. The skipped tick didn't hit
+    // Discord at all and shouldn't count toward back-pressure evidence.
+    const sm = mkSessionManager();
+    const tracker = new ProgressTracker(sm);
+
+    const edit = jest.fn().mockResolvedValue(undefined);
+    // Static currentTime so signature is stable across calls.
+    const getState = () => mkPlayerState({ currentTime: 42 });
+    const trackerState = injectTracker(sm, "g1", { edit, getState });
+
+    // Pretend two prior slow edits already happened.
+    trackerState.consecutiveSlowEdits = 2;
+
+    // First call seeds lastSignature (edit fires; "fast" path resets streak
+    // — that's the normal post-edit behavior).
+    await tracker.updateProgress("g1");
+    expect(edit).toHaveBeenCalledTimes(1);
+    expect(trackerState.consecutiveSlowEdits).toBe(0);
+
+    // Re-arm the streak; next call should hit dedup (signature unchanged) and
+    // STILL reset the counter — that's the regression.
+    trackerState.consecutiveSlowEdits = 2;
+    await tracker.updateProgress("g1");
+    expect(edit).toHaveBeenCalledTimes(1); // dedup-skipped
+    expect(trackerState.consecutiveSlowEdits).toBe(0);
+  });
+
+  test("chained cooldowns back off geometrically (5s → 10s → 20s, capped 4×)", async () => {
+    // Bug surface: when Discord's rate-limit bucket genuinely stays drained,
+    // a fixed 5s cooldown ends and we immediately resume 1s edits, which
+    // trip the streak detector again within seconds. Without backoff we
+    // ping-pong forever between 5s freeze and 3 slow edits. Geometric
+    // backoff (5 → 10 → 20s, capped at 4×) gives the bucket real time to
+    // drain on persistently slow channels.
+    jest.useRealTimers();
+
+    const sm = mkSessionManager();
+    const tracker = new ProgressTracker(sm);
+
+    const slowEdit = jest
+      .fn()
+      .mockImplementation(() => new Promise((r) => setTimeout(r, 2000)));
+
+    let t = 0;
+    const getState = () => mkPlayerState({ currentTime: ++t });
+    // Widen cooldownMs to 30s so the ~6s of real time spent driving 3 slow
+    // edits stays comfortably inside the "recent cooldown" chain window.
+    // (Real-time test: each slow edit blocks 2s, which would exceed a 5s
+    // window before the third edit lands.)
+    const trackerState = injectTracker(sm, "g1", {
+      edit: slowEdit,
+      getState,
+      overrides: { cooldownMs: 30_000 },
+    });
+
+    // Pre-condition: a previous cooldown ended just now → next cooldown
+    // should be the SECOND in a chain.
+    trackerState.cooldownStreak = 1;
+    trackerState.lastCooldownEndedAt = Date.now();
+
+    // Drive 3 slow edits to arm the next cooldown.
+    await tracker.updateProgress("g1");
+    await tracker.updateProgress("g1");
+    const beforeArm = Date.now();
+    await tracker.updateProgress("g1");
+
+    // 2nd in chain → multiplier 2 → 60s cooldown (30s base × 2×).
+    expect(trackerState.cooldownStreak).toBe(2);
+    // cooldownUntil is set to `Date.now() + cooldownDuration` AT arm time,
+    // which is ~2s (one slow edit) after `beforeArm`. So the gap from
+    // beforeArm spans ~62s in the happy path, with real-timer jitter on top.
+    const gapFromBeforeArm = trackerState.cooldownUntil - beforeArm;
+    expect(gapFromBeforeArm).toBeGreaterThanOrEqual(60_000);
+    expect(gapFromBeforeArm).toBeLessThanOrEqual(65_000);
+
+    jest.useFakeTimers();
+  }, 20000);
+
+  test("cooldownStreak resets after a sustained healthy window", async () => {
+    // After the channel recovers (no cooldown for ≥cooldownMs after the
+    // previous one ended), the next isolated cooldown should start fresh
+    // at 1× — otherwise a flaky 30-min stretch would permanently pin us
+    // at the 4× cap even after the network calmed down.
+    const sm = mkSessionManager();
+    const tracker = new ProgressTracker(sm);
+
+    const fastEdit = jest.fn().mockResolvedValue(undefined);
+    const getState = () => mkPlayerState({ currentTime: 1 });
+    const trackerState = injectTracker(sm, "g1", {
+      edit: fastEdit,
+      getState,
+    });
+
+    // Pre-condition: previous cooldown ended well outside the cooldownMs
+    // healthy-window threshold (cooldownMs is 5000ms in our tracker).
+    trackerState.cooldownStreak = 3;
+    trackerState.lastCooldownEndedAt = Date.now() - 60_000;
+
+    // A healthy fast edit must wipe the chain counter.
+    await tracker.updateProgress("g1");
+    expect(fastEdit).toHaveBeenCalledTimes(1);
+    expect(trackerState.cooldownStreak).toBe(0);
+  });
 
   test("stopTracking cancels an in-flight schedule", async () => {
     const sm = mkSessionManager();

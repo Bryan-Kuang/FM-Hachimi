@@ -132,7 +132,7 @@ class ProgressTracker {
     }
 
     const intervalMs = config.ui?.progressIntervalMs || 1000;
-    const slowEditThresholdMs = config.ui?.slowEditThresholdMs || 1500;
+    const slowEditThresholdMs = config.ui?.slowEditThresholdMs || 2500;
     const slowEditStreakLimit = config.ui?.slowEditStreakLimit || 3;
     const cooldownMs = config.ui?.cooldownMs || 5000;
 
@@ -154,6 +154,14 @@ class ProgressTracker {
       // fires but skips `message.edit` entirely.
       consecutiveSlowEdits: 0,
       cooldownUntil: 0,
+      // Exponential backoff for chained cooldowns. If a fresh cooldown
+      // triggers shortly after the previous one ended, the channel bucket
+      // didn't actually drain — we extend the next cooldown geometrically
+      // (5s → 10s → 20s, capped) instead of immediately resuming 1s edits
+      // and re-tripping the streak detector. Reset on a sustained healthy
+      // window (no cooldown for ≥cooldownMs after the previous one ended).
+      cooldownStreak: 0,
+      lastCooldownEndedAt: 0,
       // Thresholds pinned at startTracking time so config reloads don't
       // mutate a running tracker mid-flight.
       slowEditThresholdMs,
@@ -279,6 +287,12 @@ class ProgressTracker {
       // since our last edit, skip the Discord round-trip entirely.
       const signature = computeProgressSignature(updatedEmbed);
       if (signature === tracker.lastSignature) {
+        // A skipped edit doesn't hit Discord at all, so it can't be "slow"
+        // and shouldn't keep a partial slow-edit streak alive. Without this
+        // reset, the pattern (slow, slow, dedup-skip, slow) would trip the
+        // streak detector even though only 3 of those 4 ticks actually
+        // pressured the rate-limit bucket.
+        tracker.consecutiveSlowEdits = 0;
         logger.debug("Progress tick skipped (unchanged)", {
           guild: guildId,
           currentTime: Math.floor(currentTime),
@@ -302,16 +316,37 @@ class ProgressTracker {
       if (editDuration >= tracker.slowEditThresholdMs) {
         tracker.consecutiveSlowEdits += 1;
         if (tracker.consecutiveSlowEdits >= tracker.slowEditStreakLimit) {
-          tracker.cooldownUntil = Date.now() + tracker.cooldownMs;
+          // Chained cooldowns: if the previous cooldown ended within the
+          // last cooldownMs window, the bucket clearly didn't drain — back
+          // off geometrically (5s → 10s → 20s, capped at 4×) instead of
+          // immediately resuming 1s edits and re-tripping the streak.
+          const recentCooldown =
+            tracker.lastCooldownEndedAt > 0 &&
+            Date.now() - tracker.lastCooldownEndedAt < tracker.cooldownMs;
+          tracker.cooldownStreak = recentCooldown ? tracker.cooldownStreak + 1 : 1;
+          const multiplier = Math.min(2 ** (tracker.cooldownStreak - 1), 4);
+          const cooldownDuration = tracker.cooldownMs * multiplier;
+          tracker.cooldownUntil = Date.now() + cooldownDuration;
+          tracker.lastCooldownEndedAt = tracker.cooldownUntil;
           tracker.consecutiveSlowEdits = 0;
           logger.warn("Progress tracker entering cooldown (edit back-pressure)", {
             guild: guildId,
             editDuration,
-            cooldownMs: tracker.cooldownMs,
+            cooldownMs: cooldownDuration,
+            cooldownStreak: tracker.cooldownStreak,
           });
         }
       } else {
         tracker.consecutiveSlowEdits = 0;
+        // A sustained healthy window (no cooldown for cooldownMs after the
+        // last one ended) means the bucket has fully recovered — wipe the
+        // backoff streak so the next isolated cooldown starts fresh at 1×.
+        if (
+          tracker.cooldownStreak > 0 &&
+          Date.now() - tracker.lastCooldownEndedAt > tracker.cooldownMs
+        ) {
+          tracker.cooldownStreak = 0;
+        }
       }
 
       logger.debug("Progress updated", {
