@@ -64,7 +64,15 @@ module.exports = {
     // runaway. The user-visible symptom is "the progress bar refreshed
     // every second at the start of playback, then started refreshing every
     // few seconds after a while" (issue #12 residual).
-    slowEditThresholdMs: parseInt(process.env.UI_SLOW_EDIT_THRESHOLD_MS) || 1500,
+    //
+    // Threshold raised 1500 → 2500 ms (2026-04): Discord round-trip in a
+    // moderately busy channel routinely sits in the 800–1400 ms range even
+    // when the bucket is healthy, and 1500 ms was treating that as a
+    // runaway signal — leading to ~5 s freezes triggered by ordinary
+    // network jitter. 2500 ms reliably separates "discord.js is holding
+    // our request because the bucket is drained" from "ordinary slow
+    // round-trip."
+    slowEditThresholdMs: parseInt(process.env.UI_SLOW_EDIT_THRESHOLD_MS) || 2500,
     slowEditStreakLimit: parseInt(process.env.UI_SLOW_EDIT_STREAK_LIMIT) || 3,
     cooldownMs: parseInt(process.env.UI_COOLDOWN_MS) || 5000,
   },

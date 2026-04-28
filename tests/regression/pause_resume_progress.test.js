@@ -69,6 +69,9 @@ function emitPlaying(player) {
 function emitPaused(player) {
   player.audioPlayer.emit(AudioPlayerStatus.Paused);
 }
+function emitAutoPaused(player) {
+  player.audioPlayer.emit(AudioPlayerStatus.AutoPaused);
+}
 
 describe("regression: pause/resume progress accuracy", () => {
   let player;
@@ -182,6 +185,44 @@ describe("regression: pause/resume progress accuracy", () => {
     player.currentTrack = null;
     emitPlaying(player);
     expect(player.getCurrentTime()).toBe(0);
+  });
+
+  test("AutoPaused freezes the clock; recovery continues without drift", () => {
+    // Real-world cause: Bilibili CDN jitter / FFmpeg buffer underrun makes
+    // @discordjs/voice transition Playing → AutoPaused → Playing. Before the
+    // AutoPaused listener was added, wall-clock time during AutoPaused was
+    // counted as if the song were playing, drifting the bar progressively
+    // ahead of actual audio.
+    emitPlaying(player);
+    advance(30_000); // played 30s
+    expect(player.getCurrentTime()).toBeCloseTo(30, 2);
+
+    // Buffer underrun: AutoPaused fires. Audio is silent.
+    emitAutoPaused(player);
+    advance(5000); // 5s of silence — must NOT count as playback
+    expect(player.getCurrentTime()).toBeCloseTo(30, 2);
+
+    // Recovery: Playing fires again. Clock resumes from 30s.
+    emitPlaying(player);
+    advance(10_000);
+    expect(player.getCurrentTime()).toBeCloseTo(40, 2);
+  });
+
+  test("multiple AutoPaused cycles do not accumulate drift", () => {
+    // Simulates a flaky network with several brief stalls during a long song.
+    emitPlaying(player);
+    advance(60_000); // 60s real playback
+
+    // 4 buffer underruns of 3s each: bar should still read 60s afterwards.
+    for (let i = 0; i < 4; i++) {
+      emitAutoPaused(player);
+      advance(3000);
+      emitPlaying(player);
+    }
+    expect(player.getCurrentTime()).toBeCloseTo(60, 2);
+
+    advance(10_000); // 10s more real playback
+    expect(player.getCurrentTime()).toBeCloseTo(70, 2);
   });
 
   test("_handleIdle's startTime-based retry math is NOT affected by pause-aware refactor", () => {
