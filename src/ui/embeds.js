@@ -27,7 +27,8 @@ class EmbedBuilders {
     const statusText = isPlaying ? "Now Playing" : "Paused";
 
     const embed = new EmbedBuilder()
-      .setColor(isPlaying ? colors.playing : colors.paused);
+      .setColor(isPlaying ? colors.playing : colors.paused)
+      .setTitle(statusText);
 
     const pageUrl =
       videoData.url ||
@@ -36,7 +37,7 @@ class EmbedBuilders {
     
     const safeTitle = Formatters.escapeMarkdown(videoData.title || "Unknown");
     
-    let description = `# ${statusText}\n`;
+    let description = "";
     if (pageUrl) {
       description += `**[${safeTitle}](${pageUrl})**\n\n`;
     } else {
@@ -44,10 +45,12 @@ class EmbedBuilders {
     }
 
     if (videoData.duration > 0) {
-      description += `> Duration: ${Formatters.formatTime(videoData.duration)}\n`;
+      const m = Math.floor(videoData.duration / 60);
+      const s = videoData.duration % 60;
+      description += `> Duration: ${m}m ${s}s\n`;
     }
     
-    description += `> Requested by: ${Formatters.escapeMarkdown(requestedBy)}\n\n`;
+    description += `> Requested by: @${Formatters.escapeMarkdown(requestedBy)}\n\n`;
 
     if (videoData.duration > 0) {
       const BAR_WIDTH = 20;
@@ -55,7 +58,7 @@ class EmbedBuilders {
         Math.round((currentTime / videoData.duration) * BAR_WIDTH),
         BAR_WIDTH,
       );
-      const empty = BAR_WIDTH - filled;
+      const empty = Math.max(0, BAR_WIDTH - filled);
       const progressBar = "█".repeat(filled) + "░".repeat(empty);
       description += progressBar;
     }
