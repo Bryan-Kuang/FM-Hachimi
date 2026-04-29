@@ -17,7 +17,7 @@ exports[`Bot Commands Coverage NowPlaying Command {
   "description": "**Test Track**
 
 > Duration: 1m 0s
-> Requested by: @User
+> Requested by: User
 
 ██████████░░░░░░░░░░",
   "title": "Now Playing",
