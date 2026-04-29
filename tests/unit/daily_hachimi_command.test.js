@@ -267,6 +267,36 @@ describe("execute – setup subcommand", () => {
     );
     expect(interaction.editReply.mock.calls[0][0].embeds).toHaveLength(1);
   });
+
+  test("replies with error embed when service.setSchedule throws", async () => {
+    const { EmbedBuilder } = require("discord.js");
+    const interaction = makeInteraction({ sub: "setup", time: "12:00", count: 1 });
+    const service = makeService({
+      setSchedule: jest.fn().mockImplementation(() => {
+        throw new Error("EACCES: permission denied, open '/data/daily_hachimi.json'");
+      }),
+    });
+    const cmd = createDailyHachimiCommand(null, null, service);
+
+    await cmd.execute(interaction);
+
+    // editReply must be called with an embed payload (not the generic
+    // "❌ 发生内部错误" content fallback from the outer catch).
+    expect(interaction.editReply).toHaveBeenCalledTimes(1);
+    const reply = interaction.editReply.mock.calls[0][0];
+    expect(reply).toEqual(expect.objectContaining({ embeds: expect.any(Array) }));
+    expect(reply.embeds).toHaveLength(1);
+
+    // The single embed built during this execute() should be the error embed.
+    expect(EmbedBuilder.mock.results).toHaveLength(1);
+    const errEmbed = EmbedBuilder.mock.results[0].value;
+    expect(errEmbed.setTitle).toHaveBeenCalledWith(
+      expect.stringMatching(/配置保存失败/)
+    );
+    expect(errEmbed.setDescription).toHaveBeenCalledWith(
+      expect.stringContaining("EACCES")
+    );
+  });
 });
 
 // ─── disable subcommand ──────────────────────────────────────────────────────

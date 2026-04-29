@@ -22,10 +22,13 @@ jest.mock("fs", () => ({
   readFileSync: jest.fn(),
   writeFileSync: jest.fn(),
   mkdirSync: jest.fn(),
+  accessSync: jest.fn(),
+  constants: { W_OK: 2 },
 }));
 
 const cron = require("node-cron");
 const fs = require("fs");
+const logger = require("../../src/services/logger_service");
 const DailyHachimiService = require("../../src/services/daily_hachimi_service");
 
 const mockConfig = {
@@ -42,8 +45,10 @@ function makeService() {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  // Default: no data file exists
+  // Default: no data file exists, dir writable, write succeeds
   fs.existsSync.mockReturnValue(false);
+  fs.accessSync.mockImplementation(() => undefined);
+  fs.writeFileSync.mockImplementation(() => undefined);
 });
 
 // ─── initialize ─────────────────────────────────────────────
@@ -125,6 +130,75 @@ describe("setSchedule", () => {
 
     expect(stopMock).toHaveBeenCalledTimes(1);
     expect(cron.schedule).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─── setSchedule persistence failure ────────────────────────
+
+describe("setSchedule persistence failure", () => {
+  test("re-throws when fs.writeFileSync fails with EACCES", () => {
+    const eacces = Object.assign(
+      new Error("EACCES: permission denied, open '/data/daily_hachimi.json'"),
+      { code: "EACCES" }
+    );
+    fs.writeFileSync.mockImplementation(() => { throw eacces; });
+
+    const service = makeService();
+    service.initialize({}, {});
+
+    expect(() => service.setSchedule("guildA", {
+      channelId: "ch1", hour: 12, minute: 0, count: 1, timezone: "America/Toronto",
+    })).toThrow("EACCES: permission denied");
+  });
+
+  test("does not start a cron job when persistence fails", () => {
+    fs.writeFileSync.mockImplementation(() => {
+      throw Object.assign(new Error("EACCES"), { code: "EACCES" });
+    });
+
+    const service = makeService();
+    service.initialize({}, {});
+    cron.schedule.mockClear();
+
+    expect(() => service.setSchedule("guildA", {
+      channelId: "ch1", hour: 12, minute: 0, count: 1, timezone: "America/Toronto",
+    })).toThrow();
+
+    expect(cron.schedule).not.toHaveBeenCalled();
+  });
+});
+
+// ─── initialize - data dir health check ─────────────────────
+
+describe("initialize data dir health check", () => {
+  test("logs error when data dir is not writable", () => {
+    fs.accessSync.mockImplementation(() => {
+      throw Object.assign(
+        new Error("EACCES: permission denied, access '/data'"),
+        { code: "EACCES" }
+      );
+    });
+
+    const service = makeService();
+    service.initialize({}, {});
+
+    const errorCalls = logger.error.mock.calls.filter(
+      ([msg]) => /data dir not writable/.test(msg)
+    );
+    expect(errorCalls).toHaveLength(1);
+    expect(errorCalls[0][1]).toMatchObject({ dir: expect.any(String) });
+  });
+
+  test("does not log error when data dir is writable", () => {
+    fs.accessSync.mockImplementation(() => undefined);
+
+    const service = makeService();
+    service.initialize({}, {});
+
+    const errorCalls = logger.error.mock.calls.filter(
+      ([msg]) => /data dir not writable/.test(msg)
+    );
+    expect(errorCalls).toHaveLength(0);
   });
 });
 

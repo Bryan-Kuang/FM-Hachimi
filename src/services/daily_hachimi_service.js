@@ -42,6 +42,7 @@ class DailyHachimiService {
     this.client = discordClient;
     this.bilibiliApi = bilibiliApi;
 
+    this._checkDataDirWritable();
     this._loadSchedules();
 
     for (const [guildId, cfg] of Object.entries(this.schedules)) {
@@ -304,6 +305,19 @@ class DailyHachimiService {
         file: this._dataFile,
         error: err.message,
       });
+      throw err;
+    }
+  }
+
+  _checkDataDirWritable() {
+    const dir = path.dirname(this._dataFile);
+    try {
+      fs.accessSync(dir, fs.constants.W_OK);
+    } catch (err) {
+      logger.error(
+        "DailyHachimi: data dir not writable, /daily-hachimi setup will fail",
+        { dir, error: err.message }
+      );
     }
   }
 }
