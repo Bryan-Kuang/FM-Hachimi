@@ -36,13 +36,11 @@ class EmbedBuilders {
       playing: 0x1DB954, // Spotify green
       paused: 0xFF6B35, // Orange
     };
-    const statusEmoji = isPlaying ? "▶️" : "⏸️";
     const statusText = isPlaying ? "Now Playing" : "Paused";
 
     const embed = new EmbedBuilder()
       .setColor(isPlaying ? colors.playing : colors.paused)
-      .setAuthor({ name: `${statusEmoji} ${statusText}` })
-      .setTitle(Formatters.escapeMarkdown(videoData.title || "Unknown"));
+      .setTitle(statusText);
 
     // Make the title a hyperlink to the original Bilibili page. Track
     // objects from both extractor and search API expose `.url`; fall back
@@ -51,8 +49,12 @@ class EmbedBuilders {
       videoData.url ||
       (videoData.bvid ? `https://www.bilibili.com/video/${videoData.bvid}` : null) ||
       (videoData.videoId ? `https://www.bilibili.com/video/${videoData.videoId}` : null);
+    
+    const safeTitle = Formatters.escapeMarkdown(videoData.title || "Unknown");
     if (pageUrl) {
-      embed.setURL(pageUrl);
+      embed.setDescription(`**[${safeTitle}](${pageUrl})**`);
+    } else {
+      embed.setDescription(`**${safeTitle}**`);
     }
 
     if (videoData.thumbnail) {
@@ -63,15 +65,15 @@ class EmbedBuilders {
     // dedup miss.
     if (videoData.duration > 0) {
       embed.addFields({
-        name: "⏱️ Duration",
-        value: Formatters.formatTime(videoData.duration),
+        name: "Duration",
+        value: `\`${Formatters.formatTime(videoData.duration)}\``,
         inline: true,
       });
     }
 
     embed.addFields({
-      name: "👤 Requested by",
-      value: Formatters.escapeMarkdown(requestedBy),
+      name: "Requested by",
+      value: `\`${Formatters.escapeMarkdown(requestedBy)}\``,
       inline: true,
     });
 
@@ -92,7 +94,7 @@ class EmbedBuilders {
       const progressBar = "█".repeat(filled) + "░".repeat(empty);
       embed.addFields({
         name: "Progress",
-        value: progressBar,
+        value: `\`${progressBar}\``,
         inline: false,
       });
     }
