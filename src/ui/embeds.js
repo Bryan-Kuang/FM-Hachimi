@@ -49,9 +49,18 @@ class EmbedBuilders {
       const s = Math.floor(videoData.duration % 60);
       description += `> Duration: ${m}m ${s}s\n`;
     }
-    
-    description += `> Requested by: ${Formatters.escapeMarkdown(requestedBy)}\n\n`;
 
+    description += `> Requested by: ${Formatters.escapeMarkdown(requestedBy)}`;
+
+    embed.setDescription(description);
+
+    if (videoData.thumbnail) {
+      embed.setThumbnail(videoData.thumbnail);
+    }
+
+    // Progress bar rendered full-width BELOW the thumbnail column so it
+    // doesn't increase description height (which would make the thumbnail
+    // appear smaller relative to the left text block).
     if (videoData.duration > 0) {
       const BAR_WIDTH = 20;
       const filled = Math.min(
@@ -60,13 +69,7 @@ class EmbedBuilders {
       );
       const empty = Math.max(0, BAR_WIDTH - filled);
       const progressBar = "█".repeat(filled) + "░".repeat(empty);
-      description += progressBar;
-    }
-
-    embed.setDescription(description);
-
-    if (videoData.thumbnail) {
-      embed.setThumbnail(videoData.thumbnail);
+      embed.addFields({ name: "Progress", value: progressBar, inline: false });
     }
 
     return embed;
