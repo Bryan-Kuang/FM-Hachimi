@@ -233,7 +233,7 @@ module.exports = function createHachimiCommand(playbackService, queueService) {
             const _track = await queueService.addTrack(
               interaction.guild.id,
               video.url,
-              username
+              `<@${interaction.user.id}>`
             );
             addedCount++;
 

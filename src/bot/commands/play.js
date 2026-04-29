@@ -82,7 +82,7 @@ module.exports = function createPlayCommand(playbackService, queueService) {
         const track = await queueService.addTrack(
           interaction.guild.id,
           url,
-          user.displayName || user.username
+          `<@${user.id}>`
         );
         if (!track) {
           return await interaction.editReply({

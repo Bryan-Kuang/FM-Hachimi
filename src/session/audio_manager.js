@@ -125,7 +125,7 @@ class AudioManager {
       // Add to queue
       const track = player.addToQueue(
         videoData,
-        user.displayName || user.username
+        `<@${user.id}>`
       );
 
       // Start playing if nothing is currently playing

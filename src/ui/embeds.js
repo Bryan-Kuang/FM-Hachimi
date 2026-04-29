@@ -46,11 +46,11 @@ class EmbedBuilders {
 
     if (videoData.duration > 0) {
       const m = Math.floor(videoData.duration / 60);
-      const s = videoData.duration % 60;
+      const s = Math.floor(videoData.duration % 60);
       description += `> Duration: ${m}m ${s}s\n`;
     }
     
-    description += `> Requested by: @${Formatters.escapeMarkdown(requestedBy)}\n\n`;
+    description += `> Requested by: ${Formatters.escapeMarkdown(requestedBy)}\n\n`;
 
     if (videoData.duration > 0) {
       const BAR_WIDTH = 20;
