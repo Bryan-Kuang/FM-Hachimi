@@ -14,9 +14,8 @@ exports[`Bot Commands Coverage NowPlaying Command {
   expectErrorTitle: null
 } 1`] = `
 {
-  "description": "**Test Track**
-",
-  "title": "▶️ Now Playing",
+  "description": undefined,
+  "title": "Test Track",
 }
 `;
 

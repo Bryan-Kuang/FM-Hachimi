@@ -45,6 +45,21 @@ jest.mock("../../src/services/logger_service", () => ({
   debug: jest.fn(),
 }));
 
+// Pin progressIntervalMs to 1000 ms in tests. The production default was
+// raised to 5000 ms in 2026-04-28 (the bar-only redesign — segments only
+// flip every ~9 s for a 3-min track, so faster ticking just burns CPU on
+// dedup-skipped renders). These tests assert the SCHEDULER's behavior
+// (cadence holds, components stripped, slow-edit catch-up math), not the
+// interval default; using 1 s keeps them fast.
+jest.mock("../../src/config/config", () => ({
+  ui: {
+    progressIntervalMs: 1000,
+    slowEditThresholdMs: 2500,
+    slowEditStreakLimit: 3,
+    cooldownMs: 5000,
+  },
+}));
+
 // The embed mock returns content that varies with currentTime — so different
 // `currentTime` values produce different signatures (no dedup), but repeating
 // the same currentTime deduplicates.

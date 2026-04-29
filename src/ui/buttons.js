@@ -25,7 +25,11 @@ class ButtonBuilders {
     const row1 = new ActionRowBuilder();
     const row2 = new ActionRowBuilder();
 
-    // Previous track button with enhanced styling
+    // Uniform button color: every non-loop control uses Secondary (gray).
+    // Per the 2026-04-28 redesign, state is conveyed through label/emoji
+    // changes (▶️ Play vs ⏸️ Pause) rather than color. Loop is the lone
+    // exception — its color encodes the loop mode (the embed body no
+    // longer carries any loop indicator), so Off=Secondary, On=Success.
     const previousButton = new ButtonBuilder()
       .setCustomId("prev")
       .setLabel("Previous")
@@ -33,21 +37,18 @@ class ButtonBuilders {
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(!canGoBack);
 
-    // Play/Pause button with dynamic styling
     const playPauseButton = new ButtonBuilder()
       .setCustomId("pause_resume")
       .setLabel(isPlaying ? "Pause" : "Play")
       .setEmoji(isPlaying ? "⏸️" : "▶️")
-      .setStyle(isPlaying ? ButtonStyle.Success : ButtonStyle.Primary);
+      .setStyle(ButtonStyle.Secondary);
 
-    // Stop button with warning style
     const stopButton = new ButtonBuilder()
       .setCustomId("stop")
       .setLabel("Stop")
       .setEmoji("⏹️")
-      .setStyle(ButtonStyle.Danger);
+      .setStyle(ButtonStyle.Secondary);
 
-    // Skip button with enhanced styling
     const skipButton = new ButtonBuilder()
       .setCustomId("skip")
       .setLabel("Skip")
@@ -55,25 +56,25 @@ class ButtonBuilders {
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(!canSkip);
 
-    // Loop button with dynamic emoji and style based on mode
+    // Loop button: color IS the state indicator now (no embed-body
+    // duplicate). Off → Secondary (gray), Single/Queue → Success (green).
     const loopEmojis = {
       none: "🔁",
-      track: "🔂", 
-      queue: "🔁"
+      track: "🔂",
+      queue: "🔁",
     };
-    
     const loopButton = new ButtonBuilder()
       .setCustomId("loop")
       .setLabel(`Loop: ${loopMode === "none" ? "Off" : loopMode === "track" ? "Single" : "Queue"}`)
       .setEmoji(loopEmojis[loopMode])
       .setStyle(loopMode === "none" ? ButtonStyle.Secondary : ButtonStyle.Success);
 
-    // Queue button for easy access to queue management
+    // Queue button kept (per user spec) but flattened to Secondary too.
     const queueButton = new ButtonBuilder()
       .setCustomId("queue")
       .setLabel("Queue")
       .setEmoji("📋")
-      .setStyle(ButtonStyle.Primary)
+      .setStyle(ButtonStyle.Secondary)
       .setDisabled(!hasQueue);
 
     // First row: main playback controls

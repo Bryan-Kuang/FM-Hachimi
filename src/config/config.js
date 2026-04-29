@@ -47,7 +47,15 @@ module.exports = {
     // ProgressTracker tick interval (ms). Each tick checks whether the
     // progress bar string changed vs. last sent edit; if identical we skip
     // the Discord call entirely (content-hash dedup).
-    progressIntervalMs: parseInt(process.env.UI_PROGRESS_INTERVAL_MS) || 1000,
+    //
+    // Raised 1000 → 5000 ms (2026-04-28): with the redesigned card showing
+    // ONLY the bar (no per-second time numbers), the rendered content
+    // changes only when a bar segment flips — for a 3-min track that's
+    // every ~9s. Ticking faster than the bar can change just burns CPU
+    // on render+hash work that always dedups. 5s gives near-instant
+    // detection of segment flips while leaving plenty of headroom under
+    // Discord's 5-edits/5s rate limit even with a slow round-trip.
+    progressIntervalMs: parseInt(process.env.UI_PROGRESS_INTERVAL_MS) || 5000,
     // Back-pressure detection for the progress tracker. If a single
     // `message.edit()` takes longer than `slowEditThresholdMs` we call that
     // edit "slow" — it usually means Discord's per-channel rate-limit bucket
