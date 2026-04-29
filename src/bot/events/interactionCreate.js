@@ -573,6 +573,9 @@ module.exports = function createInteractionHandler(playbackService, queueService
 
         Lock.release(interaction.guild.id, customId)
 
+        // Notify state to update the main playback card's loop button
+        playbackService.notifyState(interaction.guild.id);
+
         logger.info("Loop mode changed via select menu", {
           mode: selectedMode,
           user: user.username,
