@@ -6,6 +6,19 @@ services:
     container_name: bilibili-discord-bot
     restart: unless-stopped
 
+    # Run as the host's bind-mount owner so writes to ./data, ./logs, and
+    # cookies.txt don't EACCES. Default 1000:1000 matches stock Linux first
+    # user (and the in-image `node` user). Oracle Cloud's Ubuntu image is
+    # the exception — there `opc` is uid 1000 and `ubuntu` is uid 1001, so
+    # set HOST_UID=1001 / HOST_GID=1001 in .env on those VPSes.
+    #
+    # Without this override the container ran as image-default `node`(1000)
+    # while ./data was owned by host `ubuntu`(1001), and every
+    # `/daily-hachimi setup` silently failed to persist the schedule
+    # (EACCES on /app/data/daily_hachimi.json) — the cron never re-armed
+    # after a container rebuild. (root cause of 2026-04-28 incident)
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+
     # Environment variables from .env file
     env_file:
       - .env
