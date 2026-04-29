@@ -27,21 +27,23 @@ class EmbedBuilders {
     const statusText = isPlaying ? "Now Playing" : "Paused";
 
     const embed = new EmbedBuilder()
-      .setColor(isPlaying ? colors.playing : colors.paused)
-      .setTitle(statusText);
+      .setColor(isPlaying ? colors.playing : colors.paused);
 
     const pageUrl =
       videoData.url ||
       (videoData.bvid ? `https://www.bilibili.com/video/${videoData.bvid}` : null) ||
       (videoData.videoId ? `https://www.bilibili.com/video/${videoData.videoId}` : null);
-    
+
     const safeTitle = Formatters.escapeMarkdown(videoData.title || "Unknown");
-    
-    let description = "";
+
+    // "Now Playing" lives inside the description (not setTitle) to eliminate
+    // the fixed gap Discord always inserts between title and description.
+    // All three lines are tight: status → video title → blockquotes.
+    let description = `**${statusText}**\n`;
     if (pageUrl) {
-      description += `**[${safeTitle}](${pageUrl})**\n\n`;
+      description += `**[${safeTitle}](${pageUrl})**\n`;
     } else {
-      description += `**${safeTitle}**\n\n`;
+      description += `**${safeTitle}**\n`;
     }
 
     if (videoData.duration > 0) {
