@@ -57,7 +57,13 @@ class EmbedBuilders {
     embed.setDescription(description);
 
     if (videoData.thumbnail) {
-      embed.setThumbnail(videoData.thumbnail);
+      // Route through wsrv.nl to center-crop the image into a square before
+      // Discord renders it at 80×80. Without this, a 16:9 Bilibili cover
+      // would be letterboxed and most of the 80px height would be wasted.
+      // fit=cover + a=center crops from the middle, keeping the subject visible.
+      const rawUrl = videoData.thumbnail.replace(/^https?:\/\//, "");
+      const croppedUrl = `https://wsrv.nl/?url=${encodeURIComponent(rawUrl)}&w=80&h=80&fit=cover&a=center`;
+      embed.setThumbnail(croppedUrl);
     }
 
     // Progress bar rendered full-width BELOW the thumbnail column so it
