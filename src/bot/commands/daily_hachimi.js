@@ -132,13 +132,27 @@ async function handleSetup(interaction, service) {
     });
   }
 
-  service.setSchedule(interaction.guild.id, {
-    channelId: channel.id,
-    hour,
-    minute,
-    count,
-    timezone: "America/Toronto",
-  });
+  try {
+    service.setSchedule(interaction.guild.id, {
+      channelId: channel.id,
+      hour,
+      minute,
+      count,
+      timezone: "America/Toronto",
+    });
+  } catch (err) {
+    logger.error("DailyHachimi: setSchedule failed during /daily-hachimi setup", {
+      guildId: interaction.guild.id,
+      error: err.message,
+    });
+
+    const errEmbed = new EmbedBuilder()
+      .setColor(0xE74C3C)
+      .setTitle("❌ 配置保存失败")
+      .setDescription(err.message);
+
+    return interaction.editReply({ embeds: [errEmbed] });
+  }
 
   const embed = new EmbedBuilder()
     .setColor(0x00B5FF)
