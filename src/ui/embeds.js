@@ -20,18 +20,6 @@ class EmbedBuilders {
       isPlaying = true,
     } = options;
 
-    // Layout (deliberately spartan — matches the reference card the user
-    // pointed to: small "Now Playing" eyebrow, a clickable title, just the
-    // duration + requester + a bottom progress bar, no footer / no
-    // queue-position / no loop-state in the embed body. Loop state is
-    // expressed entirely through the loop button's color, queue position
-    // is reachable through `/queue`. See PR discussion 2026-04-28.
-    //
-    // Two state-derived bits remain:
-    //   - color (green when playing, orange when paused)
-    //   - "Now Playing" vs "Paused" eyebrow text
-    // Everything else is identical across states so the embed renders
-    // calmly even on busy channels.
     const colors = {
       playing: 0x1DB954, // Spotify green
       paused: 0xFF6B35, // Orange
@@ -39,51 +27,28 @@ class EmbedBuilders {
     const statusText = isPlaying ? "Now Playing" : "Paused";
 
     const embed = new EmbedBuilder()
-      .setColor(isPlaying ? colors.playing : colors.paused)
-      .setTitle(statusText);
+      .setColor(isPlaying ? colors.playing : colors.paused);
 
-    // Make the title a hyperlink to the original Bilibili page. Track
-    // objects from both extractor and search API expose `.url`; fall back
-    // to constructing from bvid/videoId for older queue items.
     const pageUrl =
       videoData.url ||
       (videoData.bvid ? `https://www.bilibili.com/video/${videoData.bvid}` : null) ||
       (videoData.videoId ? `https://www.bilibili.com/video/${videoData.videoId}` : null);
     
     const safeTitle = Formatters.escapeMarkdown(videoData.title || "Unknown");
+    
+    let description = `# ${statusText}\n`;
     if (pageUrl) {
-      embed.setDescription(`**[${safeTitle}](${pageUrl})**`);
+      description += `**[${safeTitle}](${pageUrl})**\n\n`;
     } else {
-      embed.setDescription(`**${safeTitle}**`);
+      description += `**${safeTitle}**\n\n`;
     }
 
-    if (videoData.thumbnail) {
-      embed.setThumbnail(videoData.thumbnail);
-    }
-
-    // Duration field — static for the whole track lifetime, never causes a
-    // dedup miss.
     if (videoData.duration > 0) {
-      embed.addFields({
-        name: "Duration",
-        value: `\`${Formatters.formatTime(videoData.duration)}\``,
-        inline: true,
-      });
+      description += `> Duration: ${Formatters.formatTime(videoData.duration)}\n`;
     }
+    
+    description += `> Requested by: ${Formatters.escapeMarkdown(requestedBy)}\n\n`;
 
-    embed.addFields({
-      name: "Requested by",
-      value: `\`${Formatters.escapeMarkdown(requestedBy)}\``,
-      inline: true,
-    });
-
-    // Bottom progress bar: 20 segments, `█` filled / `░` empty, NO time
-    // numbers. Each segment = duration/20 of real time, so on a 3-min
-    // track a segment flips ≈ every 9s — that drives Discord-edit cadence
-    // through the content-hash dedup in ProgressTracker, well below the
-    // 5-edits/5s rate limit. Field name `Progress` is required (UI test
-    // pins it), but the visible label is small and the bar dominates the
-    // bottom of the card.
     if (videoData.duration > 0) {
       const BAR_WIDTH = 20;
       const filled = Math.min(
@@ -92,11 +57,13 @@ class EmbedBuilders {
       );
       const empty = BAR_WIDTH - filled;
       const progressBar = "█".repeat(filled) + "░".repeat(empty);
-      embed.addFields({
-        name: "Progress",
-        value: `\`${progressBar}\``,
-        inline: false,
-      });
+      description += progressBar;
+    }
+
+    embed.setDescription(description);
+
+    if (videoData.thumbnail) {
+      embed.setThumbnail(videoData.thumbnail);
     }
 
     return embed;

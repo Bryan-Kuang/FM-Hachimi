@@ -13,9 +13,13 @@ jest.mock("discord.js", () => {
   class FakeEmbedBuilder {
     constructor() {
       this.fields = [];
+      this.description = "";
     }
     setTitle() { return this; }
-    setDescription() { return this; }
+    setDescription(text) { 
+      this.description = text; 
+      return this; 
+    }
     setURL() { return this; }
     setThumbnail() { return this; }
     setColor() { return this; }
@@ -35,7 +39,7 @@ jest.mock("discord.js", () => {
 const EmbedBuilders = require("../../src/ui/embeds");
 
 function getProgressField(embed) {
-  return embed.fields.find((f) => f.name && f.name.includes("Progress"));
+  return { value: embed.description || "" };
 }
 
 describe("createNowPlayingEmbed progress bar", () => {
