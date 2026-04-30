@@ -7,16 +7,15 @@
  * policy (e.g. tests can assert on failures without catching exceptions).
  */
 
-/** @typedef {{ ok: true, warnings: string[] }
- *           | { ok: false, errors: string[], warnings: string[] }} EnvValidationResult */
+import type { EnvValidationResult } from '../types';
 
-const REQUIRED_VARS = ["DISCORD_TOKEN", "CLIENT_ID"];
+const REQUIRED_VARS = ['DISCORD_TOKEN', 'CLIENT_ID'];
 
-function isNonEmptyString(value) {
+function isNonEmptyString(value: string | undefined): boolean {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function isPositiveInt(value) {
+function isPositiveInt(value: string | undefined): boolean {
   if (value === undefined || value === null || value === "") return true; // optional
   const n = Number(value);
   return Number.isInteger(n) && n > 0;
@@ -24,12 +23,11 @@ function isPositiveInt(value) {
 
 /**
  * Validate process.env for the bot's required and optional configuration.
- * @param {NodeJS.ProcessEnv} [env] - defaults to process.env; accept override for tests
- * @returns {EnvValidationResult}
+ * @param env - defaults to process.env; accept override for tests
  */
-function validateEnv(env = process.env) {
-  const errors = [];
-  const warnings = [];
+export function validateEnv(env: NodeJS.ProcessEnv = process.env): EnvValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
 
   for (const key of REQUIRED_VARS) {
     if (!isNonEmptyString(env[key])) {
@@ -79,7 +77,7 @@ function validateEnv(env = process.env) {
   if (errors.length > 0) {
     return { ok: false, errors, warnings };
   }
-  return { ok: true, warnings };
+  return { ok: true, errors: [], warnings };
 }
 
 /**
@@ -87,18 +85,19 @@ function validateEnv(env = process.env) {
  * Accepts an optional logger (falls back to console) to avoid cyclic deps
  * with logger_service.
  */
-function validateOrExit(env = process.env, logger = console) {
+export function validateOrExit(
+  env: NodeJS.ProcessEnv = process.env,
+  logger: { warn?(msg: string): void; error?(msg: string): void; log?(msg: string): void } = console
+): EnvValidationResult {
   const result = validateEnv(env);
   for (const w of result.warnings) {
-    logger.warn ? logger.warn(w) : logger.log(w);
+    logger.warn ? logger.warn(w) : logger.log!(w);
   }
   if (!result.ok) {
     for (const e of result.errors) {
-      logger.error ? logger.error(e) : logger.log(e);
+      logger.error ? logger.error(e) : logger.log!(e);
     }
     process.exit(1);
   }
   return result;
 }
-
-module.exports = { validateEnv, validateOrExit };
