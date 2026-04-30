@@ -18,6 +18,8 @@ class EmbedBuilders {
       currentTime = 0,
       requestedBy = "Unknown",
       isPlaying = true,
+      queuePosition = 0,
+      totalQueue = 0,
     } = options;
 
     const colors = {
@@ -77,7 +79,11 @@ class EmbedBuilders {
       );
       const empty = Math.max(0, BAR_WIDTH - filled);
       const progressBar = "█".repeat(filled) + "░".repeat(empty);
-      embed.addFields({ name: "Progress", value: progressBar, inline: false });
+      // Append queue position to the right of the bar when info is available.
+      const queueTag = (queuePosition > 0 && totalQueue > 0)
+        ? `  ${queuePosition}/${totalQueue}`
+        : "";
+      embed.addFields({ name: "Progress", value: progressBar + queueTag, inline: false });
     }
 
     return embed;
