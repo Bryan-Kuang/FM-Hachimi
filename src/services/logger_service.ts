@@ -48,7 +48,7 @@ const logger = winston.createLogger({
   transports
 });
 
-type LogContext = Record<string, unknown>;
+export type LogContext = Record<string, unknown>;
 
 function log(level: string, message: string, context?: LogContext): void {
   logger.log({ level, message, context });
