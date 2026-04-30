@@ -3,25 +3,94 @@
  * Handles video URL processing and audio stream extraction
  */
 
-const _axios = require("axios");
-const { spawn } = require("child_process");
-const fs = require("fs");
-const logger = require("../services/logger_service");
-const config = require("../config/config");
-const UrlValidator = require("./validator");
+import { spawn, ChildProcess } from 'child_process';
+import * as fs from 'fs';
+import * as logger from '../services/logger_service';
+import config = require('../config/config');
+import UrlValidator = require('./validator');
+
+interface VideoMetadata {
+  success: boolean;
+  title: string;
+  description: string;
+  duration: number;
+  uploader: string;
+  uploadDate: string | null;
+  uploadDateFormatted?: string;
+  viewCount: number;
+  likeCount: number;
+  thumbnail: string | null;
+  videoId: string | null;
+  id: string | null;
+  url: string;
+  webpage_url: string;
+}
+
+interface ExtractedAudio extends VideoMetadata {
+  audioUrl: string;
+  originalUrl: string;
+  normalizedUrl: string;
+  extractedAt: string;
+}
+
+interface SearchResult {
+  title: string;
+  id: string;
+  url: string;
+  duration: number | string;
+  uploader: string;
+  viewCount: number | string;
+  thumbnail: string | null;
+  index?: number;
+}
+
+interface SearchResponse {
+  success: boolean;
+  results?: SearchResult[];
+  error?: string;
+  keyword: string;
+  timestamp: string;
+}
+
+interface TestExtractionResult {
+  success: boolean;
+  result?: ExtractedAudio;
+  error?: string;
+  ytdlpAvailable: boolean;
+  timestamp: string;
+}
+
+interface CacheEntry {
+  data: VideoMetadata;
+  timestamp: number;
+}
+
+interface ThumbnailEntry {
+  url: string;
+  width?: number;
+  height?: number;
+}
 
 class BilibiliExtractor {
+  private userAgent: string;
+  private _ytdlpChecked: boolean;
+  private _cookiesFile: string | null;
+  private videoInfoCache: Map<string, CacheEntry>;
+  private cacheExpiry: number;
+  private maxCacheSize: number;
+  private cacheCleanupInterval: NodeJS.Timeout | null;
+
   constructor() {
     this.userAgent =
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     this._ytdlpChecked = false; // Lazy check flag
     this._cookiesFile = this._resolveCookiesFile();
-    
+
     // Video info cache to avoid repeated yt-dlp calls
     this.videoInfoCache = new Map();
     this.cacheExpiry = 30 * 60 * 1000; // 30 minutes cache expiry
     this.maxCacheSize = 100; // Maximum number of cached entries
-    
+
     // Start cache cleanup interval (.unref() so it doesn't block process exit)
     this.cacheCleanupInterval = setInterval(() => {
       this.cleanupExpiredCache();
@@ -31,10 +100,10 @@ class BilibiliExtractor {
   /**
    * Clean up expired cache entries and enforce size limit
    */
-  cleanupExpiredCache() {
+  cleanupExpiredCache(): void {
     const now = Date.now();
     let removedCount = 0;
-    
+
     // Remove expired entries
     for (const [key, entry] of this.videoInfoCache) {
       if (now - entry.timestamp > this.cacheExpiry) {
@@ -42,23 +111,23 @@ class BilibiliExtractor {
         removedCount++;
       }
     }
-    
+
     // Enforce size limit by removing oldest entries
     if (this.videoInfoCache.size > this.maxCacheSize) {
       const entries = Array.from(this.videoInfoCache.entries());
       entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
-      
+
       const toRemove = entries.slice(0, this.videoInfoCache.size - this.maxCacheSize);
       toRemove.forEach(([key]) => {
         this.videoInfoCache.delete(key);
         removedCount++;
       });
     }
-    
+
     if (removedCount > 0) {
-      logger.debug("Cache cleanup completed", { 
-        removedEntries: removedCount, 
-        remainingEntries: this.videoInfoCache.size 
+      logger.debug("Cache cleanup completed", {
+        removedEntries: removedCount,
+        remainingEntries: this.videoInfoCache.size
       });
     }
   }
@@ -66,7 +135,7 @@ class BilibiliExtractor {
   /**
    * Clear all cache entries
    */
-  clearCache() {
+  clearCache(): void {
     this.videoInfoCache.clear();
     logger.info("Video info cache cleared");
   }
@@ -74,7 +143,7 @@ class BilibiliExtractor {
   /**
    * Cleanup resources when extractor is destroyed
    */
-  destroy() {
+  destroy(): void {
     if (this.cacheCleanupInterval) {
       clearInterval(this.cacheCleanupInterval);
       this.cacheCleanupInterval = null;
@@ -86,7 +155,7 @@ class BilibiliExtractor {
    * Resolve the cookies file path from config
    * @returns {string|null} - Resolved cookie file path, or null if not configured/invalid
    */
-  _resolveCookiesFile() {
+  _resolveCookiesFile(): string | null {
     const cookiesFile = config.bilibili?.cookiesFile;
     if (!cookiesFile) return null;
 
@@ -103,7 +172,7 @@ class BilibiliExtractor {
    * Get yt-dlp cookie arguments if a cookies file is configured
    * @returns {Array<string>} - Cookie-related args for yt-dlp
    */
-  _getCookieArgs() {
+  _getCookieArgs(): string[] {
     if (this._cookiesFile && fs.existsSync(this._cookiesFile)) {
       return ["--cookies", this._cookiesFile];
     }
@@ -117,7 +186,7 @@ class BilibiliExtractor {
    * @param {number} maxRetries - Maximum retry attempts
    * @returns {Promise<Object>} - Video metadata and audio stream info
    */
-  async extractAudio(url, retryCount = 0, maxRetries = 2) {
+  async extractAudio(url: string, retryCount = 0, maxRetries = 2): Promise<ExtractedAudio> {
     logger.info("Starting audio extraction", { url, attempt: retryCount + 1 });
 
     try {
@@ -150,7 +219,7 @@ class BilibiliExtractor {
       // Get audio stream URL
       const audioStreamUrl = await this.getAudioStreamUrl(normalizedUrl);
 
-      const result = {
+      const result: ExtractedAudio = {
         ...videoInfo,
         audioUrl: audioStreamUrl,
         originalUrl: url,
@@ -168,25 +237,25 @@ class BilibiliExtractor {
     } catch (error) {
       logger.error("Audio extraction failed", {
         url,
-        error: error.message,
+        error: (error as Error).message,
         attempt: retryCount + 1,
         maxRetries: maxRetries,
       });
-      
+
       // 如果是网络相关错误且还有重试次数，则重试
-      if (retryCount < maxRetries && this.isRetryableError(error)) {
+      if (retryCount < maxRetries && this.isRetryableError(error as Error)) {
         logger.info("Retrying audio extraction", {
           url,
           nextAttempt: retryCount + 2,
           delay: (retryCount + 1) * 3000,
         });
-        
+
         // 等待递增延迟后重试
         await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 3000));
         return await this.extractAudio(url, retryCount + 1, maxRetries);
       }
-      
-      throw new Error(`Audio extraction failed: ${error.message}`);
+
+      throw new Error(`Audio extraction failed: ${(error as Error).message}`);
     }
   }
 
@@ -200,21 +269,21 @@ class BilibiliExtractor {
    * @param {string} url - Bilibili video URL
    * @returns {Promise<Object>} - Video metadata
    */
-  async getVideoInfo(url) {
+  async getVideoInfo(url: string): Promise<VideoMetadata> {
     // Create cache key from normalized URL
     const normalizedUrl = UrlValidator.normalizeUrl(url);
     const cacheKey = normalizedUrl || url;
-    
+
     // Check cache first
     const cached = this.videoInfoCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < this.cacheExpiry) {
       logger.debug("Video info retrieved from cache", { url: cacheKey });
       return cached.data;
     }
-    
+
     // If not in cache or expired, fetch from yt-dlp
     logger.debug("Fetching video info from yt-dlp", { url: cacheKey });
-    
+
     return new Promise((resolve, reject) => {
       const args = [
         "--dump-json",
@@ -229,19 +298,19 @@ class BilibiliExtractor {
 
       logger.debug("Executing yt-dlp for video info", { args });
 
-      const ytdlp = spawn("yt-dlp", args);
+      const ytdlp: ChildProcess = spawn("yt-dlp", args);
       let stdout = "";
       let stderr = "";
 
-      ytdlp.stdout.on("data", (data) => {
+      ytdlp.stdout!.on("data", (data: Buffer) => {
         stdout += data.toString();
       });
 
-      ytdlp.stderr.on("data", (data) => {
+      ytdlp.stderr!.on("data", (data: Buffer) => {
         stderr += data.toString();
       });
 
-      ytdlp.on("close", (code) => {
+      ytdlp.on("close", (code: number | null) => {
         if (code !== 0 && code !== null) {
           // 忽略进程被终止的情况
           if (code === 137 || code === 143) {
@@ -252,13 +321,13 @@ class BilibiliExtractor {
             reject(new Error("Video info extraction timeout"));
             return;
           }
-          
+
           logger.error("yt-dlp failed to get video info", {
             code,
             stderr,
             url,
           });
-          
+
           // 提供更具体的错误信息
           let errorMessage = `yt-dlp exited with code ${code}`;
           if (stderr.includes('Video unavailable')) {
@@ -270,7 +339,7 @@ class BilibiliExtractor {
           } else if (stderr) {
             errorMessage += `: ${stderr}`;
           }
-          
+
           reject(new Error(errorMessage));
           return;
         }
@@ -283,7 +352,7 @@ class BilibiliExtractor {
           if (!jsonLine) {
             throw new Error('No JSON object found in yt-dlp output');
           }
-          const videoData = JSON.parse(jsonLine);
+          const videoData = JSON.parse(jsonLine) as Record<string, unknown>;
           const metadata = this.parseVideoMetadata(videoData);
 
           // Cache the result
@@ -300,20 +369,20 @@ class BilibiliExtractor {
           resolve(metadata);
         } catch (parseError) {
           logger.error("Failed to parse video metadata", {
-            error: parseError.message,
+            error: (parseError as Error).message,
             stdout: stdout.substring(0, 500),
             stdoutTail: stdout.substring(Math.max(0, stdout.length - 200)),
             stdoutLength: stdout.length,
           });
           reject(
-            new Error(`Failed to parse video metadata: ${parseError.message}`)
+            new Error(`Failed to parse video metadata: ${(parseError as Error).message}`)
           );
         }
       });
 
-      ytdlp.on("error", (error) => {
+      ytdlp.on("error", (error: NodeJS.ErrnoException) => {
         logger.error("yt-dlp process error", { error: error.message });
-        
+
         // 提供更具体的错误信息
         let errorMessage = 'yt-dlp process error';
         if (error.code === 'ENOENT') {
@@ -321,7 +390,7 @@ class BilibiliExtractor {
         } else if (error.message) {
           errorMessage += `: ${error.message}`;
         }
-        
+
         reject(new Error(errorMessage));
       });
 
@@ -349,7 +418,7 @@ class BilibiliExtractor {
    * @param {string} url - Normalized Bilibili URL
    * @returns {Promise<string>} - Audio stream URL
    */
-  async getAudioStreamUrl(url) {
+  async getAudioStreamUrl(url: string): Promise<string> {
     return new Promise((resolve, reject) => {
       const args = [
         "--get-url",
@@ -365,19 +434,19 @@ class BilibiliExtractor {
 
       logger.debug("Executing yt-dlp for audio stream URL", { args });
 
-      const ytdlp = spawn("yt-dlp", args);
+      const ytdlp: ChildProcess = spawn("yt-dlp", args);
       let stdout = "";
       let stderr = "";
 
-      ytdlp.stdout.on("data", (data) => {
+      ytdlp.stdout!.on("data", (data: Buffer) => {
         stdout += data.toString();
       });
 
-      ytdlp.stderr.on("data", (data) => {
+      ytdlp.stderr!.on("data", (data: Buffer) => {
         stderr += data.toString();
       });
 
-      ytdlp.on("close", (code) => {
+      ytdlp.on("close", (code: number | null) => {
         if (code !== 0 && code !== null) {
           // 忽略进程被终止的情况
           if (code === 137 || code === 143) {
@@ -388,13 +457,13 @@ class BilibiliExtractor {
             reject(new Error("Audio stream URL extraction timeout"));
             return;
           }
-          
+
           logger.error("yt-dlp failed to get audio stream URL", {
             code,
             stderr,
             url,
           });
-          
+
           // 提供更具体的错误信息
           let errorMessage = `yt-dlp exited with code ${code}`;
           if (stderr.includes('Video unavailable')) {
@@ -408,7 +477,7 @@ class BilibiliExtractor {
           } else if (stderr) {
             errorMessage += `: ${stderr}`;
           }
-          
+
           reject(new Error(errorMessage));
           return;
         }
@@ -422,11 +491,11 @@ class BilibiliExtractor {
         resolve(audioUrl);
       });
 
-      ytdlp.on("error", (error) => {
+      ytdlp.on("error", (error: NodeJS.ErrnoException) => {
         logger.error("yt-dlp process error for audio stream", {
           error: error.message,
         });
-        
+
         // 提供更具体的错误信息
         let errorMessage = 'yt-dlp process error';
         if (error.code === 'ENOENT') {
@@ -434,7 +503,7 @@ class BilibiliExtractor {
         } else if (error.message) {
           errorMessage += `: ${error.message}`;
         }
-        
+
         reject(new Error(errorMessage));
       });
 
@@ -462,25 +531,25 @@ class BilibiliExtractor {
    * @param {Object} videoData - Raw video data from yt-dlp
    * @returns {Object} - Normalized metadata
    */
-  parseVideoMetadata(videoData) {
-    const metadata = {
+  parseVideoMetadata(videoData: Record<string, unknown>): VideoMetadata {
+    const metadata: VideoMetadata = {
       success: true,
-      title: videoData.title || "Unknown Title",
-      description: videoData.description || "",
-      duration: videoData.duration || 0,
-      uploader: videoData.uploader || videoData.channel || "Unknown",
-      uploadDate: videoData.upload_date || null,
-      viewCount: videoData.view_count || 0,
-      likeCount: videoData.like_count || 0,
-      thumbnail: this.selectBestThumbnail(videoData.thumbnails),
+      title: (videoData.title as string) || "Unknown Title",
+      description: (videoData.description as string) || "",
+      duration: (videoData.duration as number) || 0,
+      uploader: (videoData.uploader as string) || (videoData.channel as string) || "Unknown",
+      uploadDate: (videoData.upload_date as string) || null,
+      viewCount: (videoData.view_count as number) || 0,
+      likeCount: (videoData.like_count as number) || 0,
+      thumbnail: this.selectBestThumbnail(videoData.thumbnails as ThumbnailEntry[] | undefined),
       videoId: this.extractVideoId(
-        videoData.webpage_url || videoData.original_url
+        (videoData.webpage_url as string) || (videoData.original_url as string)
       ),
       id: this.extractVideoId(
-        videoData.webpage_url || videoData.original_url
+        (videoData.webpage_url as string) || (videoData.original_url as string)
       ),
-      url: videoData.webpage_url || videoData.original_url,
-      webpage_url: videoData.webpage_url,
+      url: (videoData.webpage_url as string) || (videoData.original_url as string),
+      webpage_url: videoData.webpage_url as string,
     };
 
     // Parse upload date if available
@@ -511,7 +580,7 @@ class BilibiliExtractor {
    * @param {Array} thumbnails - Array of thumbnail objects
    * @returns {string} - Best thumbnail URL
    */
-  selectBestThumbnail(thumbnails) {
+  selectBestThumbnail(thumbnails: ThumbnailEntry[] | undefined | null): string | null {
     if (!thumbnails || !Array.isArray(thumbnails) || thumbnails.length === 0) {
       return null;
     }
@@ -519,7 +588,7 @@ class BilibiliExtractor {
     // Sort by resolution (width * height) and pick the highest
     const sorted = thumbnails
       .filter((thumb) => thumb.url && thumb.width && thumb.height)
-      .sort((a, b) => b.width * b.height - a.width * a.height);
+      .sort((a, b) => (b.width! * b.height!) - (a.width! * a.height!));
 
     return sorted.length > 0 ? sorted[0].url : thumbnails[0].url;
   }
@@ -529,7 +598,7 @@ class BilibiliExtractor {
    * @param {string} url - Video URL
    * @returns {string} - Video ID
    */
-  extractVideoId(url) {
+  extractVideoId(url: string): string | null {
     if (!url) return null;
 
     const videoInfo = UrlValidator.extractVideoId(url);
@@ -541,9 +610,9 @@ class BilibiliExtractor {
    * @param {Error} error - The error to check
    * @returns {boolean} - True if the error is retryable
    */
-  isRetryableError(error) {
+  isRetryableError(error: Error): boolean {
     const message = error.message.toLowerCase();
-    
+
     // Network-related errors that can be retried
     const retryableErrors = [
       'timeout',
@@ -563,7 +632,7 @@ class BilibiliExtractor {
       '503',
       '504'
     ];
-    
+
     return retryableErrors.some(errorType => message.includes(errorType));
   }
 
@@ -571,11 +640,11 @@ class BilibiliExtractor {
    * Check if yt-dlp is available on the system
    * @returns {Promise<boolean>} - True if yt-dlp is available
    */
-  async checkYtDlpAvailability() {
+  async checkYtDlpAvailability(): Promise<boolean> {
     return new Promise((resolve) => {
-      const ytdlp = spawn("yt-dlp", ["--version"]);
+      const ytdlp: ChildProcess = spawn("yt-dlp", ["--version"]);
 
-      ytdlp.on("close", (code) => {
+      ytdlp.on("close", (code: number | null) => {
         resolve(code === 0);
       });
 
@@ -598,7 +667,7 @@ class BilibiliExtractor {
    */
   async testExtraction(
     testUrl = "https://www.bilibili.com/video/BV1uv4y1q7Mv"
-  ) {
+  ): Promise<TestExtractionResult> {
     logger.info("Starting extraction test", { testUrl });
 
     try {
@@ -620,12 +689,12 @@ class BilibiliExtractor {
     } catch (error) {
       logger.error("Extraction test failed", {
         testUrl,
-        error: error.message,
+        error: (error as Error).message,
       });
 
       return {
         success: false,
-        error: error.message,
+        error: (error as Error).message,
         ytdlpAvailable: await this.checkYtDlpAvailability(),
         timestamp: new Date().toISOString(),
       };
@@ -638,7 +707,7 @@ class BilibiliExtractor {
    * @param {number} maxResults - Maximum number of results (default: 10)
    * @returns {Promise<Object>} - Search results with video info
    */
-  async searchVideos(keyword, maxResults = 10) {
+  async searchVideos(keyword: string, maxResults = 10): Promise<SearchResponse> {
     logger.info("Starting Bilibili video search", { keyword, maxResults });
 
     try {
@@ -656,7 +725,7 @@ class BilibiliExtractor {
       // Step 1: Get video IDs using bilisearch
       const searchQuery = `bilisearch${maxResults}:${keyword}`;
       const videoIds = await this.getSearchVideoIds(searchQuery);
-      
+
       if (!videoIds || videoIds.length === 0) {
         return {
           success: true,
@@ -668,12 +737,12 @@ class BilibiliExtractor {
 
       // Step 2: Get detailed info for each video
       const results = await this.getVideoDetailsForSearch(videoIds);
-      
-      logger.info("Search completed successfully", { 
-        keyword, 
-        resultCount: results.length 
+
+      logger.info("Search completed successfully", {
+        keyword,
+        resultCount: results.length
       });
-      
+
       return {
         success: true,
         results,
@@ -681,10 +750,10 @@ class BilibiliExtractor {
         timestamp: new Date().toISOString()
       };
     } catch (error) {
-      logger.error("Search error", { error: error.message, keyword });
+      logger.error("Search error", { error: (error as Error).message, keyword });
       return {
         success: false,
-        error: error.message,
+        error: (error as Error).message,
         keyword,
         timestamp: new Date().toISOString()
       };
@@ -696,9 +765,9 @@ class BilibiliExtractor {
    * @param {string} searchQuery - Search query for bilisearch
    * @returns {Promise<Array>} - Array of video IDs
    */
-  async getSearchVideoIds(searchQuery) {
+  async getSearchVideoIds(searchQuery: string): Promise<string[]> {
     return new Promise((resolve, reject) => {
-      const ytdlpProcess = spawn("yt-dlp", [
+      const ytdlpProcess: ChildProcess = spawn("yt-dlp", [
         searchQuery,
         "--get-id",
         "--no-download",
@@ -709,15 +778,15 @@ class BilibiliExtractor {
       let stdout = "";
       let stderr = "";
 
-      ytdlpProcess.stdout.on("data", (data) => {
+      ytdlpProcess.stdout!.on("data", (data: Buffer) => {
         stdout += data.toString();
       });
 
-      ytdlpProcess.stderr.on("data", (data) => {
+      ytdlpProcess.stderr!.on("data", (data: Buffer) => {
         stderr += data.toString();
       });
 
-      ytdlpProcess.on("close", (code) => {
+      ytdlpProcess.on("close", (code: number | null) => {
         if (code !== 0) {
           logger.error("yt-dlp search failed", { code, stderr, searchQuery });
           reject(new Error(`Search failed: ${stderr}`));
@@ -728,10 +797,10 @@ class BilibiliExtractor {
         resolve(videoIds);
       });
 
-      ytdlpProcess.on("error", (error) => {
-        logger.error("yt-dlp process error during search", { 
+      ytdlpProcess.on("error", (error: Error) => {
+        logger.error("yt-dlp process error during search", {
           error: error.message,
-          searchQuery 
+          searchQuery
         });
         reject(error);
       });
@@ -748,17 +817,15 @@ class BilibiliExtractor {
    * @param {Array} videoIds - Array of video IDs
    * @returns {Promise<Array>} - Array of video details
    */
-  async getVideoDetailsForSearch(videoIds) {
-    const _results = [];
-    
+  async getVideoDetailsForSearch(videoIds: string[]): Promise<SearchResult[]> {
     // Dynamic concurrent limit based on number of videos
     const maxConcurrent = Math.min(5, Math.max(2, Math.ceil(videoIds.length / 3)));
-    
+
     logger.debug("Starting batch video details extraction", {
       totalVideos: videoIds.length,
       concurrentLimit: maxConcurrent
     });
-    
+
     // Process all videos concurrently with Promise.allSettled for better performance
     const allPromises = videoIds.map(async (videoId, index) => {
       try {
@@ -767,26 +834,26 @@ class BilibiliExtractor {
         if (delay > 0) {
           await new Promise(resolve => setTimeout(resolve, delay));
         }
-        
+
         // Convert numeric ID to BV format URL
         const videoUrl = `https://www.bilibili.com/video/av${videoId}`;
-        
+
         // Reduced timeout for faster processing
-        const timeoutPromise = new Promise((_, reject) => {
+        const timeoutPromise = new Promise<never>((_, reject) => {
           setTimeout(() => {
             reject(new Error(`Video info timeout for ${videoId}`));
           }, 8000); // Reduced to 8 seconds per video
         });
-        
+
         const videoInfo = await Promise.race([
           this.getVideoInfo(videoUrl),
           timeoutPromise
         ]);
-        
+
         if (videoInfo.success) {
           return {
             title: videoInfo.title,
-            id: videoInfo.id,
+            id: videoInfo.id as string,
             url: videoInfo.url,
             duration: videoInfo.duration || 'Unknown',
             uploader: videoInfo.uploader || 'Unknown',
@@ -796,31 +863,34 @@ class BilibiliExtractor {
           };
         }
       } catch (error) {
-        logger.warn("Failed to get video details", { 
-          videoId, 
-          error: error.message 
+        logger.warn("Failed to get video details", {
+          videoId,
+          error: (error as Error).message
         });
         // Continue with other videos even if one fails
       }
       return null;
     });
-    
+
     // Wait for all requests to complete
     const allResults = await Promise.allSettled(allPromises);
-    
+
     // Filter successful results and maintain original order
-    const successfulResults = allResults
-      .filter(result => result.status === 'fulfilled' && result.value)
+    type SearchResultWithIndex = SearchResult & { index: number };
+    const successfulResults = (allResults as PromiseSettledResult<SearchResult | null>[])
+      .filter((result): result is PromiseFulfilledResult<SearchResultWithIndex> =>
+        result.status === 'fulfilled' && result.value !== null && result.value !== undefined
+      )
       .map(result => result.value)
       .sort((a, b) => a.index - b.index) // Maintain original order
       .map(({ index: _index, ...rest }) => rest); // Remove index field (underscore to satisfy lint)
-    
+
     logger.debug("Batch video details extraction completed", {
       totalRequested: videoIds.length,
       successfulResults: successfulResults.length,
       failedResults: videoIds.length - successfulResults.length
     });
-    
+
     return successfulResults;
   }
 
@@ -829,15 +899,15 @@ class BilibiliExtractor {
    * @param {string} output - Raw yt-dlp output
    * @returns {Array} - Parsed search results
    */
-  parseSearchResults(output) {
+  parseSearchResults(output: string): SearchResult[] {
     const lines = output.trim().split('\n').filter(line => line.trim());
-    const results = [];
+    const results: SearchResult[] = [];
 
     for (const line of lines) {
       const parts = line.split('|||');
       if (parts.length >= 6) {
         const [title, id, duration, uploader, viewCount, thumbnail] = parts;
-        
+
         results.push({
           title: title.trim(),
           id: id.trim(),
@@ -854,4 +924,4 @@ class BilibiliExtractor {
   }
 }
 
-module.exports = BilibiliExtractor;
+export = BilibiliExtractor;

@@ -2,11 +2,68 @@
  * Bilibili API utilities for searching and fetching video information
  */
 
-const axios = require("axios");
-const logger = require("../services/logger_service");
-const config = require("../config/config");
+import axios from 'axios';
+import * as logger from '../services/logger_service';
+import config = require('../config/config');
+import HistoryStoreClass = require('../utils/history_store');
+
+type HistoryStoreInstance = InstanceType<typeof HistoryStoreClass>;
+
+interface VideoInfo {
+  bvid: string | undefined;
+  aid: number | undefined;
+  title: string;
+  author: string;
+  mid: number | undefined;
+  description: string;
+  pic: string;
+  duration: number;
+  pubdate: number | undefined;
+  view: number;
+  like: number;
+  danmaku: number;
+  tag: string;
+  tid: number;
+  url: string;
+  likeRate?: number;
+  qualificationReason?: string;
+}
+
+interface ParsedSearchResults {
+  videos: VideoInfo[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+interface ProcessCandidatesResult {
+  results: VideoInfo[];
+  meta: {
+    totalRaw: number;
+    dedupedCount: number;
+    partitionFilteredCount: number;
+    relevanceFilteredCount: number;
+    durationFilteredCount: number;
+    compilationFilteredCount: number;
+    qualifiedCount: number;
+    excludedByHistory: number;
+    softFallbackApplied: boolean;
+    returnedCount: number;
+  };
+}
+
+interface SearchHachimiResult {
+  results: VideoInfo[];
+  failReason?: string;
+  meta?: ProcessCandidatesResult['meta'];
+  error?: string;
+}
 
 class BilibiliAPI {
+  private baseURL: string;
+  private headers: Record<string, string>;
+  historyStore: HistoryStoreInstance | null;
+
   constructor() {
     this.baseURL = "https://api.bilibili.com";
     this.historyStore = null;
@@ -28,7 +85,7 @@ class BilibiliAPI {
    * Set the HistoryStore instance (injected from composition root)
    * @param {Object} historyStore - HistoryStore instance
    */
-  setHistoryStore(historyStore) {
+  setHistoryStore(historyStore: HistoryStoreInstance): void {
     this.historyStore = historyStore;
   }
 
@@ -39,7 +96,7 @@ class BilibiliAPI {
    * @param {number} pageSize - Number of results per page (default: 20)
    * @returns {Promise<Array>} Array of video objects
    */
-  async searchVideos(keyword, page = 1, pageSize = 20) {
+  async searchVideos(keyword: string, page = 1, pageSize = 20): Promise<VideoInfo[]> {
     try {
       logger.info("Searching Bilibili videos", {
         keyword,
@@ -80,7 +137,7 @@ class BilibiliAPI {
       }
     } catch (error) {
       logger.error("Error searching Bilibili videos", {
-        error: error.message,
+        error: (error as Error).message,
         keyword,
         page,
       });
@@ -94,23 +151,23 @@ class BilibiliAPI {
    * @param {Object} data - Raw search data from API
    * @returns {Object} Parsed video results
    */
-  parseSearchResults(data) {
-    const videos = [];
+  parseSearchResults(data: Record<string, unknown>): ParsedSearchResults {
+    const videos: VideoInfo[] = [];
 
     // Extract video results from the response
     // For endpoint: /x/web-interface/search/type?search_type=video
     // The response structure is: data.result: Array<Video>
     if (Array.isArray(data.result)) {
       for (const video of data.result) {
-        videos.push(this.parseVideoInfo(video));
+        videos.push(this.parseVideoInfo(video as Record<string, unknown>));
       }
     }
 
     return {
       videos,
-      total: data.numResults || 0,
-      page: data.page || 1,
-      pageSize: data.pagesize || 20,
+      total: (data.numResults as number) || 0,
+      page: (data.page as number) || 1,
+      pageSize: (data.pagesize as number) || 20,
     };
   }
 
@@ -119,24 +176,24 @@ class BilibiliAPI {
    * @param {Object} video - Raw video data
    * @returns {Object} Parsed video info
    */
-  parseVideoInfo(video) {
+  parseVideoInfo(video: Record<string, unknown>): VideoInfo {
     return {
-      bvid: video.bvid,
-      aid: video.aid,
-      title: video.title.replace(/<[^>]*>/g, ""), // Remove HTML tags
-      author: video.author,
-      mid: video.mid,
-      description: video.description || "",
-      pic: video.pic,
-      duration: this.parseDuration(video.duration),
-      pubdate: video.pubdate,
+      bvid: video.bvid as string | undefined,
+      aid: video.aid as number | undefined,
+      title: (video.title as string).replace(/<[^>]*>/g, ""), // Remove HTML tags
+      author: video.author as string,
+      mid: video.mid as number | undefined,
+      description: (video.description as string) || "",
+      pic: video.pic as string,
+      duration: this.parseDuration(video.duration as string),
+      pubdate: video.pubdate as number | undefined,
       // Note: search API often doesn't include like count; default to 0
-      view: video.play || 0,
+      view: (video.play as number) || 0,
       like: typeof video.like === "number" ? video.like : 0,
-      danmaku: video.danmaku || 0,
-      tag: video.tag || "",
+      danmaku: (video.danmaku as number) || 0,
+      tag: (video.tag as string) || "",
       tid: Number(video.typeid) || 0,
-      url: `https://www.bilibili.com/video/${video.bvid}`,
+      url: `https://www.bilibili.com/video/${video.bvid as string}`,
     };
   }
 
@@ -145,7 +202,7 @@ class BilibiliAPI {
    * @param {string} duration - Duration string (e.g., "03:45")
    * @returns {number} Duration in seconds
    */
-  parseDuration(duration) {
+  parseDuration(duration: string): number {
     if (!duration || typeof duration !== "string") return 0;
 
     const parts = duration.split(":").map(Number);
@@ -163,38 +220,40 @@ class BilibiliAPI {
    * @param {number} maxResults
    * @returns {Promise<Array>} 与 parseVideoInfo 结构一致的数组
    */
-  async _fallbackSearch(keyword, maxResults = 10) {
+  async _fallbackSearch(keyword: string, maxResults = 10): Promise<VideoInfo[]> {
     try {
-      const Extractor = require("./extractor");
+      // Lazy require to avoid circular import at module load time
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const Extractor: typeof import('./extractor') = require('./extractor');
       const extractor = new Extractor();
       const res = await extractor.searchVideos(keyword, maxResults);
       if (!res || res.success !== true || !Array.isArray(res.results))
         return [];
 
       // 将 extractor 的结果映射为 BilibiliAPI 的视频结构
-      return res.results.map((item) => ({
-        bvid: item.id || undefined,
+      return (res.results as unknown as Record<string, unknown>[]).map((item: Record<string, unknown>) => ({
+        bvid: (item.id as string) || undefined,
         aid: undefined,
-        title: item.title || "",
-        author: item.uploader || "",
+        title: (item.title as string) || "",
+        author: (item.uploader as string) || "",
         mid: undefined,
         description: "",
-        pic: item.thumbnail || "",
+        pic: (item.thumbnail as string) || "",
         duration: typeof item.duration === "number" ? item.duration : 0,
         pubdate: undefined,
         view:
           (typeof item.viewCount === "number"
             ? item.viewCount
-            : parseInt(item.viewCount || 0, 10)) || 0,
+            : parseInt((item.viewCount as string) || "0", 10)) || 0,
         like: 0,
         danmaku: 0,
         tag: "",
         tid: 0,
-        url: item.url,
+        url: item.url as string,
       }));
     } catch (err) {
       logger.warn("Fallback search via extractor failed", {
-        error: err.message,
+        error: (err as Error).message,
         keyword,
       });
       return [];
@@ -206,9 +265,9 @@ class BilibiliAPI {
    * @param {Array} videos
    * @returns {Array}
    */
-  filterQualityVideos(videos) {
+  filterQualityVideos(videos: VideoInfo[]): VideoInfo[] {
     if (!Array.isArray(videos)) return [];
-    const qualified = [];
+    const qualified: VideoInfo[] = [];
     for (const v of videos) {
       const views = Number(v.view || 0);
       const likes = Number(v.like || 0);
@@ -234,7 +293,7 @@ class BilibiliAPI {
    * @param {number[]} allowedTids - Allowed partition TIDs
    * @returns {Array}
    */
-  filterByPartition(videos, allowedTids) {
+  filterByPartition(videos: VideoInfo[], allowedTids: number[]): VideoInfo[] {
     if (!Array.isArray(videos) || !Array.isArray(allowedTids)) return [];
     const allowed = new Set(allowedTids);
     return videos.filter(v => v.tid === 0 || allowed.has(v.tid));
@@ -249,7 +308,7 @@ class BilibiliAPI {
    * @param {Array} videos
    * @returns {Array}
    */
-  filterByDuration(videos) {
+  filterByDuration(videos: VideoInfo[]): VideoInfo[] {
     if (!Array.isArray(videos)) return [];
     const max = config.bilibili.hachimiMaxDurationSec;
     const min = config.bilibili.hachimiMinDurationSec;
@@ -267,7 +326,7 @@ class BilibiliAPI {
    * @param {Array} videos
    * @returns {Array}
    */
-  filterCompilations(videos) {
+  filterCompilations(videos: VideoInfo[]): VideoInfo[] {
     if (!Array.isArray(videos)) return [];
     // "合集" / "总集" / "全集" / "合辑" — obvious compilation markers
     // "第X-Y话/集/期" — episode-range notation (e.g. "第01-24话")
@@ -291,7 +350,7 @@ class BilibiliAPI {
    * @param {Array} videos
    * @returns {Array}
    */
-  filterHachimiRelevance(videos) {
+  filterHachimiRelevance(videos: VideoInfo[]): VideoInfo[] {
     if (!Array.isArray(videos)) return [];
     return videos.filter(v => {
       const title = v.title || "";
@@ -306,15 +365,15 @@ class BilibiliAPI {
    * @returns {Promise<Array>} Array of qualified video objects
    */
   async fetchRawCandidates(
-    keyword,
+    keyword: string,
     { maxPages = 3, pageSize = 50, timeoutMs = 8000 } = {}
-  ) {
+  ): Promise<VideoInfo[]> {
     try {
       // Always include page 1 for relevance
       const pages = [1];
       // Randomly add 1-2 pages from [2,10]
       const extraCount = Math.floor(Math.random() * 2) + 1; // 1 or 2
-      const candidates = new Set();
+      const candidates = new Set<number>();
       for (let i = 0; i < extraCount; i++) {
         const p = 2 + Math.floor(Math.random() * 9); // 2..10
         candidates.add(p);
@@ -347,11 +406,11 @@ class BilibiliAPI {
       const responses = await Promise.allSettled(requests);
       clearTimeout(timeout);
 
-      const all = [];
+      const all: VideoInfo[] = [];
       let apiBlocked = false;
       for (const r of responses) {
         if (r.status === "fulfilled" && r.value?.data?.code === 0) {
-          const parsed = this.parseSearchResults(r.value.data.data);
+          const parsed = this.parseSearchResults(r.value.data.data as Record<string, unknown>);
           all.push(...parsed.videos);
         } else if (r.status === "fulfilled") {
           apiBlocked = true;
@@ -360,9 +419,10 @@ class BilibiliAPI {
             message: r.value?.data?.message,
           });
         } else {
+          const rejected = r as PromiseRejectedResult;
           logger.warn("Page fetch rejected", {
-            reason: r.reason?.message,
-            status: r.reason?.response?.status,
+            reason: (rejected.reason as Error)?.message,
+            status: ((rejected.reason as Record<string, unknown>)?.response as Record<string, unknown> | undefined)?.status,
           });
         }
       }
@@ -380,18 +440,18 @@ class BilibiliAPI {
       return all;
     } catch (error) {
       logger.warn("fetchRawCandidates failed, using fallback", {
-        error: error.message,
+        error: (error as Error).message,
       });
       return await this._fallbackSearch(keyword, 50);
     }
   }
 
-  processCandidates(rawList, guildId, maxResults = 5) {
+  processCandidates(rawList: VideoInfo[], guildId: string | null, maxResults = 5): ProcessCandidatesResult {
     // Deduplicate by bvid
-    const seen = new Set();
-    const deduped = [];
+    const seen = new Set<string>();
+    const deduped: VideoInfo[] = [];
     for (const v of Array.isArray(rawList) ? rawList : []) {
-      const id = v.bvid || v.aid || v.url;
+      const id = v.bvid || v.aid?.toString() || v.url;
       if (!id) continue;
       if (seen.has(id)) continue;
       seen.add(id);
@@ -407,7 +467,12 @@ class BilibiliAPI {
     // Compilation filter: reject obvious 合集/总集/排行 videos by title pattern
     const compilationFiltered = this.filterCompilations(durationFiltered);
     const qualified = this.filterQualityVideos(compilationFiltered);
-    const afterHistory = this.historyStore ? this.historyStore.filter(guildId, qualified) : qualified;
+    // historyStore.filter nominally takes string[] (bvids), but at runtime the
+    // session's filterHistory is called with VideoInfo objects — preserve this
+    // behaviour unchanged via a cast.
+    const afterHistory: VideoInfo[] = this.historyStore
+      ? (this.historyStore.filter(guildId!, qualified as unknown as string[]) as unknown as VideoInfo[])
+      : qualified;
     const softFallback = afterHistory.length === 0 && qualified.length > 0;
     const pool = softFallback ? qualified : afterHistory;
 
@@ -437,7 +502,7 @@ class BilibiliAPI {
     };
   }
 
-  async searchHachimiVideos(maxResults = 5, guildId = null) {
+  async searchHachimiVideos(maxResults = 5, guildId: string | null = null): Promise<SearchHachimiResult> {
     try {
       logger.info("Searching for Hachimi videos (Randomized)", {
         maxResults,
@@ -469,10 +534,10 @@ class BilibiliAPI {
       return { results, meta };
     } catch (error) {
       logger.error("Error searching Hachimi videos", {
-        error: error.message,
-        stack: error.stack,
+        error: (error as Error).message,
+        stack: (error as Error).stack,
       });
-      return { results: [], failReason: "exception", error: error.message };
+      return { results: [], failReason: "exception", error: (error as Error).message };
     }
   }
 
@@ -481,7 +546,7 @@ class BilibiliAPI {
    * @param {string} bvid - Bilibili video ID
    * @returns {Promise<Object>} Video details
    */
-  async getVideoDetails(bvid) {
+  async getVideoDetails(bvid: string): Promise<unknown> {
     try {
       const url = `${this.baseURL}/x/web-interface/view`;
       const params = { bvid };
@@ -501,7 +566,7 @@ class BilibiliAPI {
       return response.data.data;
     } catch (error) {
       logger.error("Error getting video details", {
-        error: error.message,
+        error: (error as Error).message,
         bvid,
       });
       throw error;
@@ -509,4 +574,4 @@ class BilibiliAPI {
   }
 }
 
-module.exports = new BilibiliAPI();
+export = new BilibiliAPI();
