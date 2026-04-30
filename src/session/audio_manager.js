@@ -4,7 +4,7 @@
  * Player instances are stored in GuildSession via SessionManager.
  */
 
-const AudioPlayer = require("../playback/audio_player");
+const AudioPlayer = require("../audio/audio_player");
 const logger = require("../services/logger_service");
 
 class AudioManager {

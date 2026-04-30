@@ -36,7 +36,7 @@ jest.mock("../../src/services/logger_service", () => ({
 }));
 
 const AudioManager = require("../../src/session/audio_manager");
-const AudioPlayer = require("../../src/playback/audio_player");
+const AudioPlayer = require("../../src/audio/audio_player");
 
 function mkSessionManager() {
   const sessions = new Map();

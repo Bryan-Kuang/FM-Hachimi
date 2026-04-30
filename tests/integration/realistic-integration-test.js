@@ -141,7 +141,7 @@ class RealisticIntegrationTest {
       // 这里我们不能真正创建语音连接（没有真实的语音频道）
       // 但我们可以测试连接创建的时间和逻辑
 
-      const AudioPlayer = require("../../src/playback/audio_player");
+      const AudioPlayer = require("../../src/audio/audio_player");
       const player = new AudioPlayer();
 
       // 测试waitForVoiceConnection的超时逻辑

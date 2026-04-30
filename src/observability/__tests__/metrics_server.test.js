@@ -1,4 +1,4 @@
-jest.mock("../../../services/logger_service", () => ({
+jest.mock("../../services/logger_service", () => ({
   info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn(),
 }));
 
