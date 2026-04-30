@@ -14,11 +14,13 @@ export interface TrackData {
   url?: string;
   originalUrl?: string;
   normalizedUrl?: string;
+  id?: string;
+  videoId?: string;
   duration: number;          // seconds; 0 = unknown
   thumbnail?: string;
   author?: string;
   platform?: 'bilibili';
-  extractedAt?: number;      // Date.now() at extraction time
+  extractedAt?: string;      // ISO 8601 string from new Date().toISOString()
 }
 
 /** UI message reference stored in GuildSession */
@@ -30,7 +32,7 @@ export interface UiContext {
 /** Shape of a Track's requestedBy field */
 export interface Requester {
   id: UserId;
-  tag: string;   // Discord displayName
+  tag: string;   // Discord mention string, e.g. "<@123456789>"
 }
 
 /** Return type of validateEnv() */
