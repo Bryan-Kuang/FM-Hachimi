@@ -5,32 +5,31 @@
  * and UI context in one place.
  */
 
-const GuildSession = require("./guild_session");
-const logger = require("../services/logger_service");
+import GuildSession = require('./guild_session');
+import * as logger from '../services/logger_service';
 
 class SessionManager {
+  /** Public so audio_manager and progress_tracker can iterate all sessions. */
+  sessions: Map<string, GuildSession>;
+
   constructor() {
-    this.sessions = new Map(); // Guild ID -> GuildSession
+    this.sessions = new Map();
   }
 
   /**
-   * Get or create a session for the given guild
-   * @param {string} guildId - Discord guild ID
-   * @returns {GuildSession}
+   * Get or create a session for the given guild.
    */
-  get(guildId) {
+  get(guildId: string): GuildSession {
     if (!this.sessions.has(guildId)) {
       this.sessions.set(guildId, new GuildSession(guildId));
     }
-    return this.sessions.get(guildId);
+    return this.sessions.get(guildId) as GuildSession;
   }
 
   /**
-   * Check if a session exists for the given guild
-   * @param {string} guildId - Discord guild ID
-   * @returns {boolean}
+   * Check if a session exists for the given guild.
    */
-  has(guildId) {
+  has(guildId: string): boolean {
     return this.sessions.has(guildId);
   }
 
@@ -38,10 +37,8 @@ class SessionManager {
    * Remove and clean up a guild session.
    * This is the central cleanup point — player, progress tracker, and UI
    * context are all torn down here instead of being scattered across modules.
-   * @param {string} guildId - Discord guild ID
-   * @returns {boolean} Whether a session was removed
    */
-  remove(guildId) {
+  remove(guildId: string): boolean {
     const session = this.sessions.get(guildId);
     if (!session) return false;
 
@@ -64,6 +61,7 @@ class SessionManager {
     // 2. Leave voice channel and clean up player
     if (session.player) {
       try {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
         session.player.leaveVoiceChannel();
       } catch (_) { /* ignore */ }
       session.player = null;
@@ -76,27 +74,26 @@ class SessionManager {
     // 4. Delete the session
     this.sessions.delete(guildId);
 
-    logger.info("Guild session removed", { guildId });
+    logger.info('Guild session removed', { guildId });
     return true;
   }
 
   /**
-   * Remove and clean up all sessions
+   * Remove and clean up all sessions.
    */
-  cleanup() {
+  cleanup(): void {
     for (const guildId of this.sessions.keys()) {
       this.remove(guildId);
     }
-    logger.info("All guild sessions cleaned up");
+    logger.info('All guild sessions cleaned up');
   }
 
   /**
-   * Number of active sessions
-   * @returns {number}
+   * Number of active sessions.
    */
-  get size() {
+  get size(): number {
     return this.sessions.size;
   }
 }
 
-module.exports = SessionManager;
+export = SessionManager;

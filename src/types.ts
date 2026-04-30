@@ -41,3 +41,25 @@ export interface EnvValidationResult {
   errors: string[];
   warnings: string[];
 }
+
+/**
+ * Shape of a running progress-tracker stored on GuildSession.progressTracker.
+ * Defined here (types.ts) so guild_session.ts, session_manager.ts, and
+ * progress_tracker.ts all share the same interface without circular deps.
+ */
+export interface ProgressTrackerState {
+  message: unknown;                             // Discord Message object
+  guildId: string;
+  getPlayerState: () => unknown;                // callback → player state
+  timer: ReturnType<typeof setTimeout> | null;
+  stopped: boolean;
+  lastSignature: string | null;
+  nextTickAt: number;
+  cooldownUntil: number;
+  consecutiveSlowEdits: number;
+  cooldownStreak: number;
+  lastCooldownEndedAt: number;
+  slowEditThresholdMs: number;
+  slowEditStreakLimit: number;
+  cooldownMs: number;
+}

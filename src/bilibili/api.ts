@@ -467,11 +467,10 @@ class BilibiliAPI {
     // Compilation filter: reject obvious 合集/总集/排行 videos by title pattern
     const compilationFiltered = this.filterCompilations(durationFiltered);
     const qualified = this.filterQualityVideos(compilationFiltered);
-    // historyStore.filter nominally takes string[] (bvids), but at runtime the
-    // session's filterHistory is called with VideoInfo objects — preserve this
-    // behaviour unchanged via a cast.
+    // historyStore.filter is now generic (T extends { bvid: string }) so no
+    // cast is needed — VideoInfo has a `bvid` field.
     const afterHistory: VideoInfo[] = this.historyStore
-      ? (this.historyStore.filter(guildId!, qualified as unknown as string[]) as unknown as VideoInfo[])
+      ? this.historyStore.filter(guildId!, qualified)
       : qualified;
     const softFallback = afterHistory.length === 0 && qualified.length > 0;
     const pool = softFallback ? qualified : afterHistory;
