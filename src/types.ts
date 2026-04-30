@@ -43,6 +43,30 @@ export interface EnvValidationResult {
 }
 
 /**
+ * Snapshot of the AudioPlayer state passed from InterfaceUpdater to
+ * ProgressTracker via the `getPlayerState` callback.
+ */
+export interface PlayerState {
+  currentTrack: {
+    title?: string;
+    duration?: number;
+    bvid?: string;
+    url?: string;
+    thumbnail?: string;
+    requestedBy?: string;
+    audioUrl?: string;
+    [key: string]: unknown;
+  } | null;
+  isPlaying: boolean;
+  currentTime: number;
+  currentIndex: number;
+  queueLength: number;
+  loopMode: string;
+  hasPrevious: boolean;
+  hasNext: boolean;
+}
+
+/**
  * Shape of a running progress-tracker stored on GuildSession.progressTracker.
  * Defined here (types.ts) so guild_session.ts, session_manager.ts, and
  * progress_tracker.ts all share the same interface without circular deps.
@@ -53,7 +77,7 @@ export interface ProgressTrackerState {
   getPlayerState: () => unknown;                // callback → player state
   timer: ReturnType<typeof setTimeout> | null;
   stopped: boolean;
-  lastSignature: string | null;
+  lastSignature: number | null; // Bob Jenkins hash of last rendered embed payload
   nextTickAt: number;
   cooldownUntil: number;
   consecutiveSlowEdits: number;
