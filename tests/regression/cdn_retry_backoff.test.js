@@ -17,7 +17,7 @@ jest.mock("../../src/services/logger_service", () => ({
   info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn(),
 }));
 
-const AudioPlayer = require("../../src/playback/audio_player");
+const AudioPlayer = require("../../src/audio/audio_player");
 const config = require("../../src/config/config");
 
 describe("regression: CDN retry exponential backoff", () => {

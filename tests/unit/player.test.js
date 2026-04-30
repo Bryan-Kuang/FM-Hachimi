@@ -10,7 +10,7 @@ jest.mock("../../src/services/logger_service", () => ({
   debug: jest.fn(),
 }));
 
-const AudioPlayer = require("../../src/playback/audio_player");
+const AudioPlayer = require("../../src/audio/audio_player");
 
 describe("AudioPlayer", () => {
   let player;

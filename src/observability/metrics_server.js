@@ -10,7 +10,7 @@
 
 const http = require("http");
 const { registry } = require("./metrics");
-const logger = require("../../services/logger_service");
+const logger = require("../services/logger_service");
 
 function createMetricsServer({ port, host } = {}) {
   const listenPort = Number(port ?? process.env.METRICS_PORT ?? 9090);

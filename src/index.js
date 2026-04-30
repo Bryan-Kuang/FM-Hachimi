@@ -17,7 +17,7 @@ const DailyHachimiService = require("./services/daily_hachimi_service");
 const logger = require("./services/logger_service");
 const TokenPrecheck = require("./utils/token_precheck");
 const Debug = require("./utils/debug");
-const { startMetricsServerFromEnv } = require("./infra/observability/metrics_server");
+const { startMetricsServerFromEnv } = require("./observability/metrics_server");
 
 class BilibiliDiscordBot {
   constructor() {

@@ -61,7 +61,7 @@ jest.mock("@discordjs/voice", () => {
 });
 
 const { AudioPlayerStatus } = require("@discordjs/voice");
-const AudioPlayer = require("../../src/playback/audio_player");
+const AudioPlayer = require("../../src/audio/audio_player");
 
 function emitPlaying(player) {
   player.audioPlayer.emit(AudioPlayerStatus.Playing);
