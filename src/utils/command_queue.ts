@@ -49,7 +49,7 @@ class CommandQueueManager {
     this.queues = new Map();
   }
 
-  private getQueue(guildId: string, command: string): GuildCommandQueue {
+  getQueue(guildId: string, command: string): GuildCommandQueue {
     const key = `${guildId}:${command}`;
     if (!this.queues.has(key)) {
       this.queues.set(key, new GuildCommandQueue());
