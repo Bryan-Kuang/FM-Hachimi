@@ -1,0 +1,127 @@
+name: CI / CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Test ────────────────────────────────────────────────────────────────────
+  # Runs on every push and every PR targeting main.
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+        env:
+          TEST_MODE: true
+          NODE_ENV: test
+          HUSKY: 0
+
+  # ── Deploy ───────────────────────────────────────────────────────────────────
+  # Runs only on pushes to main (not PRs), and only after test passes.
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Deploy to Oracle Cloud
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          # TCP connect timeout and total command timeout.
+          # Guards against the Oracle VPS silently dropping the connection.
+          timeout: 30s
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            cd ~/bilibili-bot
+
+            # `timeout` wraps each network-bound step so a stuck git or
+            # docker build fails loudly instead of wedging the runner.
+            echo "[deploy] fetching origin/main..."
+            timeout 120 git fetch --prune origin main
+
+            # --ff-only refuses to clobber unexpected local commits (e.g. a
+            # hand-edited hotfix). Surfaces divergence as a visible failure.
+            echo "[deploy] fast-forward pulling..."
+            timeout 60 git pull --ff-only origin main
+
+            # Ensure host-mounted directories exist before docker-compose
+            # creates them — Docker auto-creates missing bind-mount sources as
+            # root-owned dirs which the node user cannot write to.
+            mkdir -p data logs
+
+            echo "[deploy] rebuilding containers..."
+            timeout 600 docker-compose up -d --build
+
+            echo "[deploy] pruning unused images..."
+            timeout 60 docker image prune -f
+
+            # Wait up to 90 s for Docker's own HEALTHCHECK to report healthy.
+            # The healthcheck has start_period=40s then runs every 30s, so the
+            # earliest "healthy" result appears at ~40-50 s after container start.
+            echo "[deploy] waiting for container to be healthy..."
+            CONTAINER=$(docker-compose ps -q 2>/dev/null | head -1)
+            if [ -n "$CONTAINER" ]; then
+              for i in $(seq 1 18); do
+                STATUS=$(docker inspect --format='{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo unknown)
+                HEALTH=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$CONTAINER" 2>/dev/null || echo unknown)
+
+                if [ "$STATUS" = "exited" ] || [ "$STATUS" = "dead" ]; then
+                  echo "[deploy] container exited unexpectedly (status=$STATUS)."
+                  docker-compose logs --tail=50
+                  exit 1
+                fi
+
+                if [ "$STATUS" = "running" ] && { [ "$HEALTH" = "healthy" ] || [ "$HEALTH" = "none" ]; }; then
+                  echo "[deploy] container is running and $HEALTH."
+                  break
+                fi
+
+                echo "[deploy] status=$STATUS health=$HEALTH, waiting... ($i/18)"
+                sleep 5
+              done
+
+              # Final gate: fail explicitly if Docker marked it unhealthy
+              HEALTH=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$CONTAINER" 2>/dev/null || echo unknown)
+              if [ "$HEALTH" = "unhealthy" ]; then
+                echo "[deploy] container is unhealthy after timeout."
+                docker-compose logs --tail=50
+                exit 1
+              fi
+            fi
+
+            echo "[deploy] done."
+
+      # Post a Discord embed when any step in this job fails.
+      # Requires the DISCORD_WEBHOOK_URL secret to be set in repository settings.
+      - name: Notify Discord on failure
+        if: failure()
+        run: |
+          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"embeds\":[{\"title\":\"🚨 Deploy Failed\",\"color\":15158332,\"description\":\"**Branch:** \`${{ github.ref_name }}\`\\n**By:** \`${{ github.actor }}\`\\n**Commit:** \`${{ github.sha }}\`\\n[View run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\"}]}"
