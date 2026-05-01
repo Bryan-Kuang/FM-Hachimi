@@ -3,6 +3,10 @@
  * Registers slash commands with Discord API
  */
 
+// Register ts-node so require() can load TypeScript source files directly.
+// transpileOnly skips type-checking for speed (tsc --noEmit handles that separately).
+require("ts-node").register({ transpileOnly: true });
+
 const { REST, Routes } = require("discord.js");
 const config = require("../src/config/config");
 const logger = require("../src/services/logger_service");
