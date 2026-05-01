@@ -1,0 +1,497 @@
+/**
+ * Discord Bot Client Setup
+ * Initializes the Discord bot with proper intents and event handling
+ */
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import {
+  Client,
+  GatewayIntentBits,
+  Collection,
+  ActivityType,
+  MessageFlags,
+  ChatInputCommandInteraction,
+  Guild,
+  AuditLogEvent,
+  VoiceState,
+} from 'discord.js';
+import * as logger from '../services/logger_service';
+import config = require('../config/config');
+import Debug = require('../utils/debug');
+
+// Augment discord.js Client with bot-specific properties
+declare module 'discord.js' {
+  interface Client {
+    commands:  Collection<string, CommandDef>;
+    cooldowns: Collection<string, Collection<string, number>>;
+    extractor: any | null;
+  }
+}
+
+interface CommandDef {
+  data:     { name: string };
+  execute:  (interaction: ChatInputCommandInteraction<'cached'>) => Promise<void>;
+  cooldown?: number;
+}
+
+interface TrackInfo {
+  title?: string;
+  url?:   string;
+}
+
+interface GuildContext {
+  channelId: string;
+}
+
+interface BotStats {
+  ready:     boolean;
+  uptime:    number;
+  guilds:    number;
+  users:     number;
+  username?: string;
+  id?:       string;
+}
+
+class BotClient {
+  private playbackService:     any;
+  private queueService:        any;
+  private dailyHachimiService: any;
+  public  client:    Client;
+  public  isReady:   boolean;
+  private startTime: Date | null;
+
+  /**
+   * @param playbackService      - PlaybackService instance
+   * @param queueService         - QueueService instance
+   * @param dailyHachimiService  - DailyHachimiService instance (optional)
+   */
+  constructor(playbackService: any, queueService?: any, dailyHachimiService?: any) {
+    this.playbackService     = playbackService;
+    this.queueService        = queueService;
+    this.dailyHachimiService = dailyHachimiService ?? null;
+
+    // Initialize Discord client with required intents
+    this.client = new Client({
+      intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+      ],
+    });
+
+    // Collections to store commands and cooldowns
+    this.client.commands  = new Collection<string, CommandDef>();
+    this.client.cooldowns = new Collection<string, Collection<string, number>>();
+
+    // Store extractor instance for command access
+    this.client.extractor = null;
+
+    // Track bot status
+    this.isReady   = false;
+    this.startTime = null;
+  }
+
+  /**
+   * Initialize the bot client
+   * @param interfaceUpdater - InterfaceUpdater instance
+   */
+  async initialize(interfaceUpdater: any): Promise<boolean> {
+    try {
+      logger.info('Initializing Discord bot client');
+      Debug.trace('client.initialize.begin');
+
+      this.setupEventHandlers();
+      Debug.trace('client.events.bound');
+
+      await this.loadCommands();
+      Debug.trace('client.commands.loaded');
+
+      await this.login();
+      Debug.trace('client.login.done');
+
+      try {
+        interfaceUpdater.setClient(this.client);
+        interfaceUpdater.bind(this.playbackService);
+        Debug.trace('client.bind.interface_updater');
+      } catch (e: unknown) {
+        logger.error('Failed to bind UI updater', { error: (e as Error).message });
+        Debug.error('client.bind.failed', e as Error);
+      }
+
+      logger.info('Discord bot client initialized successfully');
+      Debug.trace('client.initialize.success');
+      return true;
+    } catch (error: unknown) {
+      logger.error('Failed to initialize Discord bot client', {
+        error: (error as Error).message,
+        stack: (error as Error).stack,
+      });
+      Debug.error('client.initialize.failed', error as Error);
+      throw error;
+    }
+  }
+
+  /**
+   * Set up Discord event handlers
+   */
+  setupEventHandlers(): void {
+    const playbackService = this.playbackService;
+
+    // Bot ready event
+    this.client.once('clientReady', () => {
+      this.isReady   = true;
+      this.startTime = new Date();
+
+      logger.info('Discord bot is ready!', {
+        username: this.client.user!.username,
+        id:       this.client.user!.id,
+        guilds:   this.client.guilds.cache.size,
+      });
+      Debug.trace('client.event.ready');
+
+      this.client.user!.setActivity('寻找蜂蜜饮料中...', {
+        type: ActivityType.Custom,
+      });
+    });
+
+    // Voice state update event — handle disconnects and debug logging
+    this.client.on('voiceStateUpdate', (oldState: VoiceState, newState: VoiceState) => {
+      logger.debug('Voice state update', {
+        userId:     newState.id,
+        oldChannel: oldState.channelId,
+        newChannel: newState.channelId,
+      });
+      Debug.trace('client.event.voiceStateUpdate', {
+        userId:     newState.id,
+        oldChannel: oldState.channelId,
+        newChannel: newState.channelId,
+      });
+
+      // Check if bot was disconnected from a voice channel
+      if (
+        oldState.member?.id === this.client.user?.id &&
+        oldState.channel &&
+        !newState.channel
+      ) {
+        logger.info('Bot was disconnected from voice channel', {
+          guild:   oldState.guild.name,
+          channel: oldState.channel.name,
+        });
+
+        const player = playbackService.getPlayer(oldState.guild.id);
+        let currentTrack: TrackInfo | null = null;
+
+        if (player) {
+          // Capture current track before tearing down — sendDisconnectMessage uses it
+          currentTrack = player.currentTrack as TrackInfo | null;
+          // Use leaveVoiceChannel (not stop) so voiceConnection is cleared immediately
+          player.leaveVoiceChannel();
+          playbackService.clearUIContext(oldState.guild.id);
+
+          logger.info('Player torn down due to voice disconnect', {
+            guild: oldState.guild.name,
+          });
+        }
+
+        this.sendDisconnectMessage(oldState.guild, currentTrack).catch((err: Error) => {
+          logger.warn('Failed to send disconnect message', { error: err.message });
+        });
+      }
+    });
+
+    // Load interaction handlers
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const createInteractionHandler = require('./events/interactionCreate') as (
+      ps: any,
+      qs: any,
+    ) => { execute: (i: any) => Promise<void> };
+    const interactionHandler = createInteractionHandler(playbackService, this.queueService);
+
+    // Interaction handling (slash commands, buttons, and select menus)
+    this.client.on('interactionCreate', async (interaction: any) => {
+      // Handle button interactions
+      if (interaction.isButton()) {
+        return await interactionHandler.execute(interaction);
+      }
+
+      // Handle select menu interactions
+      if (interaction.isStringSelectMenu()) {
+        return await interactionHandler.execute(interaction);
+      }
+
+      // Handle slash commands
+      if (!interaction.isChatInputCommand()) return;
+
+      const command = this.client.commands.get(interaction.commandName);
+      if (!command) {
+        logger.warn('Unknown command received', {
+          commandName: interaction.commandName,
+          userId:      interaction.user.id,
+        });
+        return;
+      }
+
+      try {
+        if (this.checkCooldown(interaction, command)) return;
+
+        await command.execute(interaction);
+
+        logger.info('Command executed successfully', {
+          command: interaction.commandName,
+          user:    interaction.user.username,
+          guild:   interaction.guild?.name,
+        });
+      } catch (error: unknown) {
+        logger.error('Command execution failed', {
+          command: interaction.commandName,
+          user:    interaction.user.username,
+          error:   (error as Error).message,
+          stack:   (error as Error).stack,
+        });
+
+        const errorMessage = 'Sorry, there was an error executing this command!';
+
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp({ content: errorMessage, flags: MessageFlags.Ephemeral });
+        } else {
+          await interaction.reply({ content: errorMessage, flags: MessageFlags.Ephemeral });
+        }
+      }
+    });
+
+    // Error handling
+    this.client.on('error', (error: Error) => {
+      logger.error('Discord client error', { error: error.message, stack: error.stack });
+      Debug.error('client.event.error', error);
+    });
+
+    this.client.on('warn', (warning: string) => {
+      logger.warn('Discord client warning', { warning });
+      Debug.trace('client.event.warn', { warning });
+    });
+  }
+
+  /**
+   * Send a humorous message when bot is manually disconnected
+   */
+  async sendDisconnectMessage(guild: Guild, currentTrack: TrackInfo | null): Promise<void> {
+    try {
+      const context = this.playbackService.getUIContext(guild.id) as GuildContext | null;
+      if (!context || !context.channelId) {
+        logger.debug('No text channel context for disconnect message');
+        return;
+      }
+
+      const channel = await this.client.channels.fetch(context.channelId).catch(() => null) as any;
+      if (!channel) {
+        logger.debug('Failed to fetch text channel for disconnect message');
+        return;
+      }
+
+      // Try to find who disconnected the bot from audit logs
+      let culprit = '未知凶手';
+      try {
+        const auditLogs: any = await guild.fetchAuditLogs({
+          type:  AuditLogEvent.MemberDisconnect,
+          limit: 5,
+        });
+
+        const matchingLogs = auditLogs.entries.filter((entry: any) => {
+          return (
+            entry.target?.id === this.client.user?.id &&
+            Date.now() - entry.createdTimestamp < 5000
+          );
+        });
+
+        if (matchingLogs.size > 0) {
+          const mostRecent = Array.from(matchingLogs.values() as Iterable<any>).reduce(
+            (prev: any, current: any) =>
+              current.createdTimestamp > prev.createdTimestamp ? current : prev,
+          );
+          culprit = mostRecent.executor?.displayName || mostRecent.executor?.username;
+        }
+      } catch (auditError: unknown) {
+        logger.debug('Failed to fetch audit logs for disconnect', {
+          error: (auditError as Error).message,
+        });
+        // Continue with unknown culprit
+      }
+
+      // Build the message
+      const guildMember = (guild as any).members?.me;
+      const botName     = guildMember?.displayName || this.client.user?.username;
+      let message       = `饿啊～\n**${botName}** 被谋害了，凶手是 **${culprit}**`;
+
+      if (currentTrack && currentTrack.title) {
+        message += `\n遗言是：**${currentTrack.title}**`;
+      }
+
+      await channel.send(message);
+
+      logger.info('Sent disconnect message', {
+        guild:    guild.name,
+        culprit,
+        hadTrack: !!currentTrack,
+      });
+    } catch (error: unknown) {
+      logger.error('Error sending disconnect message', {
+        error: (error as Error).message,
+      });
+    }
+  }
+
+  /**
+   * Load slash commands.
+   * Commands that export a factory function receive playbackService;
+   * commands that export a plain object are used as-is.
+   */
+  async loadCommands(): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const commandModules: any[] = [
+      require('./commands/play'),
+      require('./commands/pause'),
+      require('./commands/resume'),
+      require('./commands/skip'),
+      require('./commands/prev'),
+      require('./commands/stop'),
+      require('./commands/queue'),
+      require('./commands/nowplaying'),
+      require('./commands/help'),
+      require('./commands/search'),
+      require('./commands/hachimi'),
+      require('./commands/daily_hachimi'),
+    ];
+
+    for (const mod of commandModules) {
+      try {
+        // Factory functions receive (playbackService, queueService[, dailyHachimiService]);
+        // plain objects used as-is.
+        const command: any = typeof mod === 'function'
+          ? mod(this.playbackService, this.queueService, this.dailyHachimiService)
+          : mod;
+
+        if (command.data && command.execute) {
+          this.client.commands.set(command.data.name, command);
+          logger.debug('Loaded command', { name: command.data.name });
+        } else {
+          logger.warn('Invalid command structure', { command });
+        }
+      } catch (e: unknown) {
+        Debug.error('command.load.failed', e as Error);
+        throw e;
+      }
+    }
+
+    logger.info('Commands loaded', { count: this.client.commands.size });
+    Debug.trace('client.commands.count', { count: this.client.commands.size });
+  }
+
+  /**
+   * Check command cooldowns
+   */
+  checkCooldown(interaction: any, command: CommandDef): boolean {
+    const cooldownAmount = (command.cooldown ?? 3) * 1000;
+    const timestamps     = this.client.cooldowns;
+
+    if (!timestamps.has(command.data.name)) {
+      timestamps.set(command.data.name, new Collection<string, number>());
+    }
+
+    const now               = Date.now();
+    const commandTimestamps = timestamps.get(command.data.name)!;
+    const userId            = interaction.user.id as string;
+
+    if (commandTimestamps.has(userId)) {
+      const storedTime     = commandTimestamps.get(userId)!;
+      const expirationTime = storedTime + cooldownAmount;
+
+      if (now < expirationTime) {
+        const timeLeft = (expirationTime - now) / 1000;
+        interaction.reply({
+          content: `Please wait ${timeLeft.toFixed(1)} more second(s) before reusing the \`${command.data.name}\` command.`,
+          flags:   MessageFlags.Ephemeral,
+        });
+        return true;
+      }
+    }
+
+    commandTimestamps.set(userId, now);
+    setTimeout(() => commandTimestamps.delete(userId), cooldownAmount);
+    return false;
+  }
+
+  /**
+   * Login to Discord
+   */
+  async login(): Promise<void> {
+    if (!config.discord.token) {
+      throw new Error('Discord token is not configured');
+    }
+
+    try {
+      await this.client.login(config.discord.token);
+      logger.info('Successfully logged in to Discord');
+      Debug.trace('client.login.success');
+    } catch (error: unknown) {
+      logger.error('Failed to login to Discord', {
+        error: (error as Error).message,
+        code:  (error as any).code,
+      });
+      Debug.error('client.login.failed', error as Error);
+      throw error;
+    }
+  }
+
+  /**
+   * Set the Bilibili extractor instance
+   */
+  setExtractor(extractor: any): void {
+    this.client.extractor = extractor;
+    logger.info('Bilibili extractor attached to Discord client');
+  }
+
+  /**
+   * Get bot statistics
+   */
+  getStats(): BotStats {
+    if (!this.isReady) {
+      return { ready: false, uptime: 0, guilds: 0, users: 0 };
+    }
+
+    const uptime = this.startTime ? Date.now() - this.startTime.getTime() : 0;
+
+    return {
+      ready:    true,
+      uptime:   Math.floor(uptime / 1000),
+      guilds:   this.client.guilds.cache.size,
+      users:    this.client.users.cache.size,
+      username: this.client.user?.username,
+      id:       this.client.user?.id,
+    };
+  }
+
+  /**
+   * Gracefully shutdown the bot
+   */
+  async shutdown(): Promise<void> {
+    logger.info('Shutting down Discord bot');
+    try {
+      if (this.isReady) {
+        await this.client.destroy();
+      }
+      logger.info('Discord bot shutdown complete');
+    } catch (error: unknown) {
+      logger.error('Error during bot shutdown', { error: (error as Error).message });
+    }
+  }
+
+  /**
+   * Get the Discord client instance
+   */
+  getClient(): Client {
+    return this.client;
+  }
+}
+
+export = BotClient;
