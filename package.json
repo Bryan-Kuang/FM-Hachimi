@@ -2,10 +2,10 @@
   "name": "bilibili-discord-bot",
   "version": "1.0.0",
   "description": "Discord bot for streaming Bilibili video audio",
-  "main": "src/index.js",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
+    "start": "node dist/index.js",
+    "dev": "nodemon src/index.ts",
     "tools": "node scripts/tools/bot-tools.js",
     "docker:dev": "docker compose -f docker-compose.dev.yml up",
     "docker:build": "bash scripts/deploy/build.sh",

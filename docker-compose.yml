@@ -53,7 +53,7 @@ services:
 
     # Health check
     healthcheck:
-      test: ["CMD", "node", "-e", "require('./src/index.js')"]
+      test: ["CMD", "node", "-e", "require('./dist/index.js')"]
       interval: 30s
       timeout: 10s
       retries: 3
