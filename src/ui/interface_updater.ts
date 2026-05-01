@@ -137,6 +137,10 @@ class InterfaceUpdater {
           try {
             await channel.messages.edit(ctx.messageId, { components: [] });
           } catch (_) { /* message may already be deleted */ }
+          // Stale-check before sending: a newer handleUpdate() may have already
+          // sent its own message. If so, let it own the new messageId instead
+          // of sending a duplicate.
+          if ((session.uiSeq || 0) !== s) return;
           const sent = await channel.send(options);
           session.uiContext = { channelId: ctx.channelId, messageId: sent.id };
           if (state.isPlaying && state.currentTrack) {
@@ -146,6 +150,12 @@ class InterfaceUpdater {
           }
         }
       } else {
+        // Stale-check: if another handleUpdate() incremented uiSeq past s while
+        // we were awaiting the channel fetch above, that newer call is responsible
+        // for sending the initial message. Returning here prevents two concurrent
+        // "no messageId" calls from both reaching channel.send() and creating
+        // duplicate play cards.
+        if ((session.uiSeq || 0) !== s) return;
         const sent = await channel.send(options);
         session.uiContext = { channelId: ctx.channelId, messageId: sent.id };
         if (state.isPlaying && state.currentTrack) {

@@ -350,20 +350,30 @@ const createInteractionHandler = (
 
         Lock.release(interaction.guild.id, customId);
 
-        // Update the original message with new queue info
-        const queueInfo  = queueService.getQueue(interaction.guild.id);
-        const queueEmbed = EmbedBuilders.createQueueEmbed(queueInfo.queue, {
-          currentTrack: queueInfo.currentTrack,
-          page:         1,
-          itemsPerPage: 10,
-          totalPages:   Math.ceil(queueInfo.state.queueLength / 10) || 1,
-        });
-        const response: Record<string, any> = { embeds: [queueEmbed] };
-        if (responseButtons) {
-          response.components = responseButtons;
+        // Best-effort: refresh the queue message UI.
+        // Wrapped in its own try/catch so a Discord API hiccup (e.g. message
+        // already deleted, unknown message, rate limit) cannot clobber the
+        // success reply that the user should always see — the track was already
+        // removed above regardless of whether this edit succeeds.
+        try {
+          const queueInfo  = queueService.getQueue(interaction.guild.id);
+          const queueEmbed = EmbedBuilders.createQueueEmbed(queueInfo.queue, {
+            currentTrack: queueInfo.currentTrack,
+            page:         1,
+            itemsPerPage: 10,
+            totalPages:   Math.ceil((queueInfo.state?.queueLength ?? 0) / 10) || 1,
+          });
+          const response: Record<string, any> = { embeds: [queueEmbed] };
+          if (responseButtons) {
+            response.components = responseButtons;
+          }
+          await interaction.message.edit(response);
+        } catch (_editErr: unknown) {
+          logger.warn('Failed to refresh queue message after track removal — interaction reply will still succeed', {
+            guild: interaction.guild?.name,
+          });
         }
 
-        await interaction.message.edit(response);
         await interaction.editReply({ embeds: [responseEmbed], flags: MessageFlags.Ephemeral });
 
         logger.info('Track removed via select menu', {
