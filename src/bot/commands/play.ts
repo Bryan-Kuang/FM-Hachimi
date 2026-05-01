@@ -82,6 +82,11 @@ const createPlayCommand = (playbackService: any, queueService: any) => ({
       playbackService.setUIContext(interaction.guild.id, interaction.channelId);
       if (!player.isPlaying && !player.isPaused) {
         await playbackService.play(interaction.guild.id);
+      } else {
+        // Already playing: addTrack() doesn't emit a state event, so the play
+        // card queue count stays stale until the next progress-tracker tick.
+        // Push the updated state immediately so the card reflects the new total.
+        playbackService.notifyState(interaction.guild.id);
       }
 
       await interaction.editReply({ content: `🎵 已添加: ${track.title || url}` });
