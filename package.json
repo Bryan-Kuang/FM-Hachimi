@@ -13,6 +13,7 @@
     "deploy:commands": "node scripts/deploy-commands.js",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
+    "typecheck": "tsc --noEmit",
     "pretest": "eslint src/",
     "test": "jest",
     "test:watch": "jest --watch",
