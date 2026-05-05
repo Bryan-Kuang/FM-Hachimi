@@ -8,7 +8,7 @@ jest.mock('../../src/services/logger_service', () => ({
 }))
 
 const InterfaceUpdater = require('../../src/ui/interface_updater')
-const PlaybackService = require('../../src/services/playback_service')
+const PlayerService = require('../../src/services/player_service')
 
 function createTestSetup() {
   const sessions = {}
@@ -23,18 +23,18 @@ function createTestSetup() {
   const mockAudioManager = { getPlayer: () => mockPlayer }
 
   const updater = new InterfaceUpdater(mockSessionManager, mockProgressTracker, mockAudioManager)
-  const playbackService = new PlaybackService({
+  const playerService = new PlayerService({
     audioManager: mockAudioManager,
     interfaceUpdater: updater,
     progressTracker: mockProgressTracker,
     extractor: {},
   })
 
-  return { updater, playbackService, mockSessionManager }
+  return { updater, playerService, mockSessionManager }
 }
 
 test('event-driven UI: first send then edit on subsequent updates', async () => {
-  const { updater, playbackService } = createTestSetup()
+  const { updater, playerService } = createTestSetup()
   const sent1 = { id: 'msg-1' }
   const channel = {
     messages: { edit: jest.fn().mockResolvedValue(sent1) },
@@ -47,20 +47,20 @@ test('event-driven UI: first send then edit on subsequent updates', async () => 
   const state2 = { isPlaying: true, isPaused: false, currentTrack: { title: 'B' }, currentIndex: 1, queueLength: 2, hasNext: false, hasPrevious: true, loopMode: 'queue' }
 
   // Bind and emit events
-  updater.bind(playbackService)
-  playbackService._emitState('guild-1', state1, state1.currentTrack)
+  updater.bind(playerService)
+  playerService._emitState('guild-1', state1, state1.currentTrack)
   await new Promise(r => setTimeout(r, 10))
   expect(channel.send).toHaveBeenCalledTimes(1)
 
   // Subsequent update should edit
   updater.setPlaybackContext('guild-1', 'ch-1', 'msg-1')
-  playbackService._emitState('guild-1', state2, state2.currentTrack)
+  playerService._emitState('guild-1', state2, state2.currentTrack)
   await new Promise(r => setTimeout(r, 10))
   expect(channel.messages.edit).toHaveBeenCalledTimes(1)
 })
 
 test('concurrent updates resolve to latest state', async () => {
-  const { updater, playbackService } = createTestSetup()
+  const { updater, playerService } = createTestSetup()
   const channel = {
     messages: { edit: jest.fn() },
     send: jest.fn().mockResolvedValue({ id: 'msg-2' })
@@ -71,9 +71,9 @@ test('concurrent updates resolve to latest state', async () => {
   const sA = { isPlaying: true, isPaused: false, currentTrack: { title: 'A' }, currentIndex: 0, queueLength: 1, hasNext: true, hasPrevious: false, loopMode: 'none' }
   const sB = { isPlaying: true, isPaused: false, currentTrack: { title: 'B' }, currentIndex: 1, queueLength: 2, hasNext: false, hasPrevious: true, loopMode: 'queue' }
 
-  updater.bind(playbackService)
-  playbackService._emitState('guild-2', sA, sA.currentTrack)
-  playbackService._emitState('guild-2', sB, sB.currentTrack)
+  updater.bind(playerService)
+  playerService._emitState('guild-2', sA, sA.currentTrack)
+  playerService._emitState('guild-2', sB, sB.currentTrack)
   await new Promise(r => setTimeout(r, 10))
   expect(channel.send).toHaveBeenCalled()
 })
