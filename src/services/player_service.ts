@@ -7,6 +7,7 @@
 
 import { EventEmitter } from 'events';
 import * as logger from './logger_service';
+import * as metrics from '../observability/metrics';
 import type Track from '../models/track';
 import type { GuildId, ChannelId, MessageId } from '../types';
 import type {
@@ -95,6 +96,7 @@ class PlayerService extends EventEmitter {
 
   async play(guildId: GuildId): Promise<boolean> {
     try {
+      metrics.counter('player_play_total', 'Tracks started').inc({ guildId });
       const player = this.audioManager.getPlayer(guildId);
       if (!player) return false;
       const success = await player.playNext();
@@ -102,6 +104,7 @@ class PlayerService extends EventEmitter {
       this._emitState(guildId, state, state.currentTrack);
       return success;
     } catch (e: unknown) {
+      metrics.counter('player_errors_total', 'Player action errors').inc({ action: 'play' });
       logger.error('Play action failed', { guildId, error: (e as Error).message });
       return false;
     }
@@ -109,6 +112,7 @@ class PlayerService extends EventEmitter {
 
   pause(guildId: GuildId): boolean {
     try {
+      metrics.counter('player_pause_total', 'Pause actions').inc({ guildId });
       const result = this.audioManager.pausePlayback(guildId);
       if (result && result.player) {
         const state = result.player as AudioPlayerState;
@@ -116,6 +120,7 @@ class PlayerService extends EventEmitter {
       }
       return !!(result && result.success);
     } catch (e: unknown) {
+      metrics.counter('player_errors_total', 'Player action errors').inc({ action: 'pause' });
       logger.error('Pause action failed', { guildId, error: (e as Error).message });
       return false;
     }
@@ -123,6 +128,7 @@ class PlayerService extends EventEmitter {
 
   resume(guildId: GuildId): boolean {
     try {
+      metrics.counter('player_resume_total', 'Resume actions').inc({ guildId });
       const result = this.audioManager.resumePlayback(guildId);
       if (result && result.player) {
         const state = result.player as AudioPlayerState;
@@ -130,6 +136,7 @@ class PlayerService extends EventEmitter {
       }
       return !!(result && result.success);
     } catch (e: unknown) {
+      metrics.counter('player_errors_total', 'Player action errors').inc({ action: 'resume' });
       logger.error('Resume action failed', { guildId, error: (e as Error).message });
       return false;
     }
@@ -137,6 +144,7 @@ class PlayerService extends EventEmitter {
 
   async skip(guildId: GuildId): Promise<boolean> {
     try {
+      metrics.counter('player_skip_total', 'Skip actions').inc({ guildId });
       const result = await this.audioManager.skipTrack(guildId);
       if (result && result.player) {
         const state = result.player as AudioPlayerState;
@@ -144,6 +152,7 @@ class PlayerService extends EventEmitter {
       }
       return !!(result && result.success);
     } catch (e: unknown) {
+      metrics.counter('player_errors_total', 'Player action errors').inc({ action: 'skip' });
       logger.error('Skip action failed', { guildId, error: (e as Error).message });
       return false;
     }
@@ -151,6 +160,7 @@ class PlayerService extends EventEmitter {
 
   async previous(guildId: GuildId): Promise<boolean> {
     try {
+      metrics.counter('player_previous_total', 'Previous actions').inc({ guildId });
       const result = await this.audioManager.previousTrack(guildId);
       if (result && result.player) {
         const state = result.player as AudioPlayerState;
@@ -158,6 +168,7 @@ class PlayerService extends EventEmitter {
       }
       return !!(result && result.success);
     } catch (e: unknown) {
+      metrics.counter('player_errors_total', 'Player action errors').inc({ action: 'previous' });
       logger.error('Previous action failed', { guildId, error: (e as Error).message });
       return false;
     }
@@ -165,6 +176,7 @@ class PlayerService extends EventEmitter {
 
   async stop(guildId: GuildId): Promise<boolean> {
     try {
+      metrics.counter('player_stop_total', 'Stop actions').inc({ guildId });
       this._hachimiControllers.get(guildId)?.abort();
       this._hachimiControllers.delete(guildId);
       const result = await this.audioManager.stopPlayback(guildId);
@@ -177,6 +189,7 @@ class PlayerService extends EventEmitter {
       }
       return !!(result && result.success);
     } catch (e: unknown) {
+      metrics.counter('player_errors_total', 'Player action errors').inc({ action: 'stop' });
       logger.error('Stop action failed', { guildId, error: (e as Error).message });
       return false;
     }
@@ -188,6 +201,7 @@ class PlayerService extends EventEmitter {
 
   async addTrack(guildId: GuildId, videoOrUrl: ExtractedTrackData | string, requestedBy: string): Promise<Track | null> {
     try {
+      metrics.counter('queue_add_total', 'Tracks added to queue').inc({ guildId });
       const player = this.audioManager.getPlayer(guildId);
       let videoData: ExtractedTrackData;
 
@@ -201,6 +215,7 @@ class PlayerService extends EventEmitter {
       const track = player.addToQueue(videoData, requestedBy);
       return track;
     } catch (e: unknown) {
+      metrics.counter('player_errors_total', 'Player action errors').inc({ action: 'addTrack' });
       logger.error('Add to queue failed', { guildId, error: (e as Error).message });
       return null;
     }
@@ -287,6 +302,7 @@ class PlayerService extends EventEmitter {
   // ---------------------------------------------------------------------------
 
   async playBilibiliVideo(interaction: unknown, url: string): Promise<PlayResult> {
+    metrics.counter('bilibili_play_requested_total', 'Bilibili video play requests').inc();
     return this.audioManager.playBilibiliVideo(interaction, url);
   }
 
