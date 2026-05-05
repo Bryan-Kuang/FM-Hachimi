@@ -12,8 +12,7 @@ import AudioManager = require('./session/audio_manager');
 import InterfaceUpdater = require('./ui/interface_updater');
 import ProgressTracker = require('./ui/progress_tracker');
 import HistoryStore = require('./utils/history_store');
-import PlaybackService = require('./services/playback_service');
-import QueueService = require('./services/queue_service');
+import PlayerService = require('./services/player_service');
 import DailyHachimiService = require('./services/daily_hachimi_service');
 import * as logger from './services/logger_service';
 import TokenPrecheck = require('./utils/token_precheck');
@@ -76,15 +75,13 @@ class BilibiliDiscordBot {
       const bilibiliApi = require('./bilibili/api') as any;
       bilibiliApi.setHistoryStore(historyStore);
 
-      const playbackService = new PlaybackService({
+      const playerService = new PlayerService({
         audioManager,
         interfaceUpdater,
         progressTracker,
         extractor,
         historyStore,
       });
-
-      const queueService = new QueueService({ audioManager, extractor });
 
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const config = require('./config/config') as any;
@@ -94,7 +91,7 @@ class BilibiliDiscordBot {
       // Bot client
       logger.info('Initializing Discord bot client');
       Debug.trace('client.init');
-      this.botClient = new BotClient(playbackService, queueService, dailyHachimiService);
+      this.botClient = new BotClient(playerService, dailyHachimiService);
       this.botClient.setExtractor(extractor);
 
       // Initialize bot client (login, load commands, bind UI)

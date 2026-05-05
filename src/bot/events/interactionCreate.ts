@@ -15,9 +15,12 @@ import * as logger from '../../services/logger_service';
 import * as Lock from '../../utils/lock';
 
 const createInteractionHandler = (
-  playbackService: any,
-  queueService: any,
+  playerService: any,
+  _deprecated?: any,   // kept for backward compat if called with 2 args
 ): { name: string; execute: (interaction: any) => Promise<void> } => {
+  // Unified: playerService handles both playback and queue operations
+  const playbackService = playerService;
+  const queueService = playerService;
   return {
     name: 'interactionCreate',
 

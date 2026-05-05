@@ -1,14 +1,15 @@
 /**
- * Playback Service
- * Unified service layer that absorbs PlayerControl and PlaylistManager logic.
- * Acts as the single bridge between command layer and audio layer.
+ * Player Service
+ * Single service layer bridging command/UI layer and audio layer.
+ * Absorbs both PlaybackService (play/pause/skip/stop/state) and
+ * QueueService (add/remove/clear/shuffle/loop) responsibilities.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { EventEmitter } from 'events';
 import * as logger from './logger_service';
 
-interface PlaybackServiceDeps {
+interface PlayerServiceDeps {
   audioManager: any;
   interfaceUpdater: any;
   progressTracker: any;
@@ -16,7 +17,7 @@ interface PlaybackServiceDeps {
   historyStore?: any;
 }
 
-class PlaybackService extends EventEmitter {
+class PlayerService extends EventEmitter {
   private audioManager: any;
   private interfaceUpdater: any;
   private extractor: any;
@@ -26,14 +27,14 @@ class PlaybackService extends EventEmitter {
   constructor({
     audioManager,
     interfaceUpdater,
-    progressTracker: _progressTracker,   // received but not used directly in this class
+    progressTracker: _progressTracker,
     extractor,
-    historyStore: _historyStore,         // received but not used directly in this class
-  }: PlaybackServiceDeps = {} as PlaybackServiceDeps) {
+    historyStore: _historyStore,
+  }: PlayerServiceDeps = {} as PlayerServiceDeps) {
     super();
     this.audioManager      = audioManager;
     this.interfaceUpdater  = interfaceUpdater;
-    this.extractor         = extractor;   // kept for getExtractor() used by search / interactionCreate
+    this.extractor         = extractor;
     this._hachimiControllers = new Map();
   }
 
@@ -53,30 +54,17 @@ class PlaybackService extends EventEmitter {
   }
 
   // ---------------------------------------------------------------------------
-  // State emission (compatible with PlayerControl's event contract)
+  // State emission (InterfaceUpdater listens for 'player_state_changed')
   // ---------------------------------------------------------------------------
 
-  /**
-   * Register a handler for player state changes.
-   * Compatible with PlayerControl's event contract — used by InterfaceUpdater.bind().
-   */
   onStateChanged(handler: (event: { guildId: string; state: any; track: any }) => void): void {
     this.on('player_state_changed', handler);
   }
 
-  /**
-   * Emit a player_state_changed event.
-   * Payload: { guildId, state, track }
-   * InterfaceUpdater listens for this event.
-   */
   _emitState(guildId: string, state: any, track: any): void {
     this.emit('player_state_changed', { guildId, state, track });
   }
 
-  /**
-   * Read the current player state and emit it.
-   * Convenience wrapper used after operations that need a fresh state push.
-   */
   notifyState(guildId: string): void {
     try {
       const player = this.audioManager.getPlayer(guildId);
@@ -88,12 +76,9 @@ class PlaybackService extends EventEmitter {
   }
 
   // ---------------------------------------------------------------------------
-  // Playback control (absorbed from PlayerControl)
+  // Playback control
   // ---------------------------------------------------------------------------
 
-  /**
-   * Start playback for the guild (plays next track in queue).
-   */
   async play(guildId: string): Promise<boolean> {
     try {
       const player = this.audioManager.getPlayer(guildId);
@@ -108,9 +93,6 @@ class PlaybackService extends EventEmitter {
     }
   }
 
-  /**
-   * Pause playback.
-   */
   pause(guildId: string): boolean {
     try {
       const result = this.audioManager.pausePlayback(guildId);
@@ -124,9 +106,6 @@ class PlaybackService extends EventEmitter {
     }
   }
 
-  /**
-   * Resume playback.
-   */
   resume(guildId: string): boolean {
     try {
       const result = this.audioManager.resumePlayback(guildId);
@@ -140,9 +119,6 @@ class PlaybackService extends EventEmitter {
     }
   }
 
-  /**
-   * Skip to next track.
-   */
   async skip(guildId: string): Promise<boolean> {
     try {
       const result = await this.audioManager.skipTrack(guildId);
@@ -156,9 +132,6 @@ class PlaybackService extends EventEmitter {
     }
   }
 
-  /**
-   * Go to previous track.
-   */
   async previous(guildId: string): Promise<boolean> {
     try {
       const result = await this.audioManager.previousTrack(guildId);
@@ -172,12 +145,8 @@ class PlaybackService extends EventEmitter {
     }
   }
 
-  /**
-   * Stop playback, clear queue, leave voice channel, and clear UI context.
-   */
   async stop(guildId: string): Promise<boolean> {
     try {
-      // Abort any in-flight hachimi search/parse for this guild
       this._hachimiControllers.get(guildId)?.abort();
       this._hachimiControllers.delete(guildId);
       const result = await this.audioManager.stopPlayback(guildId);
@@ -195,34 +164,85 @@ class PlaybackService extends EventEmitter {
   }
 
   // ---------------------------------------------------------------------------
+  // Queue operations (absorbed from QueueService)
+  // ---------------------------------------------------------------------------
+
+  async addTrack(guildId: string, videoOrUrl: any, requestedBy: string): Promise<any> {
+    try {
+      const player = this.audioManager.getPlayer(guildId);
+      let videoData = videoOrUrl;
+
+      if (typeof videoOrUrl === 'string') {
+        if (!this.extractor) throw new Error('Extractor not available');
+        videoData = await this.extractor.extractAudio(videoOrUrl);
+      }
+
+      const track = player.addToQueue(videoData, requestedBy);
+      return track;
+    } catch (e: unknown) {
+      logger.error('Add to queue failed', { guildId, error: (e as Error).message });
+      return null;
+    }
+  }
+
+  removeTrack(guildId: string, index: number): boolean {
+    try {
+      const player = this.audioManager.getPlayer(guildId);
+      return player.removeFromQueue(index) as boolean;
+    } catch (e: unknown) {
+      logger.error('Remove from queue failed', { guildId, index, error: (e as Error).message });
+      return false;
+    }
+  }
+
+  clearQueue(guildId: string): boolean {
+    try {
+      const player = this.audioManager.getPlayer(guildId);
+      player.clearQueue();
+      return true;
+    } catch (e: unknown) {
+      logger.error('Clear queue failed', { guildId, error: (e as Error).message });
+      return false;
+    }
+  }
+
+  shuffleQueue(guildId: string): any {
+    return this.audioManager.shuffleQueue(guildId);
+  }
+
+  setLoopMode(guildId: string, mode: string): any {
+    return this.audioManager.setLoopMode(guildId, mode);
+  }
+
+  getLoopMode(guildId: string): string {
+    const player = this.audioManager.getPlayer(guildId);
+    return player.loopMode as string;
+  }
+
+  getQueue(guildId: string): any {
+    return this.audioManager.getQueue(guildId);
+  }
+
+  // ---------------------------------------------------------------------------
   // State queries
   // ---------------------------------------------------------------------------
 
-  /**
-   * Get the AudioPlayer instance for a guild.
-   */
   getPlayer(guildId: string): any {
     return this.audioManager.getPlayer(guildId);
   }
 
-  /**
-   * Get the currently playing track.
-   */
   getCurrentTrack(guildId: string): any {
     const player = this.audioManager.getPlayer(guildId);
     return player.currentTrack;
   }
 
-  /**
-   * Check if audio is currently playing in a guild.
-   */
   isPlaying(guildId: string): boolean {
     const player = this.audioManager.getPlayer(guildId);
     return player.isPlaying as boolean;
   }
 
   // ---------------------------------------------------------------------------
-  // UI context management (proxied to InterfaceUpdater)
+  // UI context management
   // ---------------------------------------------------------------------------
 
   setUIContext(guildId: string, channelId: string, messageId?: string): void {
@@ -242,65 +262,37 @@ class PlaybackService extends EventEmitter {
   }
 
   // ---------------------------------------------------------------------------
-  // High-level playback entry point (delegates to AudioManager)
+  // High-level playback entry point
   // ---------------------------------------------------------------------------
 
-  /**
-   * Play a Bilibili video: extract, join voice, add to queue, start playback.
-   * Delegates to AudioManager.playBilibiliVideo().
-   */
   async playBilibiliVideo(interaction: any, url: string): Promise<any> {
     return this.audioManager.playBilibiliVideo(interaction, url);
   }
 
   // ---------------------------------------------------------------------------
-  // Button interaction handler (extracted from interactionCreate.js)
+  // Button interaction handler
   // ---------------------------------------------------------------------------
 
-  /**
-   * Handle a button interaction from the player controls.
-   * Routes control buttons through PlaybackService and delegates
-   * non-control buttons to AudioManager.
-   */
   async handleButtonInteraction(interaction: any): Promise<{ success: boolean; error?: string }> {
     const customId = interaction.customId as string;
     const guildId = interaction.guild.id as string;
 
-    // --- Control buttons (play/pause, skip, prev, stop) ---
     if (['pause_resume', 'skip', 'prev', 'stop'].includes(customId)) {
       this.setUIContext(guildId, interaction.channelId as string);
       const player = this.getPlayer(guildId);
 
       if (customId === 'pause_resume') {
-        if (player.isPlaying) {
-          const ok = this.pause(guildId);
-          return { success: ok };
-        } else if (player.isPaused) {
-          const ok = this.resume(guildId);
-          return { success: ok };
-        }
+        if (player.isPlaying) return { success: this.pause(guildId) };
+        else if (player.isPaused) return { success: this.resume(guildId) };
         return { success: false, error: 'No audio to pause/resume' };
       }
-
-      if (customId === 'skip') {
-        const ok = await this.skip(guildId);
-        return { success: ok };
-      }
-
-      if (customId === 'prev') {
-        const ok = await this.previous(guildId);
-        return { success: ok };
-      }
-
-      if (customId === 'stop') {
-        const ok = await this.stop(guildId);
-        return { success: ok };
-      }
+      if (customId === 'skip') return { success: await this.skip(guildId) };
+      if (customId === 'prev') return { success: await this.previous(guildId) };
+      if (customId === 'stop') return { success: await this.stop(guildId) };
     }
 
-    // --- Non-control buttons: delegate to AudioManager ---
     return this.audioManager.handleButtonInteraction(interaction) as Promise<{ success: boolean }>;
   }
 }
 
-export = PlaybackService;
+export = PlayerService;
