@@ -5,24 +5,38 @@
  * QueueService (add/remove/clear/shuffle/loop) responsibilities.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { EventEmitter } from 'events';
 import * as logger from './logger_service';
+import type Track from '../models/track';
+import type { GuildId, ChannelId, MessageId } from '../types';
+import type {
+  AudioManagerLike,
+  AudioPlayerLike,
+  AudioPlayerState,
+  InterfaceUpdaterLike,
+  ExtractorLike,
+  ExtractedTrackData,
+  ActionResult,
+  PlayResult,
+  QueueInfo,
+  StateChangedEvent,
+  ButtonResult,
+} from './types';
 
 interface PlayerServiceDeps {
-  audioManager: any;
-  interfaceUpdater: any;
-  progressTracker: any;
-  extractor: any;
-  historyStore?: any;
+  audioManager: AudioManagerLike;
+  interfaceUpdater: InterfaceUpdaterLike;
+  progressTracker: unknown;
+  extractor: ExtractorLike;
+  historyStore?: unknown;
 }
 
 class PlayerService extends EventEmitter {
-  private audioManager: any;
-  private interfaceUpdater: any;
-  private extractor: any;
+  private audioManager: AudioManagerLike;
+  private interfaceUpdater: InterfaceUpdaterLike;
+  private extractor: ExtractorLike;
   /** Per-guild AbortControllers for running hachimi ops */
-  private _hachimiControllers: Map<string, AbortController>;
+  private _hachimiControllers: Map<GuildId, AbortController>;
 
   constructor({
     audioManager,
@@ -30,26 +44,26 @@ class PlayerService extends EventEmitter {
     progressTracker: _progressTracker,
     extractor,
     historyStore: _historyStore,
-  }: PlayerServiceDeps = {} as PlayerServiceDeps) {
+  }: PlayerServiceDeps) {
     super();
-    this.audioManager      = audioManager;
-    this.interfaceUpdater  = interfaceUpdater;
-    this.extractor         = extractor;
+    this.audioManager        = audioManager;
+    this.interfaceUpdater    = interfaceUpdater;
+    this.extractor           = extractor;
     this._hachimiControllers = new Map();
   }
 
-  _setHachimiController(guildId: string, controller: AbortController): void {
+  _setHachimiController(guildId: GuildId, controller: AbortController): void {
     this._hachimiControllers.set(guildId, controller);
   }
 
-  _clearHachimiController(guildId: string): void {
+  _clearHachimiController(guildId: GuildId): void {
     this._hachimiControllers.delete(guildId);
   }
 
   /**
    * Public accessor for the Bilibili extractor.
    */
-  getExtractor(): any {
+  getExtractor(): ExtractorLike {
     return this.extractor;
   }
 
@@ -57,18 +71,18 @@ class PlayerService extends EventEmitter {
   // State emission (InterfaceUpdater listens for 'player_state_changed')
   // ---------------------------------------------------------------------------
 
-  onStateChanged(handler: (event: { guildId: string; state: any; track: any }) => void): void {
+  onStateChanged(handler: (event: StateChangedEvent) => void): void {
     this.on('player_state_changed', handler);
   }
 
-  _emitState(guildId: string, state: any, track: any): void {
+  _emitState(guildId: GuildId, state: AudioPlayerState, track: Track | null): void {
     this.emit('player_state_changed', { guildId, state, track });
   }
 
-  notifyState(guildId: string): void {
+  notifyState(guildId: GuildId): void {
     try {
       const player = this.audioManager.getPlayer(guildId);
-      const state = player.getState();
+      const state  = player.getState();
       this._emitState(guildId, state, state.currentTrack);
     } catch (e: unknown) {
       logger.error('Notify state failed', { guildId, error: (e as Error).message });
@@ -79,12 +93,12 @@ class PlayerService extends EventEmitter {
   // Playback control
   // ---------------------------------------------------------------------------
 
-  async play(guildId: string): Promise<boolean> {
+  async play(guildId: GuildId): Promise<boolean> {
     try {
       const player = this.audioManager.getPlayer(guildId);
       if (!player) return false;
-      const success = await player.playNext() as boolean;
-      const state = player.getState();
+      const success = await player.playNext();
+      const state   = player.getState();
       this._emitState(guildId, state, state.currentTrack);
       return success;
     } catch (e: unknown) {
@@ -93,11 +107,12 @@ class PlayerService extends EventEmitter {
     }
   }
 
-  pause(guildId: string): boolean {
+  pause(guildId: GuildId): boolean {
     try {
       const result = this.audioManager.pausePlayback(guildId);
       if (result && result.player) {
-        this._emitState(guildId, result.player, result.player.currentTrack);
+        const state = result.player as AudioPlayerState;
+        this._emitState(guildId, state, state.currentTrack);
       }
       return !!(result && result.success);
     } catch (e: unknown) {
@@ -106,11 +121,12 @@ class PlayerService extends EventEmitter {
     }
   }
 
-  resume(guildId: string): boolean {
+  resume(guildId: GuildId): boolean {
     try {
       const result = this.audioManager.resumePlayback(guildId);
       if (result && result.player) {
-        this._emitState(guildId, result.player, result.player.currentTrack);
+        const state = result.player as AudioPlayerState;
+        this._emitState(guildId, state, state.currentTrack);
       }
       return !!(result && result.success);
     } catch (e: unknown) {
@@ -119,11 +135,12 @@ class PlayerService extends EventEmitter {
     }
   }
 
-  async skip(guildId: string): Promise<boolean> {
+  async skip(guildId: GuildId): Promise<boolean> {
     try {
       const result = await this.audioManager.skipTrack(guildId);
       if (result && result.player) {
-        this._emitState(guildId, result.player, result.newTrack || result.player.currentTrack);
+        const state = result.player as AudioPlayerState;
+        this._emitState(guildId, state, (result.newTrack as Track | null) ?? state.currentTrack);
       }
       return !!(result && result.success);
     } catch (e: unknown) {
@@ -132,11 +149,12 @@ class PlayerService extends EventEmitter {
     }
   }
 
-  async previous(guildId: string): Promise<boolean> {
+  async previous(guildId: GuildId): Promise<boolean> {
     try {
       const result = await this.audioManager.previousTrack(guildId);
       if (result && result.player) {
-        this._emitState(guildId, result.player, result.newTrack || result.player.currentTrack);
+        const state = result.player as AudioPlayerState;
+        this._emitState(guildId, state, (result.newTrack as Track | null) ?? state.currentTrack);
       }
       return !!(result && result.success);
     } catch (e: unknown) {
@@ -145,13 +163,14 @@ class PlayerService extends EventEmitter {
     }
   }
 
-  async stop(guildId: string): Promise<boolean> {
+  async stop(guildId: GuildId): Promise<boolean> {
     try {
       this._hachimiControllers.get(guildId)?.abort();
       this._hachimiControllers.delete(guildId);
       const result = await this.audioManager.stopPlayback(guildId);
       if (result && result.player) {
-        this._emitState(guildId, result.player, null);
+        const state = result.player as AudioPlayerState;
+        this._emitState(guildId, state, null);
       }
       if (result && result.success) {
         this.interfaceUpdater.clearContext(guildId);
@@ -167,14 +186,16 @@ class PlayerService extends EventEmitter {
   // Queue operations (absorbed from QueueService)
   // ---------------------------------------------------------------------------
 
-  async addTrack(guildId: string, videoOrUrl: any, requestedBy: string): Promise<any> {
+  async addTrack(guildId: GuildId, videoOrUrl: ExtractedTrackData | string, requestedBy: string): Promise<Track | null> {
     try {
       const player = this.audioManager.getPlayer(guildId);
-      let videoData = videoOrUrl;
+      let videoData: ExtractedTrackData;
 
       if (typeof videoOrUrl === 'string') {
         if (!this.extractor) throw new Error('Extractor not available');
         videoData = await this.extractor.extractAudio(videoOrUrl);
+      } else {
+        videoData = videoOrUrl;
       }
 
       const track = player.addToQueue(videoData, requestedBy);
@@ -185,17 +206,17 @@ class PlayerService extends EventEmitter {
     }
   }
 
-  removeTrack(guildId: string, index: number): boolean {
+  removeTrack(guildId: GuildId, index: number): boolean {
     try {
       const player = this.audioManager.getPlayer(guildId);
-      return player.removeFromQueue(index) as boolean;
+      return player.removeFromQueue(index);
     } catch (e: unknown) {
       logger.error('Remove from queue failed', { guildId, index, error: (e as Error).message });
       return false;
     }
   }
 
-  clearQueue(guildId: string): boolean {
+  clearQueue(guildId: GuildId): boolean {
     try {
       const player = this.audioManager.getPlayer(guildId);
       player.clearQueue();
@@ -206,20 +227,20 @@ class PlayerService extends EventEmitter {
     }
   }
 
-  shuffleQueue(guildId: string): any {
+  shuffleQueue(guildId: GuildId): ActionResult {
     return this.audioManager.shuffleQueue(guildId);
   }
 
-  setLoopMode(guildId: string, mode: string): any {
+  setLoopMode(guildId: GuildId, mode: string): ActionResult {
     return this.audioManager.setLoopMode(guildId, mode);
   }
 
-  getLoopMode(guildId: string): string {
+  getLoopMode(guildId: GuildId): string {
     const player = this.audioManager.getPlayer(guildId);
-    return player.loopMode as string;
+    return player.loopMode;
   }
 
-  getQueue(guildId: string): any {
+  getQueue(guildId: GuildId): QueueInfo {
     return this.audioManager.getQueue(guildId);
   }
 
@@ -227,45 +248,45 @@ class PlayerService extends EventEmitter {
   // State queries
   // ---------------------------------------------------------------------------
 
-  getPlayer(guildId: string): any {
+  getPlayer(guildId: GuildId): AudioPlayerLike {
     return this.audioManager.getPlayer(guildId);
   }
 
-  getCurrentTrack(guildId: string): any {
+  getCurrentTrack(guildId: GuildId): Track | null {
     const player = this.audioManager.getPlayer(guildId);
     return player.currentTrack;
   }
 
-  isPlaying(guildId: string): boolean {
+  isPlaying(guildId: GuildId): boolean {
     const player = this.audioManager.getPlayer(guildId);
-    return player.isPlaying as boolean;
+    return player.isPlaying;
   }
 
   // ---------------------------------------------------------------------------
   // UI context management
   // ---------------------------------------------------------------------------
 
-  setUIContext(guildId: string, channelId: string, messageId?: string): void {
+  setUIContext(guildId: GuildId, channelId: ChannelId, messageId?: MessageId): void {
     this.interfaceUpdater.setPlaybackContext(guildId, channelId, messageId);
   }
 
-  clearUIContext(guildId: string): void {
+  clearUIContext(guildId: GuildId): void {
     this.interfaceUpdater.clearContext(guildId);
   }
 
-  hasUIContext(guildId: string): boolean {
-    return this.interfaceUpdater.hasContext(guildId) as boolean;
+  hasUIContext(guildId: GuildId): boolean {
+    return this.interfaceUpdater.hasContext(guildId);
   }
 
-  getUIContext(guildId: string): { channelId: string; messageId: string } | null {
-    return this.interfaceUpdater.getContext(guildId) as { channelId: string; messageId: string } | null;
+  getUIContext(guildId: GuildId): { channelId: string; messageId: string } | null {
+    return this.interfaceUpdater.getContext(guildId);
   }
 
   // ---------------------------------------------------------------------------
   // High-level playback entry point
   // ---------------------------------------------------------------------------
 
-  async playBilibiliVideo(interaction: any, url: string): Promise<any> {
+  async playBilibiliVideo(interaction: unknown, url: string): Promise<PlayResult> {
     return this.audioManager.playBilibiliVideo(interaction, url);
   }
 
@@ -273,12 +294,12 @@ class PlayerService extends EventEmitter {
   // Button interaction handler
   // ---------------------------------------------------------------------------
 
-  async handleButtonInteraction(interaction: any): Promise<{ success: boolean; error?: string }> {
-    const customId = interaction.customId as string;
-    const guildId = interaction.guild.id as string;
+  async handleButtonInteraction(interaction: { customId: string; guild: { id: string }; channelId: string }): Promise<ButtonResult> {
+    const customId = interaction.customId;
+    const guildId  = interaction.guild.id;
 
     if (['pause_resume', 'skip', 'prev', 'stop'].includes(customId)) {
-      this.setUIContext(guildId, interaction.channelId as string);
+      this.setUIContext(guildId, interaction.channelId);
       const player = this.getPlayer(guildId);
 
       if (customId === 'pause_resume') {
@@ -291,7 +312,7 @@ class PlayerService extends EventEmitter {
       if (customId === 'stop') return { success: await this.stop(guildId) };
     }
 
-    return this.audioManager.handleButtonInteraction(interaction) as Promise<{ success: boolean }>;
+    return this.audioManager.handleButtonInteraction(interaction) as Promise<ButtonResult>;
   }
 }
 
