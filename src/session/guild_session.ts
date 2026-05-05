@@ -5,9 +5,8 @@
 
 import type { UiContext, ProgressTrackerState } from '../types';
 
-// AudioPlayer is not yet migrated — keep loose so we don't import a .js class
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AudioPlayerInstance = any;
+import type AudioPlayer from '../audio/audio_player';
+type AudioPlayerInstance = AudioPlayer;
 
 class GuildSession {
   guildId: string;

@@ -157,12 +157,10 @@ describe("regression: pause/resume progress accuracy", () => {
   });
 
   test("skip() resets progress to 0 for the next track", async () => {
-    player.queue = [
-      { title: "a", audioUrl: "u1", duration: 300, resetRetry: jest.fn() },
-      { title: "b", audioUrl: "u2", duration: 300, resetRetry: jest.fn() },
-    ];
+    player.addToQueue({ bvid: "BVa", title: "a", audioUrl: "u1", duration: 300 }, "<@user>");
+    player.addToQueue({ bvid: "BVb", title: "b", audioUrl: "u2", duration: 300 }, "<@user>");
     player.currentIndex = 0;
-    player.currentTrack = player.queue[0];
+    player.currentTrack = player.queue.items[0];
     player.voiceConnection = null; // bypass actual playback
 
     emitPlaying(player);

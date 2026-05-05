@@ -17,13 +17,18 @@ jest.mock("../../src/services/logger_service", () => ({
 
 const AudioPlayer = require("../../src/audio/audio_player");
 
-const makeQueue = (n) =>
-  Array.from({ length: n }, (_, i) => ({
-    title: `Song ${i + 1}`,
-    audioUrl: `url${i + 1}`,
-    duration: 180,
-    resetRetry: jest.fn(),
-  }));
+const makeTrackData = (i) => ({
+  bvid: `BV${i}`,
+  title: `Song ${i + 1}`,
+  audioUrl: `url${i + 1}`,
+  duration: 180,
+});
+
+const populateQueue = (player, n) => {
+  for (let i = 0; i < n; i++) {
+    player.addToQueue(makeTrackData(i), `<@user>`);
+  }
+};
 
 describe("regression: double-skip via stale Idle", () => {
   let player;
@@ -37,11 +42,11 @@ describe("regression: double-skip via stale Idle", () => {
   afterEach(() => jest.clearAllTimers());
 
   test("Idle arriving AFTER skip completed does not advance queue again", async () => {
-    player.queue = makeQueue(5);
+    populateQueue(player, 5);
     player.currentIndex = 1;
-    player.currentTrack = player.queue[1];
+    player.currentTrack = player.queue.items[1];
     player.startTime = Date.now() - 60 * 1000;
-    player.loopMode = "queue";
+    player.queue.loopMode = "queue";
     player.voiceConnection = null;
 
     await player.skip();
@@ -56,10 +61,10 @@ describe("regression: double-skip via stale Idle", () => {
   });
 
   test("three rapid skips advance by exactly 3, not 6", async () => {
-    player.queue = makeQueue(10);
+    populateQueue(player, 10);
     player.currentIndex = 0;
-    player.currentTrack = player.queue[0];
-    player.loopMode = "queue";
+    player.currentTrack = player.queue.items[0];
+    player.queue.loopMode = "queue";
     player.voiceConnection = null;
 
     await player.skip();
