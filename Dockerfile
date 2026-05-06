@@ -18,8 +18,9 @@ RUN apk add --no-cache \
     py3-pip \
     ca-certificates
 
-# yt-dlp (the actual bilibili extractor invoked by the bot)
-RUN pip3 install --no-cache-dir --break-system-packages yt-dlp
+# yt-dlp (bilibili + YouTube audio extractor invoked by the bot).
+# --upgrade forces the latest release so signature-solving stays current.
+RUN pip3 install --no-cache-dir --break-system-packages --upgrade yt-dlp
 
 WORKDIR /app
 
