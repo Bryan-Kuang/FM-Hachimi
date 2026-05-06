@@ -520,21 +520,30 @@ class AudioPlayer {
           guild: this.currentGuild,
         });
 
+        // Build platform-aware FFmpeg args.
+        // streamHeaders comes from the extractor — each platform provides its own
+        // referer/UA so YouTube support is just "add a new extractor."
+        const headers = this.currentTrack?.streamHeaders;
+        const referer   = headers?.referer   || 'https://www.bilibili.com/';
+        const userAgent = headers?.userAgent  || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
         const ffmpegProcess = spawn('ffmpeg', [
-          '-user_agent',
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          '-referer', 'https://www.bilibili.com/',
+          '-user_agent', userAgent,
+          '-referer', referer,
           '-reconnect', '1',
           '-reconnect_streamed', '1',
           '-reconnect_delay_max', '5',
-          '-rw_timeout', '60000000',
-          '-timeout', '60000000',
+          '-rw_timeout', '30000000',
+          '-timeout', '30000000',
           '-headers', 'Connection: keep-alive',
-          '-analyzeduration', '10000000',
-          '-probesize', '50000000',
+          // Reduced from 10M/50M — Bilibili/YouTube serve well-known containers;
+          // lower values shave 1-2s off first-byte latency.
+          '-analyzeduration', '2000000',
+          '-probesize', '5000000',
           '-fflags', '+genpts+discardcorrupt',
           '-i', audioUrl,
-          '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
+          // Removed loudnorm (buffered ~0.5-1s). Use simple volume filter instead.
+          '-af', 'volume=1.0',
           '-f', 's16le',
           '-ar', '48000',
           '-ac', '2',

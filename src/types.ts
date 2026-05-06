@@ -6,6 +6,12 @@ export type UserId = string;
 export type ChannelId = string;
 export type MessageId = string;
 
+/** Platform-specific HTTP headers for FFmpeg streaming. */
+export interface StreamHeaders {
+  referer: string;
+  userAgent: string;
+}
+
 /** Raw data returned by BilibiliExtractor.extractAudio() */
 export interface TrackData {
   bvid: string;
@@ -21,6 +27,8 @@ export interface TrackData {
   author?: string;
   platform?: 'bilibili';
   extractedAt?: string;      // ISO 8601 string from new Date().toISOString()
+  /** Platform-specific headers for FFmpeg to send when fetching the audio stream. */
+  streamHeaders?: StreamHeaders;
 }
 
 /** UI message reference stored in GuildSession */

@@ -6,7 +6,7 @@
  */
 
 import config = require('../config/config');
-import type { TrackData } from '../types';
+import type { TrackData, StreamHeaders } from '../types';
 
 class Track implements TrackData {
   // Fields spread from TrackData via Object.assign:
@@ -23,6 +23,7 @@ class Track implements TrackData {
   extractedAt?: string;
   id?: string;
   videoId?: string;
+  streamHeaders?: StreamHeaders;
 
   // Queue-time fields:
   requestedBy: string | null;
