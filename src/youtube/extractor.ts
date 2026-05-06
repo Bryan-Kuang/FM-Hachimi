@@ -5,6 +5,7 @@
  */
 
 import { spawn, ChildProcess } from 'child_process';
+import * as fs from 'fs';
 import * as logger from '../services/logger_service';
 import YouTubeValidator = require('./validator');
 
@@ -66,11 +67,43 @@ interface ThumbnailEntry {
 class YouTubeExtractor {
   private userAgent: string;
   private _ytdlpChecked: boolean;
+  private _cookiesFile: string | null;
 
   constructor() {
     this.userAgent =
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
     this._ytdlpChecked = false;
+    this._cookiesFile = this._resolveCookiesFile();
+  }
+
+  /**
+   * Resolve cookies file path. Checks YOUTUBE_COOKIES_FILE env var,
+   * then falls back to the shared cookies.txt used by Bilibili extractor.
+   */
+  private _resolveCookiesFile(): string | null {
+    const candidates = [
+      process.env.YOUTUBE_COOKIES_FILE,
+      'youtube_cookies.txt',
+      'cookies.txt',
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate && fs.existsSync(candidate)) {
+        logger.info('YouTube cookies file found', { path: candidate });
+        return candidate;
+      }
+    }
+
+    logger.warn('No YouTube cookies file found — bot-detection may block requests');
+    return null;
+  }
+
+  /** Get yt-dlp cookie arguments if a cookies file is configured. */
+  private _getCookieArgs(): string[] {
+    if (this._cookiesFile && fs.existsSync(this._cookiesFile)) {
+      return ['--cookies', this._cookiesFile];
+    }
+    return [];
   }
 
   /**
@@ -148,6 +181,7 @@ class YouTubeExtractor {
         '--no-check-certificate',
         '--no-warnings',
         '--user-agent', this.userAgent,
+        ...this._getCookieArgs(),
         url,
       ];
 
@@ -199,6 +233,7 @@ class YouTubeExtractor {
         '--no-check-certificate',
         '--no-warnings',
         '--user-agent', this.userAgent,
+        ...this._getCookieArgs(),
       ];
 
       logger.debug('YouTube search via yt-dlp', { keyword, limit });
@@ -290,6 +325,7 @@ class YouTubeExtractor {
         '--no-check-certificate',
         '--no-warnings',
         '--user-agent', this.userAgent,
+        ...this._getCookieArgs(),
         normalizedUrl,
       ];
 
@@ -307,7 +343,9 @@ class YouTubeExtractor {
             return;
           }
           let errorMessage = `yt-dlp exited with code ${code}`;
-          if (stderr.includes('Video unavailable') || stderr.includes('Private video')) {
+          if (stderr.includes('Sign in to confirm') || stderr.includes('not a bot')) {
+            errorMessage = 'YouTube bot-detection triggered — cookies file required or expired';
+          } else if (stderr.includes('Video unavailable') || stderr.includes('Private video')) {
             errorMessage = 'Video is unavailable or private';
           } else if (stderr.includes('Sign in to confirm your age')) {
             errorMessage = 'Age-restricted video (login required)';
