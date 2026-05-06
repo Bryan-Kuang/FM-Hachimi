@@ -7,6 +7,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as logger from '../services/logger_service';
+import config = require('../config/config');
 import YouTubeValidator = require('./validator');
 
 interface VideoMetadata {
@@ -64,16 +65,80 @@ interface ThumbnailEntry {
   height?: number;
 }
 
+interface CacheEntry {
+  data: ExtractedAudio;
+  cachedAt: number;
+}
+
 class YouTubeExtractor {
   private userAgent: string;
   private _ytdlpChecked: boolean;
   private _cookiesFile: string | null;
+
+  // Extraction result cache — avoids repeated yt-dlp calls for the same video
+  private _cache: Map<string, CacheEntry>;
+  private _cacheExpiry: number;
+  private _maxCacheSize: number;
+  private _cacheCleanupInterval: NodeJS.Timeout | null;
+
+  // Rate limiter — prevents burst yt-dlp requests that burn cookies
+  private _lastExtractionTime: number;
 
   constructor() {
     this.userAgent =
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
     this._ytdlpChecked = false;
     this._cookiesFile = this._resolveCookiesFile();
+
+    // URL cache (mirrors BilibiliExtractor pattern)
+    this._cache = new Map();
+    this._cacheExpiry = 25 * 60 * 1000; // 25 minutes
+    this._maxCacheSize = 50;
+    this._cacheCleanupInterval = setInterval(() => {
+      this._cleanupExpiredCache();
+    }, 10 * 60 * 1000).unref();
+
+    // Rate limiter
+    this._lastExtractionTime = 0;
+  }
+
+  /** Clean up expired cache entries and enforce size limit. */
+  private _cleanupExpiredCache(): void {
+    const now = Date.now();
+    for (const [key, entry] of this._cache) {
+      if (now - entry.cachedAt > this._cacheExpiry) {
+        this._cache.delete(key);
+      }
+    }
+    // Enforce size limit — evict oldest entries
+    if (this._cache.size > this._maxCacheSize) {
+      const sorted = [...this._cache.entries()].sort((a, b) => a[1].cachedAt - b[1].cachedAt);
+      const excess = this._cache.size - this._maxCacheSize;
+      for (let i = 0; i < excess; i++) {
+        this._cache.delete(sorted[i][0]);
+      }
+    }
+  }
+
+  /** Stop the cache cleanup timer. Call on shutdown. */
+  destroy(): void {
+    if (this._cacheCleanupInterval) {
+      clearInterval(this._cacheCleanupInterval);
+      this._cacheCleanupInterval = null;
+    }
+    this._cache.clear();
+  }
+
+  /** Wait for the rate limiter cooldown before the next yt-dlp call. */
+  private async _waitForRateLimit(): Promise<void> {
+    const minInterval = config.youtube.minExtractionIntervalMs;
+    const elapsed = Date.now() - this._lastExtractionTime;
+    if (elapsed < minInterval) {
+      const wait = minInterval - elapsed;
+      logger.debug('YouTube rate limiter: waiting before next extraction', { waitMs: wait });
+      await new Promise(resolve => setTimeout(resolve, wait));
+    }
+    this._lastExtractionTime = Date.now();
   }
 
   /**
@@ -119,6 +184,7 @@ class YouTubeExtractor {
   /**
    * Extract audio from a YouTube video URL.
    * Single yt-dlp invocation: --dump-json --format bestaudio/best.
+   * Results are cached for 25 minutes to reduce yt-dlp calls.
    */
   async extractAudio(url: string, retryCount = 0, maxRetries = 2): Promise<ExtractedAudio> {
     logger.info('Starting YouTube audio extraction', { url, attempt: retryCount + 1 });
@@ -141,6 +207,20 @@ class YouTubeExtractor {
         throw new Error('Failed to normalize YouTube URL');
       }
 
+      // Check cache first — skip yt-dlp entirely on hit
+      const cached = this._cache.get(normalizedUrl);
+      if (cached && (Date.now() - cached.cachedAt < this._cacheExpiry)) {
+        logger.info('YouTube cache hit — skipping yt-dlp', {
+          url: normalizedUrl,
+          title: cached.data.title,
+          cacheAgeMin: Math.round((Date.now() - cached.cachedAt) / 60000),
+        });
+        return cached.data;
+      }
+
+      // Rate limit — wait if too soon after last extraction
+      await this._waitForRateLimit();
+
       const { metadata, audioUrl } = await this.extractMetadataAndUrl(normalizedUrl);
 
       const result: ExtractedAudio = {
@@ -154,6 +234,9 @@ class YouTubeExtractor {
           userAgent: this.userAgent,
         },
       };
+
+      // Cache the result
+      this._cache.set(normalizedUrl, { data: result, cachedAt: Date.now() });
 
       logger.info('YouTube audio extraction completed', {
         url,
@@ -184,6 +267,7 @@ class YouTubeExtractor {
    * Get audio stream URL only (for CDN URL refresh on stale tracks).
    */
   async getAudioStreamUrl(url: string): Promise<string> {
+    await this._waitForRateLimit();
     return new Promise((resolve, reject) => {
       const args = [
         '--get-url',
@@ -345,7 +429,7 @@ class YouTubeExtractor {
           }
           let errorMessage = `yt-dlp exited with code ${code}`;
           if (stderr.includes('Sign in to confirm') || stderr.includes('not a bot')) {
-            errorMessage = 'YouTube bot-detection triggered — cookies file required or expired';
+            errorMessage = 'YouTube cookies expired. Run: bash scripts/refresh-cookies.sh';
           } else if (stderr.includes('Video unavailable') || stderr.includes('Private video')) {
             errorMessage = 'Video is unavailable or private';
           } else if (stderr.includes('Sign in to confirm your age')) {
@@ -449,12 +533,12 @@ class YouTubeExtractor {
 
   private isRetryableError(error: Error): boolean {
     const msg = error.message.toLowerCase();
+    // bot-detection is intentionally NOT retried — retrying just burns cookies faster
     return (
       msg.includes('network') ||
       msg.includes('timeout') ||
       msg.includes('connection') ||
       msg.includes('rate') ||
-      msg.includes('bot-detection') ||
       msg.includes('429') ||
       msg.includes('503')
     );

@@ -64,6 +64,10 @@ interface BilibiliConfig {
   hachimiMinDurationSec: number;
 }
 
+interface YouTubeConfig {
+  minExtractionIntervalMs: number;
+}
+
 interface DailyHachimiConfig {
   dataFile: string;
   defaultTimezone: string;
@@ -83,6 +87,7 @@ interface BotConfig {
   logging: LoggingConfig;
   ui: UiConfig;
   bilibili: BilibiliConfig;
+  youtube: YouTubeConfig;
   dailyHachimi: DailyHachimiConfig;
   test: TestConfig;
 }
@@ -184,6 +189,11 @@ const config: BotConfig = {
     // passed through so we don't silently drop otherwise-valid results.
     hachimiMaxDurationSec: parseInt(process.env.HACHIMI_MAX_DURATION_SEC!) || 360,  // 6 min
     hachimiMinDurationSec: parseInt(process.env.HACHIMI_MIN_DURATION_SEC!) || 60,   // 1 min
+  },
+  youtube: {
+    // Minimum delay between consecutive yt-dlp calls. Prevents burst requests
+    // when queuing multiple YouTube videos, which burns cookies faster.
+    minExtractionIntervalMs: parseInt(process.env.YOUTUBE_MIN_EXTRACTION_INTERVAL_MS!) || 2000,
   },
   dailyHachimi: {
     dataFile: process.env.DAILY_HACHIMI_DATA_FILE
