@@ -106,6 +106,16 @@ class YouTubeExtractor {
     return [];
   }
 
+  /** Common yt-dlp args shared across all invocations. */
+  private _baseArgs(): string[] {
+    return [
+      '--no-check-certificate',
+      '--no-warnings',
+      '--user-agent', this.userAgent,
+      ...this._getCookieArgs(),
+    ];
+  }
+
   /**
    * Extract audio from a YouTube video URL.
    * Single yt-dlp invocation: --dump-json --format bestaudio/best.
@@ -178,10 +188,7 @@ class YouTubeExtractor {
       const args = [
         '--get-url',
         '--format', 'bestaudio/best',
-        '--no-check-certificate',
-        '--no-warnings',
-        '--user-agent', this.userAgent,
-        ...this._getCookieArgs(),
+        ...this._baseArgs(),
         url,
       ];
 
@@ -230,10 +237,7 @@ class YouTubeExtractor {
         '--dump-json',
         '--flat-playlist',
         '--no-download',
-        '--no-check-certificate',
-        '--no-warnings',
-        '--user-agent', this.userAgent,
-        ...this._getCookieArgs(),
+        ...this._baseArgs(),
       ];
 
       logger.debug('YouTube search via yt-dlp', { keyword, limit });
@@ -322,10 +326,7 @@ class YouTubeExtractor {
         '--dump-json',
         '--format', 'bestaudio/best',
         '--no-download',
-        '--no-check-certificate',
-        '--no-warnings',
-        '--user-agent', this.userAgent,
-        ...this._getCookieArgs(),
+        ...this._baseArgs(),
         normalizedUrl,
       ];
 
@@ -453,6 +454,7 @@ class YouTubeExtractor {
       msg.includes('timeout') ||
       msg.includes('connection') ||
       msg.includes('rate') ||
+      msg.includes('bot-detection') ||
       msg.includes('429') ||
       msg.includes('503')
     );
