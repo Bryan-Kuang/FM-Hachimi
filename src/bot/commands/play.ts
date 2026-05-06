@@ -53,9 +53,32 @@ const createPlayCommand = (playbackService: any, queueService: any) => ({
           return;
         }
 
-        await interaction.editReply({ content: '🎬 提取 YouTube 音频...' });
+        await interaction.editReply({ content: '🎬 Extracting YouTube audio...' });
 
-        const videoData = await ytExtractor.extractAudio(route.normalizedUrl || route.raw);
+        let videoData;
+        try {
+          videoData = await ytExtractor.extractAudio(route.normalizedUrl || route.raw);
+        } catch (ytErr: unknown) {
+          const msg = (ytErr as Error).message || '';
+          if (msg.includes('cookies expired')) {
+            await interaction.editReply({
+              content: '🔒 YouTube cookies expired. Ask the bot admin to run `bash scripts/refresh-cookies.sh`',
+            });
+          } else if (msg.includes('unavailable') || msg.includes('private')) {
+            await interaction.editReply({ content: '⚠️ Video is unavailable or private' });
+          } else if (msg.includes('Age-restricted')) {
+            await interaction.editReply({ content: '⚠️ Age-restricted video (login required)' });
+          } else {
+            await interaction.editReply({ content: `⚠️ YouTube extraction failed: ${msg.substring(0, 100)}` });
+          }
+          logger.error('YouTube extraction failed in play command', {
+            url: route.normalizedUrl,
+            error: msg,
+            user: user.username,
+          });
+          return;
+        }
+
         const player = playbackService.getPlayer(interaction.guild.id);
         const joined = await player.joinVoiceChannel(member.voice.channel) as boolean;
         if (!joined) {
@@ -76,7 +99,7 @@ const createPlayCommand = (playbackService: any, queueService: any) => ({
           playbackService.notifyState(interaction.guild.id);
         }
 
-        await interaction.editReply({ content: `🎵 已添加: ${track.title || route.raw}` });
+        await interaction.editReply({ content: `🎵 Added: ${track.title || route.raw}` });
         logger.info('Play command completed (YouTube)', {
           query,
           url: route.normalizedUrl,
