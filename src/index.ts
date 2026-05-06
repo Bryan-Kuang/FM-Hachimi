@@ -7,6 +7,7 @@
 import { validateEnv } from './config/env_validator';
 import BotClient = require('./bot/client');
 import BilibiliExtractor = require('./bilibili/extractor');
+import YouTubeExtractor = require('./youtube/extractor');
 import SessionManager = require('./session/session_manager');
 import AudioManager = require('./session/audio_manager');
 import InterfaceUpdater = require('./ui/interface_updater');
@@ -65,6 +66,9 @@ class BilibiliDiscordBot {
       const extractor = new BilibiliExtractor();
       logger.info('Bilibili extractor initialized (will test on first use)');
 
+      const youtubeExtractor = new YouTubeExtractor();
+      logger.info('YouTube extractor initialized (requires yt-dlp)');
+
       const audioManager    = new AudioManager(sessionManager, extractor);
       const progressTracker = new ProgressTracker(sessionManager);
       const historyStore    = new HistoryStore(sessionManager);
@@ -80,6 +84,7 @@ class BilibiliDiscordBot {
         interfaceUpdater,
         progressTracker,
         extractor,
+        youtubeExtractor,
         historyStore,
       });
 

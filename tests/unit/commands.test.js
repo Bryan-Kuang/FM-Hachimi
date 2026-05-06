@@ -10,6 +10,7 @@ jest.mock("discord.js", () => ({
       setRequired: jest.fn().mockReturnThis(),
       setMinValue: jest.fn().mockReturnThis(),
       setMaxValue: jest.fn().mockReturnThis(),
+      addChoices: jest.fn().mockReturnThis(),
       addStringOption: jest.fn().mockReturnThis(),
       addIntegerOption: jest.fn().mockReturnThis(),
     };
@@ -102,6 +103,7 @@ const mockPlaybackService = {
   getUIContext: jest.fn(),
   getPlayer: jest.fn().mockReturnValue(mockPlayer),
   getExtractor: jest.fn(),
+  getYouTubeExtractor: jest.fn().mockReturnValue(null),
   notifyState: jest.fn(),
 };
 
@@ -576,10 +578,15 @@ describe("Bot Commands Coverage", () => {
   });
 
   describe("Play Command", () => {
-    const playCommand = require("../../src/bot/commands/play")(mockPlaybackService, mockQueueService);
     jest.mock("../../src/bilibili/validator", () => ({
       isValidBilibiliUrl: jest.fn(),
+      normalizeUrl: jest.fn((url) => url),
     }));
+    jest.mock("../../src/youtube/validator", () => ({
+      isValidYouTubeUrl: jest.fn().mockReturnValue(false),
+      normalizeUrl: jest.fn((url) => url),
+    }));
+    const playCommand = require("../../src/bot/commands/play")(mockPlaybackService, mockQueueService);
     const UrlValidator = require("../../src/bilibili/validator");
 
     const cases = [

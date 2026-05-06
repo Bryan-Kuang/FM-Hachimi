@@ -1,0 +1,424 @@
+/**
+ * YouTube Audio Extractor
+ * Handles YouTube video URL processing and audio stream extraction via yt-dlp.
+ * Mirrors the BilibiliExtractor interface for seamless platform switching.
+ */
+
+import { spawn, ChildProcess } from 'child_process';
+import * as logger from '../services/logger_service';
+import YouTubeValidator = require('./validator');
+
+interface VideoMetadata {
+  success: boolean;
+  title: string;
+  description: string;
+  duration: number;
+  uploader: string;
+  uploadDate: string | null;
+  uploadDateFormatted?: string;
+  viewCount: number;
+  likeCount: number;
+  thumbnail: string | null;
+  videoId: string | null;
+  id: string | null;
+  url: string;
+  webpage_url: string;
+}
+
+interface StreamHeaders {
+  referer: string;
+  userAgent: string;
+}
+
+interface ExtractedAudio extends VideoMetadata {
+  audioUrl: string;
+  originalUrl: string;
+  normalizedUrl: string;
+  extractedAt: string;
+  streamHeaders: StreamHeaders;
+}
+
+interface SearchResult {
+  title: string;
+  id: string;
+  url: string;
+  duration: number | string;
+  uploader: string;
+  viewCount: number | string;
+  thumbnail: string | null;
+  index?: number;
+}
+
+interface SearchResponse {
+  success: boolean;
+  results?: SearchResult[];
+  error?: string;
+  keyword: string;
+  timestamp: string;
+}
+
+interface ThumbnailEntry {
+  url: string;
+  width?: number;
+  height?: number;
+}
+
+class YouTubeExtractor {
+  private userAgent: string;
+  private _ytdlpChecked: boolean;
+
+  constructor() {
+    this.userAgent =
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+    this._ytdlpChecked = false;
+  }
+
+  /**
+   * Extract audio from a YouTube video URL.
+   * Single yt-dlp invocation: --dump-json --format bestaudio/best.
+   */
+  async extractAudio(url: string, retryCount = 0, maxRetries = 2): Promise<ExtractedAudio> {
+    logger.info('Starting YouTube audio extraction', { url, attempt: retryCount + 1 });
+
+    try {
+      if (!this._ytdlpChecked) {
+        const available = await this.checkYtDlpAvailability();
+        if (!available) {
+          throw new Error('yt-dlp is not available. Please install it: pip install yt-dlp');
+        }
+        this._ytdlpChecked = true;
+      }
+
+      if (!YouTubeValidator.isValidYouTubeUrl(url)) {
+        throw new Error('Invalid YouTube URL format');
+      }
+
+      const normalizedUrl = YouTubeValidator.normalizeUrl(url);
+      if (!normalizedUrl) {
+        throw new Error('Failed to normalize YouTube URL');
+      }
+
+      const { metadata, audioUrl } = await this.extractMetadataAndUrl(normalizedUrl);
+
+      const result: ExtractedAudio = {
+        ...metadata,
+        audioUrl,
+        originalUrl: url,
+        normalizedUrl,
+        extractedAt: new Date().toISOString(),
+        streamHeaders: {
+          referer: 'https://www.youtube.com/',
+          userAgent: this.userAgent,
+        },
+      };
+
+      logger.info('YouTube audio extraction completed', {
+        url,
+        title: result.title,
+        duration: result.duration,
+      });
+
+      return result;
+    } catch (error) {
+      logger.error('YouTube audio extraction failed', {
+        url,
+        error: (error as Error).message,
+        attempt: retryCount + 1,
+      });
+
+      if (retryCount < maxRetries && this.isRetryableError(error as Error)) {
+        const delay = (retryCount + 1) * 2000;
+        logger.info('Retrying YouTube extraction', { url, nextAttempt: retryCount + 2, delay });
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return this.extractAudio(url, retryCount + 1, maxRetries);
+      }
+
+      throw new Error(`YouTube extraction failed: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Get audio stream URL only (for CDN URL refresh on stale tracks).
+   */
+  async getAudioStreamUrl(url: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const args = [
+        '--get-url',
+        '--format', 'bestaudio/best',
+        '--no-check-certificate',
+        '--no-warnings',
+        '--user-agent', this.userAgent,
+        url,
+      ];
+
+      const ytdlp: ChildProcess = spawn('yt-dlp', args);
+      let stdout = '';
+      let stderr = '';
+
+      ytdlp.stdout!.on('data', (data: Buffer) => { stdout += data.toString(); });
+      ytdlp.stderr!.on('data', (data: Buffer) => { stderr += data.toString(); });
+
+      ytdlp.on('close', (code: number | null) => {
+        if (code !== 0 && code !== null) {
+          reject(new Error(`yt-dlp exited with code ${code}: ${stderr}`));
+          return;
+        }
+        const audioUrl = stdout.trim().split('\n')[0];
+        if (!audioUrl) {
+          reject(new Error('No audio stream URL found'));
+          return;
+        }
+        resolve(audioUrl);
+      });
+
+      ytdlp.on('error', (error: NodeJS.ErrnoException) => {
+        reject(new Error(`yt-dlp process error: ${error.message}`));
+      });
+
+      const timeoutId = setTimeout(() => {
+        ytdlp.kill('SIGTERM');
+        setTimeout(() => { if (!ytdlp.killed) ytdlp.kill('SIGKILL'); }, 2000);
+        reject(new Error('YouTube audio URL extraction timeout'));
+      }, 30000).unref();
+
+      ytdlp.on('close', () => clearTimeout(timeoutId));
+      ytdlp.on('error', () => clearTimeout(timeoutId));
+    });
+  }
+
+  /**
+   * Search YouTube videos by keyword.
+   */
+  async searchVideos(keyword: string, limit = 5): Promise<SearchResponse> {
+    return new Promise((resolve) => {
+      const args = [
+        `ytsearch${limit}:${keyword}`,
+        '--dump-json',
+        '--flat-playlist',
+        '--no-download',
+        '--no-check-certificate',
+        '--no-warnings',
+        '--user-agent', this.userAgent,
+      ];
+
+      logger.debug('YouTube search via yt-dlp', { keyword, limit });
+
+      const ytdlp: ChildProcess = spawn('yt-dlp', args);
+      let stdout = '';
+      let stderr = '';
+
+      ytdlp.stdout!.on('data', (data: Buffer) => { stdout += data.toString(); });
+      ytdlp.stderr!.on('data', (data: Buffer) => { stderr += data.toString(); });
+
+      ytdlp.on('close', (code: number | null) => {
+        if (code !== 0 && code !== null) {
+          logger.error('YouTube search failed', { code, stderr });
+          resolve({
+            success: false,
+            error: `Search failed: ${stderr || `exit code ${code}`}`,
+            keyword,
+            timestamp: new Date().toISOString(),
+          });
+          return;
+        }
+
+        try {
+          const lines = stdout.split('\n').filter(l => l.trim().startsWith('{'));
+          const results: SearchResult[] = lines.map((line, index) => {
+            const data = JSON.parse(line) as Record<string, unknown>;
+            return {
+              title: (data.title as string) || 'Unknown',
+              id: (data.id as string) || '',
+              url: (data.url as string) || (data.webpage_url as string) || `https://www.youtube.com/watch?v=${data.id}`,
+              duration: (data.duration as number) || 0,
+              uploader: (data.uploader as string) || (data.channel as string) || 'Unknown',
+              viewCount: (data.view_count as number) || 0,
+              thumbnail: this.selectBestThumbnail(data.thumbnails as ThumbnailEntry[] | undefined),
+              index,
+            };
+          });
+
+          resolve({
+            success: true,
+            results,
+            keyword,
+            timestamp: new Date().toISOString(),
+          });
+        } catch (parseError) {
+          logger.error('Failed to parse YouTube search results', { error: (parseError as Error).message });
+          resolve({
+            success: false,
+            error: `Parse error: ${(parseError as Error).message}`,
+            keyword,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      });
+
+      ytdlp.on('error', (error: NodeJS.ErrnoException) => {
+        resolve({
+          success: false,
+          error: `yt-dlp error: ${error.message}`,
+          keyword,
+          timestamp: new Date().toISOString(),
+        });
+      });
+
+      const timeoutId = setTimeout(() => {
+        ytdlp.kill('SIGTERM');
+        resolve({
+          success: false,
+          error: 'Search timeout',
+          keyword,
+          timestamp: new Date().toISOString(),
+        });
+      }, 20000).unref();
+
+      ytdlp.on('close', () => clearTimeout(timeoutId));
+      ytdlp.on('error', () => clearTimeout(timeoutId));
+    });
+  }
+
+  // ─── Private helpers ───────��──────────────────────────────────────────
+
+  private async extractMetadataAndUrl(normalizedUrl: string): Promise<{ metadata: VideoMetadata; audioUrl: string }> {
+    return new Promise((resolve, reject) => {
+      const args = [
+        '--dump-json',
+        '--format', 'bestaudio/best',
+        '--no-download',
+        '--no-check-certificate',
+        '--no-warnings',
+        '--user-agent', this.userAgent,
+        normalizedUrl,
+      ];
+
+      const ytdlp: ChildProcess = spawn('yt-dlp', args);
+      let stdout = '';
+      let stderr = '';
+
+      ytdlp.stdout!.on('data', (data: Buffer) => { stdout += data.toString(); });
+      ytdlp.stderr!.on('data', (data: Buffer) => { stderr += data.toString(); });
+
+      ytdlp.on('close', (code: number | null) => {
+        if (code !== 0 && code !== null) {
+          if (code === 137 || code === 143) {
+            reject(new Error('YouTube extraction timeout'));
+            return;
+          }
+          let errorMessage = `yt-dlp exited with code ${code}`;
+          if (stderr.includes('Video unavailable') || stderr.includes('Private video')) {
+            errorMessage = 'Video is unavailable or private';
+          } else if (stderr.includes('Sign in to confirm your age')) {
+            errorMessage = 'Age-restricted video (login required)';
+          } else if (stderr.includes('network') || stderr.includes('timeout')) {
+            errorMessage = 'Network connection error';
+          } else if (stderr) {
+            errorMessage += `: ${stderr.substring(0, 200)}`;
+          }
+          reject(new Error(errorMessage));
+          return;
+        }
+
+        try {
+          const lines = stdout.split('\n').filter(l => l.trim());
+          const jsonLine = lines.find(l => l.trim().startsWith('{'));
+          if (!jsonLine) throw new Error('No JSON object in yt-dlp output');
+
+          const videoData = JSON.parse(jsonLine) as Record<string, unknown>;
+          const metadata = this.parseVideoMetadata(videoData);
+
+          // Extract audio URL from requested_downloads or url field
+          let audioUrl = '';
+          const requestedDownloads = videoData.requested_downloads as Array<{ url?: string }> | undefined;
+          if (requestedDownloads && requestedDownloads.length > 0 && requestedDownloads[0].url) {
+            audioUrl = requestedDownloads[0].url;
+          } else if (videoData.url && typeof videoData.url === 'string') {
+            audioUrl = videoData.url;
+          }
+
+          if (!audioUrl) {
+            reject(new Error('No audio URL found in yt-dlp JSON output'));
+            return;
+          }
+
+          resolve({ metadata, audioUrl });
+        } catch (parseError) {
+          reject(new Error(`Parse error: ${(parseError as Error).message}`));
+        }
+      });
+
+      ytdlp.on('error', (error: NodeJS.ErrnoException) => {
+        reject(new Error(`yt-dlp error: ${error.message}`));
+      });
+
+      const timeoutId = setTimeout(() => {
+        ytdlp.kill('SIGTERM');
+        setTimeout(() => { if (!ytdlp.killed) ytdlp.kill('SIGKILL'); }, 2000);
+        reject(new Error('YouTube extraction timeout'));
+      }, 30000).unref();
+
+      ytdlp.on('close', () => clearTimeout(timeoutId));
+      ytdlp.on('error', () => clearTimeout(timeoutId));
+    });
+  }
+
+  private parseVideoMetadata(videoData: Record<string, unknown>): VideoMetadata {
+    const metadata: VideoMetadata = {
+      success: true,
+      title: (videoData.title as string) || 'Unknown Title',
+      description: (videoData.description as string) || '',
+      duration: (videoData.duration as number) || 0,
+      uploader: (videoData.uploader as string) || (videoData.channel as string) || 'Unknown',
+      uploadDate: (videoData.upload_date as string) || null,
+      viewCount: (videoData.view_count as number) || 0,
+      likeCount: (videoData.like_count as number) || 0,
+      thumbnail: this.selectBestThumbnail(videoData.thumbnails as ThumbnailEntry[] | undefined),
+      videoId: (videoData.id as string) || null,
+      id: (videoData.id as string) || null,
+      url: (videoData.webpage_url as string) || (videoData.original_url as string) || '',
+      webpage_url: (videoData.webpage_url as string) || '',
+    };
+
+    if (metadata.uploadDate) {
+      try {
+        const y = metadata.uploadDate.substring(0, 4);
+        const m = metadata.uploadDate.substring(4, 6);
+        const d = metadata.uploadDate.substring(6, 8);
+        metadata.uploadDateFormatted = `${y}-${m}-${d}`;
+      } catch { /* ignore */ }
+    }
+
+    return metadata;
+  }
+
+  private selectBestThumbnail(thumbnails: ThumbnailEntry[] | undefined): string | null {
+    if (!thumbnails || thumbnails.length === 0) return null;
+    // Prefer medium-sized thumbnail for embed display
+    const sorted = [...thumbnails].sort((a, b) => (b.width || 0) - (a.width || 0));
+    const medium = sorted.find(t => (t.width || 0) >= 320 && (t.width || 0) <= 720);
+    return (medium || sorted[0])?.url || null;
+  }
+
+  private async checkYtDlpAvailability(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const ytdlp: ChildProcess = spawn('yt-dlp', ['--version']);
+      ytdlp.on('close', (code) => resolve(code === 0));
+      ytdlp.on('error', () => resolve(false));
+    });
+  }
+
+  private isRetryableError(error: Error): boolean {
+    const msg = error.message.toLowerCase();
+    return (
+      msg.includes('network') ||
+      msg.includes('timeout') ||
+      msg.includes('connection') ||
+      msg.includes('rate') ||
+      msg.includes('429') ||
+      msg.includes('503')
+    );
+  }
+}
+
+export = YouTubeExtractor;
