@@ -19,8 +19,13 @@ RUN apk add --no-cache \
     ca-certificates
 
 # yt-dlp (bilibili + YouTube audio extractor invoked by the bot).
-# --upgrade forces the latest release so signature-solving stays current.
-RUN pip3 install --no-cache-dir --break-system-packages --upgrade yt-dlp
+# [default] extras include yt-dlp-ejs — the External JavaScript Solver
+# scripts that YouTube's signature challenge requires. Node.js (already in
+# this image) is used as the JS runtime via --js-runtimes node.
+RUN pip3 install --no-cache-dir --break-system-packages --upgrade "yt-dlp[default]" && \
+    mkdir -p /home/node/.config/yt-dlp && \
+    echo "--js-runtimes node" > /home/node/.config/yt-dlp/config && \
+    chown -R node:node /home/node/.config
 
 WORKDIR /app
 
