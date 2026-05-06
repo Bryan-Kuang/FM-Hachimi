@@ -181,7 +181,7 @@ class InterfaceUpdater {
       isPlaying: player.isPlaying,
       currentTime: player.getCurrentTime(),
       currentIndex: player.currentIndex,
-      queueLength: player.queue ? player.queue.length : 0,
+      queueLength: player.queue ? player.queue.length : 0,  // queue.length works on both Queue class and raw array
       loopMode: player.loopMode,
       hasPrevious: player.canGoBack(),
       hasNext: player.canSkip(),

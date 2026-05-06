@@ -86,7 +86,7 @@ describe("AudioPlayer", () => {
     test("increments retryCount", async () => {
       jest.useFakeTimers();
       const Track = require("../../src/models/track");
-      player.currentTrack = new Track({ title: "Test", normalizedUrl: null }, "user");
+      player.currentTrack = new Track({ title: "Test", normalizedUrl: null, bvid: "BVtest", audioUrl: "url", duration: 180 }, "user");
       // Prevent actual playback attempt by mocking playCurrentTrack
       player.playCurrentTrack = jest.fn().mockResolvedValue(true);
 
@@ -101,7 +101,7 @@ describe("AudioPlayer", () => {
 
     test("skips track after max retries (>2)", async () => {
       const Track = require("../../src/models/track");
-      player.currentTrack = new Track({ title: "Test", normalizedUrl: null, retryCount: 2 }, "user");
+      player.currentTrack = new Track({ title: "Test", normalizedUrl: null, bvid: "BVtest", audioUrl: "url", duration: 180 }, "user");
       player.currentTrack.retryCount = 2; // set after construction
       player.handleTrackEnd = jest.fn();
 
@@ -116,25 +116,29 @@ describe("AudioPlayer", () => {
 
   describe("queue management", () => {
     test("addToQueue adds tracks", () => {
-      const track = { title: "Song A", duration: 100 };
-      player.addToQueue(track);
+      const track = { bvid: "BVa", title: "Song A", audioUrl: "url", duration: 100 };
+      player.addToQueue(track, "<@user>");
 
-      expect(player.queue).toHaveLength(1);
-      expect(player.queue[0].title).toBe("Song A");
+      expect(player.queue.length).toBe(1);
+      expect(player.queue.items[0].title).toBe("Song A");
     });
 
-    test("clearQueue empties the queue", () => {
-      player.queue = [{ title: "A" }, { title: "B" }];
+    test("clearQueue empties the queue (keeps current track)", () => {
+      player.addToQueue({ bvid: "BVa", title: "A", audioUrl: "u1", duration: 100 }, "<@user>");
+      player.addToQueue({ bvid: "BVb", title: "B", audioUrl: "u2", duration: 100 }, "<@user>");
+      player.currentIndex = 0;
+      player.currentTrack = player.queue.items[0];
+
       player.clearQueue();
 
-      expect(player.queue).toHaveLength(0);
+      // clearQueue keeps only the current track
+      expect(player.queue.length).toBe(1);
+      expect(player.queue.items[0].title).toBe("A");
     });
 
     test("getFormattedQueue returns formatted entries", () => {
-      player.queue = [
-        { title: "Song A", duration: 125, requestedBy: "User1", addedAt: new Date() },
-        { title: "Song B", duration: 63, requestedBy: "User2", addedAt: new Date() },
-      ];
+      player.addToQueue({ bvid: "BVa", title: "Song A", audioUrl: "u1", duration: 125 }, "User1");
+      player.addToQueue({ bvid: "BVb", title: "Song B", audioUrl: "u2", duration: 63 }, "User2");
 
       const formatted = player.getFormattedQueue();
 
@@ -198,14 +202,12 @@ describe("AudioPlayer", () => {
     });
 
     test("skip sets _manualNavigating flag and resets startTime", async () => {
-      player.queue = [
-        { title: "Song 1", audioUrl: "url1" },
-        { title: "Song 2", audioUrl: "url2" },
-      ];
+      player.addToQueue({ bvid: "BV1", title: "Song 1", audioUrl: "url1", duration: 180 }, "<@user>");
+      player.addToQueue({ bvid: "BV2", title: "Song 2", audioUrl: "url2", duration: 180 }, "<@user>");
       player.currentIndex = 0;
-      player.currentTrack = player.queue[0];
+      player.currentTrack = player.queue.items[0];
       player.startTime = Date.now() - 30 * 60 * 1000; // stale: 30 min ago
-      player.loopMode = "none";
+      player.setLoopMode("none");
       player.voiceConnection = null;
 
       await player.skip();
@@ -217,14 +219,12 @@ describe("AudioPlayer", () => {
     });
 
     test("previous sets _manualNavigating flag and resets startTime", async () => {
-      player.queue = [
-        { title: "Song 1", audioUrl: "url1" },
-        { title: "Song 2", audioUrl: "url2" },
-      ];
+      player.addToQueue({ bvid: "BV1", title: "Song 1", audioUrl: "url1", duration: 180 }, "<@user>");
+      player.addToQueue({ bvid: "BV2", title: "Song 2", audioUrl: "url2", duration: 180 }, "<@user>");
       player.currentIndex = 1;
-      player.currentTrack = player.queue[1];
+      player.currentTrack = player.queue.items[1];
       player.startTime = Date.now() - 30 * 60 * 1000;
-      player.loopMode = "none";
+      player.setLoopMode("none");
       player.voiceConnection = null;
 
       await player.previous();
@@ -234,18 +234,13 @@ describe("AudioPlayer", () => {
     });
 
     test("regression #2: skip does not double-advance queue via stale Idle event", async () => {
-      // Reproduces the bug: song 2 played for 30 min, user skips midway.
-      // Idle fires from killed FFmpeg with stale startTime — without the guard,
-      // handleTrackEnd would be called again, advancing index from 2 to 3.
-      player.queue = [
-        { title: "Song 1", audioUrl: "url1" },
-        { title: "Song 2", audioUrl: "url2" },
-        { title: "Song 3", audioUrl: "url3" },
-      ];
+      player.addToQueue({ bvid: "BV1", title: "Song 1", audioUrl: "url1", duration: 180 }, "<@user>");
+      player.addToQueue({ bvid: "BV2", title: "Song 2", audioUrl: "url2", duration: 180 }, "<@user>");
+      player.addToQueue({ bvid: "BV3", title: "Song 3", audioUrl: "url3", duration: 180 }, "<@user>");
       player.currentIndex = 1; // on song 2
-      player.currentTrack = player.queue[1];
+      player.currentTrack = player.queue.items[1];
       player.startTime = Date.now() - 30 * 60 * 1000; // 30 min ago (stale)
-      player.loopMode = "queue";
+      player.setLoopMode("queue");
       player.voiceConnection = null;
       player.handleTrackEnd = jest.fn();
 
@@ -269,17 +264,18 @@ describe("AudioPlayer", () => {
     test("returns current player state snapshot", () => {
       player.isPlaying = true;
       player.isPaused = false;
-      player.queue = [{ title: "A" }, { title: "B" }];
-      player.currentTrack = { title: "Now" };
+      player.addToQueue({ bvid: "BVa", title: "A", audioUrl: "u1", duration: 100 }, "<@user>");
+      player.addToQueue({ bvid: "BVb", title: "B", audioUrl: "u2", duration: 100 }, "<@user>");
       player.currentIndex = 0;
-      player.loopMode = "track";
+      player.currentTrack = player.queue.items[0];
+      player.setLoopMode("track");
 
       const state = player.getState();
 
       expect(state.isPlaying).toBe(true);
       expect(state.isPaused).toBe(false);
       expect(state.queueLength).toBe(2);
-      expect(state.currentTrack).toEqual({ title: "Now" });
+      expect(state.currentTrack.title).toBe("A");
       expect(state.loopMode).toBe("track");
     });
   });

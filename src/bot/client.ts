@@ -53,21 +53,18 @@ interface BotStats {
 }
 
 class BotClient {
-  private playbackService:     any;
-  private queueService:        any;
+  private playerService:       any;
   private dailyHachimiService: any;
   public  client:    Client;
   public  isReady:   boolean;
   private startTime: Date | null;
 
   /**
-   * @param playbackService      - PlaybackService instance
-   * @param queueService         - QueueService instance
+   * @param playerService        - PlayerService (unified playback + queue)
    * @param dailyHachimiService  - DailyHachimiService instance (optional)
    */
-  constructor(playbackService: any, queueService?: any, dailyHachimiService?: any) {
-    this.playbackService     = playbackService;
-    this.queueService        = queueService;
+  constructor(playerService: any, dailyHachimiService?: any) {
+    this.playerService       = playerService;
     this.dailyHachimiService = dailyHachimiService ?? null;
 
     // Initialize Discord client with required intents
@@ -112,7 +109,7 @@ class BotClient {
 
       try {
         interfaceUpdater.setClient(this.client);
-        interfaceUpdater.bind(this.playbackService);
+        interfaceUpdater.bind(this.playerService);
         Debug.trace('client.bind.interface_updater');
       } catch (e: unknown) {
         logger.error('Failed to bind UI updater', { error: (e as Error).message });
@@ -136,7 +133,7 @@ class BotClient {
    * Set up Discord event handlers
    */
   setupEventHandlers(): void {
-    const playbackService = this.playbackService;
+    const playerService = this.playerService;
 
     // Bot ready event
     this.client.once('clientReady', () => {
@@ -179,7 +176,7 @@ class BotClient {
           channel: oldState.channel.name,
         });
 
-        const player = playbackService.getPlayer(oldState.guild.id);
+        const player = playerService.getPlayer(oldState.guild.id);
         let currentTrack: TrackInfo | null = null;
 
         if (player) {
@@ -187,7 +184,7 @@ class BotClient {
           currentTrack = player.currentTrack as TrackInfo | null;
           // Use leaveVoiceChannel (not stop) so voiceConnection is cleared immediately
           player.leaveVoiceChannel();
-          playbackService.clearUIContext(oldState.guild.id);
+          playerService.clearUIContext(oldState.guild.id);
 
           logger.info('Player torn down due to voice disconnect', {
             guild: oldState.guild.name,
@@ -204,9 +201,8 @@ class BotClient {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const createInteractionHandler = require('./events/interactionCreate') as (
       ps: any,
-      qs: any,
     ) => { execute: (i: any) => Promise<void> };
-    const interactionHandler = createInteractionHandler(playbackService, this.queueService);
+    const interactionHandler = createInteractionHandler(playerService);
 
     // Interaction handling (slash commands, buttons, and select menus)
     this.client.on('interactionCreate', async (interaction: any) => {
@@ -277,7 +273,7 @@ class BotClient {
    */
   async sendDisconnectMessage(guild: Guild, currentTrack: TrackInfo | null): Promise<void> {
     try {
-      const context = this.playbackService.getUIContext(guild.id) as GuildContext | null;
+      const context = this.playerService.getUIContext(guild.id) as GuildContext | null;
       if (!context || !context.channelId) {
         logger.debug('No text channel context for disconnect message');
         return;
@@ -343,7 +339,7 @@ class BotClient {
 
   /**
    * Load slash commands.
-   * Commands that export a factory function receive playbackService;
+   * Commands that export a factory function receive playerService;
    * commands that export a plain object are used as-is.
    */
   async loadCommands(): Promise<void> {
@@ -365,10 +361,10 @@ class BotClient {
 
     for (const mod of commandModules) {
       try {
-        // Factory functions receive (playbackService, queueService[, dailyHachimiService]);
-        // plain objects used as-is.
+        // Factory functions receive (playerService[, playerService, dailyHachimiService]);
+        // second arg is legacy compat — same service passed twice.
         const command: any = typeof mod === 'function'
-          ? mod(this.playbackService, this.queueService, this.dailyHachimiService)
+          ? mod(this.playerService, this.playerService, this.dailyHachimiService)
           : mod;
 
         if (command.data && command.execute) {

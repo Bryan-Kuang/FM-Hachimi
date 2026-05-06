@@ -4,9 +4,7 @@
  * Player instances are stored in GuildSession via SessionManager.
  */
 
-// audio_player.js is not yet migrated — use any to avoid duplicating its
-// entire interface here. Will be replaced with a proper type in Task 15.
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import SessionManager = require('./session_manager');
 import * as logger from '../services/logger_service';
@@ -61,14 +59,13 @@ interface StatsResult {
   playingGuilds: number;
 }
 
-// audio_player.js is not yet migrated; use CJS import to avoid @no-var-requires
 import AudioPlayer = require('../audio/audio_player');
 
 class AudioManager {
   private sessionManager: SessionManager;
-  private extractor: unknown;
+  private extractor: any;
 
-  constructor(sessionManager: SessionManager, extractor?: unknown) {
+  constructor(sessionManager: SessionManager, extractor?: any) {
     this.sessionManager = sessionManager;
     this.extractor = extractor ?? null;
   }
@@ -76,7 +73,7 @@ class AudioManager {
   /**
    * Set the Bilibili extractor instance.
    */
-  setExtractor(extractor: unknown): void {
+  setExtractor(extractor: any): void {
     this.extractor = extractor;
     logger.info('Bilibili extractor attached to audio manager');
   }
@@ -84,7 +81,7 @@ class AudioManager {
   /**
    * Get the Bilibili extractor instance.
    */
-  getExtractor(): unknown {
+  getExtractor(): any {
     return this.extractor;
   }
 
@@ -183,7 +180,7 @@ class AudioManager {
           // Fix: if queue ended and a new song is added, start from the newest song
           if (player.currentTrack === null && player.queue.length > 0) {
             player.currentIndex = player.queue.length - 1;
-            player.currentTrack = player.queue[player.currentIndex];
+            player.currentTrack = player.queue.items[player.currentIndex];
             playSuccess = await player.playCurrentTrack();
           } else {
             playSuccess = await player.playNext();
@@ -576,7 +573,5 @@ class AudioManager {
     logger.info('Audio manager cleanup completed');
   }
 }
-
-/* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return */
 
 export = AudioManager;

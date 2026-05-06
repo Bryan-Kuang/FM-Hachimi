@@ -14,13 +14,20 @@ jest.mock("../../src/services/logger_service", () => ({
 
 const AudioPlayer = require("../../src/audio/audio_player");
 
-const makeQueue = (n) =>
-  Array.from({ length: n }, (_, i) => ({
-    title: `Song ${i + 1}`,
-    audioUrl: `url${i + 1}`,
-    duration: 180,
-    resetRetry: jest.fn(),
-  }));
+/** Build a mock track with the minimal shape Queue/AudioPlayer expects. */
+const makeTrackData = (i) => ({
+  bvid: `BV${i}`,
+  title: `Song ${i + 1}`,
+  audioUrl: `url${i + 1}`,
+  duration: 180,
+});
+
+/** Populate a player's queue with N tracks using the Queue API. */
+const populateQueue = (player, n) => {
+  for (let i = 0; i < n; i++) {
+    player.addToQueue(makeTrackData(i), `<@user>`);
+  }
+};
 
 describe("regression: manual navigation bursts", () => {
   let player;
@@ -32,10 +39,10 @@ describe("regression: manual navigation bursts", () => {
   afterEach(() => jest.clearAllTimers());
 
   test("5 sequential skips advance by exactly 5", async () => {
-    player.queue = makeQueue(10);
+    populateQueue(player, 10);
     player.currentIndex = 0;
-    player.currentTrack = player.queue[0];
-    player.loopMode = "queue";
+    player.currentTrack = player.queue.items[0];
+    player.queue.loopMode = "queue";
     player.voiceConnection = null;
 
     for (let i = 0; i < 5; i++) {
@@ -46,10 +53,10 @@ describe("regression: manual navigation bursts", () => {
   });
 
   test("concurrent skips (all awaited) advance deterministically", async () => {
-    player.queue = makeQueue(10);
+    populateQueue(player, 10);
     player.currentIndex = 0;
-    player.currentTrack = player.queue[0];
-    player.loopMode = "queue";
+    player.currentTrack = player.queue.items[0];
+    player.queue.loopMode = "queue";
     player.voiceConnection = null;
 
     await Promise.all([player.skip(), player.skip(), player.skip()]);
@@ -58,10 +65,10 @@ describe("regression: manual navigation bursts", () => {
   });
 
   test("skip then previous returns to original track", async () => {
-    player.queue = makeQueue(5);
+    populateQueue(player, 5);
     player.currentIndex = 2;
-    player.currentTrack = player.queue[2];
-    player.loopMode = "queue";
+    player.currentTrack = player.queue.items[2];
+    player.queue.loopMode = "queue";
     player.voiceConnection = null;
 
     await player.skip();
@@ -72,10 +79,10 @@ describe("regression: manual navigation bursts", () => {
   });
 
   test("skip at end with queue loop + stale Idle: wraps once, not twice", async () => {
-    player.queue = makeQueue(3);
+    populateQueue(player, 3);
     player.currentIndex = 2;
-    player.currentTrack = player.queue[2];
-    player.loopMode = "queue";
+    player.currentTrack = player.queue.items[2];
+    player.queue.loopMode = "queue";
     player.voiceConnection = null;
     player.handleTrackEnd = jest.fn();
 
@@ -91,10 +98,8 @@ describe("regression: manual navigation bursts", () => {
   });
 
   test("skip on empty queue (no tracks) stops playback cleanly", async () => {
-    player.queue = [];
-    player.currentIndex = -1;
-    player.currentTrack = null;
-    player.loopMode = "none";
+    // Empty queue — no tracks added
+    player.queue.loopMode = "none";
     player.voiceConnection = null;
     player._doDisconnect = jest.fn();
 
@@ -106,11 +111,11 @@ describe("regression: manual navigation bursts", () => {
   });
 
   test("skip resets startTime to avoid stale duration calculations", async () => {
-    player.queue = makeQueue(3);
+    populateQueue(player, 3);
     player.currentIndex = 0;
-    player.currentTrack = player.queue[0];
+    player.currentTrack = player.queue.items[0];
     player.startTime = Date.now() - 30 * 60 * 1000;
-    player.loopMode = "queue";
+    player.queue.loopMode = "queue";
     player.voiceConnection = null;
 
     await player.skip();
@@ -119,11 +124,11 @@ describe("regression: manual navigation bursts", () => {
   });
 
   test("previous resets startTime", async () => {
-    player.queue = makeQueue(3);
+    populateQueue(player, 3);
     player.currentIndex = 2;
-    player.currentTrack = player.queue[2];
+    player.currentTrack = player.queue.items[2];
     player.startTime = Date.now() - 30 * 60 * 1000;
-    player.loopMode = "queue";
+    player.queue.loopMode = "queue";
     player.voiceConnection = null;
 
     await player.previous();
@@ -132,10 +137,10 @@ describe("regression: manual navigation bursts", () => {
   });
 
   test("skip + stale Idle + another skip: advances by 2, Idle is absorbed", async () => {
-    player.queue = makeQueue(5);
+    populateQueue(player, 5);
     player.currentIndex = 0;
-    player.currentTrack = player.queue[0];
-    player.loopMode = "queue";
+    player.currentTrack = player.queue.items[0];
+    player.queue.loopMode = "queue";
     player.voiceConnection = null;
     player.handleTrackEnd = jest.fn();
 

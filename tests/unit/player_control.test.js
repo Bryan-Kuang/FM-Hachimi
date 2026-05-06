@@ -5,9 +5,9 @@ jest.mock('../../src/services/logger_service', () => ({
   debug: jest.fn(),
 }))
 
-const PlaybackService = require('../../src/services/playback_service')
+const PlayerService = require('../../src/services/player_service')
 
-test('playbackService emits state on notifyState', () => {
+test('playerService emits state on notifyState', () => {
   const mockPlayer = {
     getState: () => ({
       isPlaying: false,
@@ -21,15 +21,15 @@ test('playbackService emits state on notifyState', () => {
     }),
   }
   const mockAudioManager = { getPlayer: () => mockPlayer }
-  const playbackService = new PlaybackService({
+  const playerService = new PlayerService({
     audioManager: mockAudioManager,
-    interfaceUpdater: {},
+    interfaceUpdater: { setPlaybackContext: jest.fn(), clearContext: jest.fn(), hasContext: jest.fn() },
     progressTracker: {},
     extractor: {},
   })
   let received = null
-  playbackService.onStateChanged((p) => { received = p })
-  playbackService.notifyState('guild-1')
+  playerService.onStateChanged((p) => { received = p })
+  playerService.notifyState('guild-1')
   expect(received).toBeTruthy()
   expect(received.guildId).toBe('guild-1')
   expect(received.state.isPlaying).toBe(false)
