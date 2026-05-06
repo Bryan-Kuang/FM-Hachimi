@@ -74,9 +74,19 @@ jobs:
             # creates them — Docker auto-creates missing bind-mount sources as
             # root-owned dirs which the node user cannot write to.
             mkdir -p data logs
+            # Ensure bind-mount source files exist — Docker auto-creates
+            # missing sources as root-owned directories, breaking the mount.
+            touch -a cookies.txt youtube_cookies.txt
 
             echo "[deploy] rebuilding containers..."
-            timeout 600 docker-compose up -d --build
+            # docker-compose recreate can fail with a naming conflict if a
+            # previous recreate was interrupted (leaves a temp-renamed container).
+            # Retry once after a full down cycle to clear the stale state.
+            if ! timeout 600 docker-compose up -d --build 2>&1; then
+              echo "[deploy] recreate conflict — cleaning up and retrying..."
+              timeout 60 docker-compose down --remove-orphans 2>/dev/null || true
+              timeout 600 docker-compose up -d --build
+            fi
 
             echo "[deploy] pruning unused images..."
             timeout 60 docker image prune -f

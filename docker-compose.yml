@@ -65,6 +65,7 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./cookies.txt:/app/cookies.txt
+      - ./youtube_cookies.txt:/app/youtube_cookies.txt
       - ./data:/app/data
 
     # Network mode
