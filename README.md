@@ -40,9 +40,30 @@ cp .env.example .env   # fill in DISCORD_TOKEN and CLIENT_ID
 docker compose up -d --build
 ```
 
-Cookies files (optional, for bot-detection bypass):
-- `cookies.txt` — Bilibili cookies (Netscape format)
-- `youtube_cookies.txt` — YouTube cookies (export with `yt-dlp --cookies-from-browser chrome`)
+## Cookies (required for YouTube, optional for Bilibili)
+
+YouTube blocks requests from server IPs unless you provide cookies from a logged-in browser session. Without cookies, YouTube playback will fail with "Sign in to confirm you're not a bot."
+
+**How to export cookies:**
+
+1. Log into YouTube (or Bilibili) in Chrome on your local machine
+2. Run this on your local machine (not the server):
+   ```bash
+   # YouTube cookies
+   yt-dlp --cookies-from-browser chrome --cookies youtube_cookies.txt --skip-download "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+   # Bilibili cookies (if needed)
+   yt-dlp --cookies-from-browser chrome --cookies cookies.txt --skip-download "https://www.bilibili.com/video/BV1GJ411x7h7"
+   ```
+3. Copy the cookie files to the project root (same folder as `docker-compose.yml`):
+   ```bash
+   scp youtube_cookies.txt user@your-server:~/bilibili-bot/
+   scp cookies.txt user@your-server:~/bilibili-bot/
+   ```
+
+Docker mounts both files automatically. The bot picks them up on startup — no restart needed for new cookie files, but a restart applies them.
+
+**Cookies expire** after a few weeks to months. When YouTube starts failing again, re-export fresh cookies with the same steps above.
 
 ## Environment Variables
 
