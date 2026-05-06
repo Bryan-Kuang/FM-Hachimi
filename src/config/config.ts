@@ -112,7 +112,7 @@ const config: BotConfig = {
   },
   voice: {
     connectionTimeoutMs: parseInt(process.env.VOICE_CONNECTION_TIMEOUT_MS!) || 15000, // waitForVoiceConnection 超时
-    handoffWaitMs: parseInt(process.env.VOICE_HANDOFF_WAIT_MS!) || 1000, // play() 后保持 _manualNavigating 的 startup window
+    handoffWaitMs: parseInt(process.env.VOICE_HANDOFF_WAIT_MS!) || 200, // play() 后保持 _manualNavigating 的 startup window（降低: 1000→200ms）
     autoDisconnectIdleMs: parseInt(process.env.VOICE_AUTO_DISCONNECT_IDLE_MS!) || 60 * 1000, // 无播放自动断开
   },
   retry: {

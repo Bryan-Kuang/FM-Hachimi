@@ -26,11 +26,19 @@ interface VideoMetadata {
   webpage_url: string;
 }
 
+/** Platform-specific HTTP headers for FFmpeg to use when streaming. */
+interface StreamHeaders {
+  referer: string;
+  userAgent: string;
+}
+
 interface ExtractedAudio extends VideoMetadata {
   audioUrl: string;
   originalUrl: string;
   normalizedUrl: string;
   extractedAt: string;
+  /** Platform headers FFmpeg should send when fetching this audio URL. */
+  streamHeaders: StreamHeaders;
 }
 
 interface SearchResult {
@@ -213,18 +221,20 @@ class BilibiliExtractor {
         throw new Error("Failed to normalize URL");
       }
 
-      // Extract video information
-      const videoInfo = await this.getVideoInfo(normalizedUrl);
-
-      // Get audio stream URL
-      const audioStreamUrl = await this.getAudioStreamUrl(normalizedUrl);
+      // Single yt-dlp call: --dump-json with --format bestaudio/best gives us
+      // both metadata AND the audio URL in one process spawn + HTTP round-trip.
+      const { metadata, audioUrl } = await this.extractMetadataAndUrl(normalizedUrl);
 
       const result: ExtractedAudio = {
-        ...videoInfo,
-        audioUrl: audioStreamUrl,
+        ...metadata,
+        audioUrl,
         originalUrl: url,
         normalizedUrl: normalizedUrl,
         extractedAt: new Date().toISOString(),
+        streamHeaders: {
+          referer: 'https://www.bilibili.com/',
+          userAgent: this.userAgent,
+        },
       };
 
       logger.info("Audio extraction completed successfully", {
@@ -257,6 +267,123 @@ class BilibiliExtractor {
 
       throw new Error(`Audio extraction failed: ${(error as Error).message}`);
     }
+  }
+
+  /**
+   * Single yt-dlp invocation: extract both metadata and audio URL.
+   * Uses --dump-json --format bestaudio/best which includes the resolved
+   * download URL in `requested_downloads[0].url` — eliminating the need for
+   * a separate --get-url call (saves 1-3 seconds of network latency).
+   */
+  private async extractMetadataAndUrl(normalizedUrl: string): Promise<{ metadata: VideoMetadata; audioUrl: string }> {
+    return new Promise((resolve, reject) => {
+      const args = [
+        "--dump-json",
+        "--format", "bestaudio/best",
+        "--no-download",
+        "--no-check-certificate",
+        "--no-warnings",
+        "--user-agent", this.userAgent,
+        ...this._getCookieArgs(),
+        normalizedUrl,
+      ];
+
+      logger.debug("Executing yt-dlp for metadata + audio URL (single call)", { url: normalizedUrl });
+
+      const ytdlp: ChildProcess = spawn("yt-dlp", args);
+      let stdout = "";
+      let stderr = "";
+
+      ytdlp.stdout!.on("data", (data: Buffer) => {
+        stdout += data.toString();
+      });
+
+      ytdlp.stderr!.on("data", (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      ytdlp.on("close", (code: number | null) => {
+        if (code !== 0 && code !== null) {
+          if (code === 137 || code === 143) {
+            reject(new Error("Audio extraction timeout"));
+            return;
+          }
+
+          let errorMessage = `yt-dlp exited with code ${code}`;
+          if (stderr.includes('Video unavailable')) {
+            errorMessage = 'Video is unavailable or private';
+          } else if (stderr.includes('network') || stderr.includes('timeout')) {
+            errorMessage = 'Network connection error';
+          } else if (stderr.includes('certificate') || stderr.includes('SSL')) {
+            errorMessage = 'SSL certificate error';
+          } else if (stderr) {
+            errorMessage += `: ${stderr}`;
+          }
+
+          reject(new Error(errorMessage));
+          return;
+        }
+
+        try {
+          const lines = stdout.split('\n').filter(l => l.trim());
+          const jsonLine = lines.find(l => l.trim().startsWith('{'));
+          if (!jsonLine) {
+            throw new Error('No JSON object found in yt-dlp output');
+          }
+          const videoData = JSON.parse(jsonLine) as Record<string, unknown>;
+          const metadata = this.parseVideoMetadata(videoData);
+
+          // Extract audio URL from requested_downloads or url field
+          let audioUrl = '';
+          const requestedDownloads = videoData.requested_downloads as Array<{ url?: string }> | undefined;
+          if (requestedDownloads && requestedDownloads.length > 0 && requestedDownloads[0].url) {
+            audioUrl = requestedDownloads[0].url;
+          } else if (videoData.url && typeof videoData.url === 'string') {
+            audioUrl = videoData.url;
+          }
+
+          if (!audioUrl) {
+            reject(new Error('No audio URL found in yt-dlp JSON output'));
+            return;
+          }
+
+          // Cache metadata
+          this.videoInfoCache.set(normalizedUrl, {
+            data: metadata,
+            timestamp: Date.now(),
+          });
+
+          resolve({ metadata, audioUrl });
+        } catch (parseError) {
+          logger.error("Failed to parse yt-dlp JSON output", {
+            error: (parseError as Error).message,
+            stdout: stdout.substring(0, 500),
+          });
+          reject(new Error(`Failed to parse yt-dlp output: ${(parseError as Error).message}`));
+        }
+      });
+
+      ytdlp.on("error", (error: NodeJS.ErrnoException) => {
+        let errorMessage = 'yt-dlp process error';
+        if (error.code === 'ENOENT') {
+          errorMessage = 'yt-dlp is not installed or not found in PATH';
+        } else if (error.message) {
+          errorMessage += `: ${error.message}`;
+        }
+        reject(new Error(errorMessage));
+      });
+
+      // 30 second timeout
+      const timeoutId = setTimeout(() => {
+        ytdlp.kill('SIGTERM');
+        setTimeout(() => { if (!ytdlp.killed) ytdlp.kill('SIGKILL'); }, 2000);
+        reject(new Error("Audio extraction timeout"));
+      }, 30000).unref();
+
+      const clearKillTimeout = () => clearTimeout(timeoutId);
+      ytdlp.on('close', clearKillTimeout);
+      ytdlp.on('error', clearKillTimeout);
+    });
   }
 
   /**
