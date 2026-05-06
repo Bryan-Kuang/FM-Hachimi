@@ -29,6 +29,7 @@ interface PlayerServiceDeps {
   interfaceUpdater: InterfaceUpdaterLike;
   progressTracker: unknown;
   extractor: ExtractorLike;
+  youtubeExtractor?: ExtractorLike;
   historyStore?: unknown;
 }
 
@@ -36,6 +37,7 @@ class PlayerService extends EventEmitter {
   private audioManager: AudioManagerLike;
   private interfaceUpdater: InterfaceUpdaterLike;
   private extractor: ExtractorLike;
+  private youtubeExtractor: ExtractorLike | null;
   /** Per-guild AbortControllers for running hachimi ops */
   private _hachimiControllers: Map<GuildId, AbortController>;
 
@@ -44,12 +46,14 @@ class PlayerService extends EventEmitter {
     interfaceUpdater,
     progressTracker: _progressTracker,
     extractor,
+    youtubeExtractor,
     historyStore: _historyStore,
   }: PlayerServiceDeps) {
     super();
     this.audioManager        = audioManager;
     this.interfaceUpdater    = interfaceUpdater;
     this.extractor           = extractor;
+    this.youtubeExtractor    = youtubeExtractor || null;
     this._hachimiControllers = new Map();
   }
 
@@ -66,6 +70,13 @@ class PlayerService extends EventEmitter {
    */
   getExtractor(): ExtractorLike {
     return this.extractor;
+  }
+
+  /**
+   * Public accessor for the YouTube extractor (null if unavailable).
+   */
+  getYouTubeExtractor(): ExtractorLike | null {
+    return this.youtubeExtractor;
   }
 
   // ---------------------------------------------------------------------------

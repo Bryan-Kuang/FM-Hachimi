@@ -1,6 +1,6 @@
 /**
  * Search Command
- * Search for Bilibili videos by keyword
+ * Search for Bilibili or YouTube videos by keyword
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -12,12 +12,22 @@ import * as logger from '../../services/logger_service';
 const createSearchCommand = (playbackService: any) => ({
   data: new SlashCommandBuilder()
     .setName('search')
-    .setDescription('搜索 Bilibili 视频')
+    .setDescription('搜索 Bilibili / YouTube 视频')
     .addStringOption((option) =>
       option
         .setName('keyword')
         .setDescription('搜索关键词')
         .setRequired(true),
+    )
+    .addStringOption((option) =>
+      option
+        .setName('platform')
+        .setDescription('搜索平台（默认 bilibili）')
+        .setRequired(false)
+        .addChoices(
+          { name: 'Bilibili', value: 'bilibili' },
+          { name: 'YouTube', value: 'youtube' },
+        ),
     )
     .addIntegerOption((option) =>
       option
@@ -34,12 +44,57 @@ const createSearchCommand = (playbackService: any) => ({
     let deferred = false;
     try {
       const keyword    = interaction.options.getString('keyword', true);
+      const platform   = interaction.options.getString('platform') || 'bilibili';
       const maxResults = interaction.options.getInteger('results') ?? 5;
       const user       = interaction.user;
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       deferred = true;
 
+      // ─── YouTube search ───────────────────────────────────────────────────
+      if (platform === 'youtube') {
+        const ytExtractor = playbackService.getYouTubeExtractor();
+        if (!ytExtractor) {
+          const errEmbed = EmbedBuilders.createErrorEmbed(
+            'YouTube Not Available',
+            'YouTube 提取器未初始化，请稍后再试。',
+          );
+          await interaction.editReply({ embeds: [errEmbed] });
+          return;
+        }
+
+        const response = await ytExtractor.searchVideos(keyword, maxResults) as any;
+        const results: any[] = response?.results ?? [];
+
+        if (results.length === 0) {
+          const noResultsEmbed = EmbedBuilders.createErrorEmbed(
+            'No Results Found',
+            `未找到 "${keyword}" 相关 YouTube 视频。`,
+          );
+          await interaction.editReply({ embeds: [noResultsEmbed] });
+          return;
+        }
+
+        const searchEmbed = EmbedBuilders.createSearchResultsEmbed(results, keyword);
+        let components: any[] = [];
+        try {
+          components = [ButtonBuilders.createSearchResultsMenu(results, keyword)];
+        } catch { /* StringSelectMenuBuilder unavailable */ }
+
+        const payload: Record<string, unknown> = { embeds: [searchEmbed] };
+        if (components.length > 0) payload.components = components;
+        await interaction.editReply(payload);
+
+        logger.info('Search command executed (YouTube)', {
+          user: user.username,
+          guild: interaction.guild.name,
+          keyword,
+          resultsFound: results.length,
+        });
+        return;
+      }
+
+      // ─── Bilibili search (default) ────────────────────────────────────────
       const extractor = playbackService.getExtractor();
       if (!extractor) {
         const errEmbed = EmbedBuilders.createErrorEmbed(
