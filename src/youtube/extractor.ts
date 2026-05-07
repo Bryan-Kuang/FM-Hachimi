@@ -6,6 +6,8 @@
 
 import { spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import * as logger from '../services/logger_service';
 import config = require('../config/config');
 import YouTubeValidator = require('./validator');
@@ -163,10 +165,30 @@ class YouTubeExtractor {
     return null;
   }
 
-  /** Get yt-dlp cookie arguments if a cookies file is configured. */
+  /**
+   * Get yt-dlp cookie arguments using a read-only temp copy.
+   *
+   * yt-dlp writes back to the cookies file on every call, overwriting
+   * the original with rotated tokens from the data-center IP response.
+   * This degrades the session until YouTube kills it — often within an hour.
+   *
+   * Fix: copy the original cookies to a temp file, pass that to yt-dlp,
+   * then delete it. The original file stays untouched.
+   */
   private _getCookieArgs(): string[] {
     if (this._cookiesFile && fs.existsSync(this._cookiesFile)) {
-      return ['--cookies', this._cookiesFile];
+      try {
+        const tmpFile = path.join(os.tmpdir(), `yt-cookies-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`);
+        fs.copyFileSync(this._cookiesFile, tmpFile);
+        // Schedule cleanup — delete temp file after yt-dlp finishes (60s buffer)
+        setTimeout(() => {
+          try { fs.unlinkSync(tmpFile); } catch { /* already gone */ }
+        }, 60000).unref();
+        return ['--cookies', tmpFile];
+      } catch (err) {
+        logger.warn('Failed to create temp cookies copy, using original', { error: (err as Error).message });
+        return ['--cookies', this._cookiesFile];
+      }
     }
     return [];
   }
