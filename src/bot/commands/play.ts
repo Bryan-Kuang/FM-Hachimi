@@ -8,6 +8,7 @@ import { SlashCommandBuilder, ChatInputCommandInteraction, MessageFlags } from '
 import { routeQuery } from '../../utils/url_router';
 import EmbedBuilders = require('../../ui/embeds');
 import ButtonBuilders = require('../../ui/buttons');
+import SearchRanker = require('../../utils/search_ranker');
 import * as logger from '../../services/logger_service';
 
 const createPlayCommand = (playbackService: any, queueService: any) => ({
@@ -160,7 +161,7 @@ const createPlayCommand = (playbackService: any, queueService: any) => ({
 
       // Search both platforms in parallel
       // Bilibili: use the HTTP API (fast, ~1s) not the yt-dlp extractor (slow, ~10s)
-      // YouTube: use yt-dlp search, capped to match Bilibili result count
+      // Rank the returned pool locally by title relevance before displaying it.
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const bilibiliApi = require('../../bilibili/api') as any;
 
@@ -176,14 +177,24 @@ const createPlayCommand = (playbackService: any, queueService: any) => ({
       const rawBili: any[] = biliResponse.status === 'fulfilled'
         ? (Array.isArray(biliResponse.value) ? biliResponse.value : [])
         : [];
-      const biliResults: any[] = rawBili.slice(0, perPlatformLimit).map(r => ({
+      const normalizedBiliResults: any[] = rawBili.map(r => ({
         ...r,
         uploader: r.uploader || r.author || 'Unknown',
         viewCount: r.viewCount ?? r.view ?? 0,
       }));
-      const ytResults: any[] = ytResponse.status === 'fulfilled'
-        ? ((ytResponse.value as any)?.results ?? []).slice(0, perPlatformLimit)
+      const rawYtResults: any[] = ytResponse.status === 'fulfilled'
+        ? ((ytResponse.value as any)?.results ?? [])
         : [];
+      const biliResults = SearchRanker.rankAndLimitSearchResults(
+        normalizedBiliResults,
+        query as string,
+        perPlatformLimit,
+      );
+      const ytResults = SearchRanker.rankAndLimitSearchResults(
+        rawYtResults,
+        query as string,
+        perPlatformLimit,
+      );
 
       if (biliResults.length === 0 && ytResults.length === 0) {
         await interaction.editReply({ content: `No results found for "${query}"` });
@@ -204,6 +215,8 @@ const createPlayCommand = (playbackService: any, queueService: any) => ({
         query,
         biliCount: biliResults.length,
         ytCount: ytResults.length,
+        rawBiliCount: normalizedBiliResults.length,
+        rawYtCount: rawYtResults.length,
         user: user.username,
       });
     } catch (e: unknown) {
