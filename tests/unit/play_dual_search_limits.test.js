@@ -105,4 +105,54 @@ describe("/play dual-platform keyword search limits", () => {
     expect(ButtonBuilders.createDualSearchMenu.mock.calls[0][0]).toHaveLength(5);
     expect(ButtonBuilders.createDualSearchMenu.mock.calls[0][1]).toHaveLength(5);
   });
+
+  test("promotes exact title matches within the returned five results", async () => {
+    const biliResults = [
+      ...Array.from({ length: 4 }, (_, index) => ({
+        title: `完全无关 ${index}`,
+        bvid: `BVoff${index}`,
+        author: "Bili Uploader",
+        duration: 60 + index,
+      })),
+      {
+        title: "【哈基米】无止境电台",
+        bvid: "BV1JuhNz6Eg6",
+        author: "Bili Uploader",
+        duration: 185,
+      },
+    ];
+    const ytResults = [
+      ...Array.from({ length: 4 }, (_, index) => ({
+        title: `Unrelated ${index}`,
+        id: `ytid00000${index}`,
+        uploader: "YouTube Uploader",
+        duration: 120 + index,
+      })),
+      {
+        title: "哈基米无止境电台",
+        id: "ytidtarget1",
+        uploader: "YouTube Uploader",
+        duration: 180,
+      },
+    ];
+
+    bilibiliApi.searchVideos.mockResolvedValue(biliResults);
+    const ytExtractor = {
+      searchVideos: jest.fn().mockResolvedValue({ success: true, results: ytResults }),
+    };
+    const playbackService = {
+      getYouTubeExtractor: jest.fn().mockReturnValue(ytExtractor),
+    };
+    const command = createPlayCommand(playbackService, {});
+
+    await command.execute(makeInteraction("哈基米无止境电台"));
+
+    const [biliDisplayed, ytDisplayed] = EmbedBuilders.createDualSearchEmbed.mock.calls[0];
+    expect(biliDisplayed[0]).toEqual(expect.objectContaining({ bvid: "BV1JuhNz6Eg6" }));
+    expect(ytDisplayed[0]).toEqual(expect.objectContaining({ id: "ytidtarget1" }));
+    expect(biliDisplayed).toHaveLength(5);
+    expect(ytDisplayed).toHaveLength(5);
+    expect(biliDisplayed.map(result => result.title)).toContain("完全无关 0");
+    expect(ytDisplayed.map(result => result.title)).toContain("Unrelated 0");
+  });
 });

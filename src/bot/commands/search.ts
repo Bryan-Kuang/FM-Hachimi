@@ -7,6 +7,7 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import EmbedBuilders = require('../../ui/embeds');
 import ButtonBuilders = require('../../ui/buttons');
+import SearchRanker = require('../../utils/search_ranker');
 import * as logger from '../../services/logger_service';
 
 const createSearchCommand = (playbackService: any) => ({
@@ -64,7 +65,8 @@ const createSearchCommand = (playbackService: any) => ({
         }
 
         const response = await ytExtractor.searchVideos(keyword, maxResults) as any;
-        const results: any[] = response?.results ?? [];
+        const rawResults: any[] = response?.results ?? [];
+        const results = SearchRanker.rankAndLimitSearchResults(rawResults, keyword, maxResults);
 
         if (results.length === 0) {
           const noResultsEmbed = EmbedBuilders.createErrorEmbed(
@@ -90,6 +92,7 @@ const createSearchCommand = (playbackService: any) => ({
           guild: interaction.guild.name,
           keyword,
           resultsFound: results.length,
+          rawResultsFound: rawResults.length,
         });
         return;
       }
@@ -107,7 +110,8 @@ const createSearchCommand = (playbackService: any) => ({
 
       // extractor.searchVideos may return a plain array or { success, results }
       const response = await extractor.searchVideos(keyword, maxResults) as any;
-      const results: any[] = Array.isArray(response) ? response : (response?.results ?? []);
+      const rawResults: any[] = Array.isArray(response) ? response : (response?.results ?? []);
+      const results = SearchRanker.rankAndLimitSearchResults(rawResults, keyword, maxResults);
 
       if (results.length === 0) {
         const noResultsEmbed = EmbedBuilders.createErrorEmbed(
@@ -136,6 +140,7 @@ const createSearchCommand = (playbackService: any) => ({
         guild: interaction.guild.name,
         keyword,
         resultsFound: results.length,
+        rawResultsFound: rawResults.length,
       });
     } catch (e: unknown) {
       logger.error('Search command failed', {
