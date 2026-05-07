@@ -323,20 +323,12 @@ async function handlePlaySearch(interaction: any, customId: string, playerServic
 
   try {
     if (isBilibili) {
-      // ── Bilibili path ───────────────────────────────────────────────────
-      const extractor = playerService.getExtractor();
-      if (!extractor) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          'Extractor Not Available', 'Bilibili extractor is not available.',
-          { suggestion: 'Please try again later.' },
-        );
-        return await interaction.editReply({ embeds: [errorEmbed] });
-      }
+      // ── Bilibili path (use HTTP API, not yt-dlp extractor) ──────────────
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const bilibiliApi = require('../../../bilibili/api') as any;
+      const results = await bilibiliApi.searchVideos(keyword, 1, 10) as any[];
 
-      const searchResults = await extractor.searchVideos(keyword, 10);
-      const results = Array.isArray(searchResults) ? searchResults : (searchResults?.results ?? []);
-
-      if (resultIndex >= results.length) {
+      if (!results || resultIndex >= results.length) {
         const errorEmbed = EmbedBuilders.createErrorEmbed(
           'Video Not Found', 'The selected video is no longer available.',
           { suggestion: 'Please search again.' },

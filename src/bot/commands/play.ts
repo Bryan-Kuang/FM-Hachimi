@@ -156,21 +156,30 @@ const createPlayCommand = (playbackService: any, queueService: any) => ({
       await interaction.editReply({ content: `🔍 Searching "${query}" on Bilibili & YouTube...` });
 
       const ytExtractorForSearch = playbackService.getYouTubeExtractor();
-      const biliExtractor = playbackService.getExtractor();
 
       // Search both platforms in parallel
+      // Bilibili: use the HTTP API (fast, ~1s) not the yt-dlp extractor (slow, ~10s)
+      // YouTube: use yt-dlp search with a 15s timeout so it doesn't hang
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const bilibiliApi = require('../../bilibili/api') as any;
+
       const [biliResponse, ytResponse] = await Promise.allSettled([
-        biliExtractor
-          ? biliExtractor.searchVideos(query as string, 3)
-          : Promise.resolve({ success: false, results: [] }),
+        bilibiliApi.searchVideos(query as string, 1, 3) as Promise<any[]>,
         ytExtractorForSearch
           ? ytExtractorForSearch.searchVideos(query as string, 3)
           : Promise.resolve({ success: false, results: [] }),
       ]);
 
-      const biliResults: any[] = biliResponse.status === 'fulfilled'
-        ? (Array.isArray(biliResponse.value) ? biliResponse.value : (biliResponse.value as any)?.results ?? [])
+      // Bilibili API returns a plain array with `author`/`view` fields;
+      // normalize to `uploader`/`viewCount` so the embed/menu builders work
+      const rawBili: any[] = biliResponse.status === 'fulfilled'
+        ? (Array.isArray(biliResponse.value) ? biliResponse.value : [])
         : [];
+      const biliResults: any[] = rawBili.map(r => ({
+        ...r,
+        uploader: r.uploader || r.author || 'Unknown',
+        viewCount: r.viewCount ?? r.view ?? 0,
+      }));
       const ytResults: any[] = ytResponse.status === 'fulfilled'
         ? ((ytResponse.value as any)?.results ?? [])
         : [];

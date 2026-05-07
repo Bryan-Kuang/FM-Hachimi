@@ -337,6 +337,7 @@ class YouTubeExtractor {
    * Search YouTube videos by keyword.
    */
   async searchVideos(keyword: string, limit = 5): Promise<SearchResponse> {
+    await this._waitForRateLimit();
     return new Promise((resolve) => {
       const args = [
         `ytsearch${limit}:${keyword}`,
@@ -417,7 +418,7 @@ class YouTubeExtractor {
           keyword,
           timestamp: new Date().toISOString(),
         });
-      }, 20000).unref();
+      }, 10000).unref();
 
       ytdlp.on('close', () => clearTimeout(timeoutId));
       ytdlp.on('error', () => clearTimeout(timeoutId));
