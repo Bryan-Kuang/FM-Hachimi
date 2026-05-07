@@ -62,6 +62,63 @@ interface UpdateButtonStatesOptions {
   canSkip?: boolean;
 }
 
+interface SearchMenuResult {
+  title: string;
+  uploader?: string;
+  duration?: string | number;
+  id?: string | number;
+  bvid?: string;
+  aid?: string | number;
+  url?: string;
+}
+
+type SearchPlatform = 'bilibili' | 'youtube';
+
+function extractBilibiliIdentity(result: SearchMenuResult): string | null {
+  if (typeof result.bvid === 'string' && result.bvid.trim()) return result.bvid.trim();
+  if (typeof result.aid === 'number' && Number.isFinite(result.aid)) return String(Math.trunc(result.aid));
+  if (typeof result.aid === 'string' && result.aid.trim()) return result.aid.trim();
+
+  if (typeof result.id === 'number' && Number.isFinite(result.id)) return String(Math.trunc(result.id));
+  if (typeof result.id === 'string' && result.id.trim()) {
+    const id = result.id.trim();
+    if (/^(BV[a-zA-Z0-9]+|av\d+|\d+)$/.test(id)) return id;
+  }
+
+  if (typeof result.url === 'string') {
+    const match = result.url.match(/\/video\/(BV[a-zA-Z0-9]+|av\d+)/i);
+    if (match) return match[1];
+  }
+
+  return null;
+}
+
+function extractYouTubeIdentity(result: SearchMenuResult): string | null {
+  if (typeof result.id === 'string' && /^[a-zA-Z0-9_-]{11}$/.test(result.id.trim())) {
+    return result.id.trim();
+  }
+
+  if (typeof result.url === 'string') {
+    const url = result.url.trim();
+    if (/^[a-zA-Z0-9_-]{11}$/.test(url)) return url;
+
+    const watchMatch = url.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+    if (watchMatch) return watchMatch[1];
+
+    const pathMatch = url.match(/(?:youtu\.be\/|\/shorts\/|\/embed\/|\/live\/)([a-zA-Z0-9_-]{11})/);
+    if (pathMatch) return pathMatch[1];
+  }
+
+  return null;
+}
+
+function createSelectionValue(platform: SearchPlatform, result: SearchMenuResult, fallback: string): string {
+  const identity = platform === 'youtube'
+    ? extractYouTubeIdentity(result)
+    : extractBilibiliIdentity(result);
+  return identity ? `${platform === 'youtube' ? 'yt' : 'bili'}:${identity}` : fallback;
+}
+
 class ButtonBuilders {
   /**
    * Create modern playback control buttons.
@@ -398,8 +455,9 @@ class ButtonBuilders {
    * Create a search results selection menu.
    */
   static createSearchResultsMenu(
-    results: { title: string; uploader?: string; duration?: string | number }[],
+    results: SearchMenuResult[],
     keyword: string,
+    platform: SearchPlatform = 'bilibili',
   ): ActionRowBuilder<StringSelectMenuBuilder> {
     const safeKeyword = keyword || 'search';
     const safeResults = Array.isArray(results) ? results : [];
@@ -417,7 +475,7 @@ class ButtonBuilders {
       selectMenu.addOptions({
         label: `${index + 1}. ${title}`,
         description: `${uploader} | ${duration}`,
-        value: `search_result_${index}`,
+        value: createSelectionValue(platform, result, `search_result_${index}`),
       });
     });
 
@@ -426,11 +484,11 @@ class ButtonBuilders {
 
   /**
    * Create a dual-platform search results selection menu.
-   * Values are prefixed with platform: "bili_0", "yt_0", etc.
+   * Values carry platform and video identity when available, with index fallback.
    */
   static createDualSearchMenu(
-    biliResults: { title: string; uploader?: string; duration?: string | number }[],
-    ytResults: { title: string; uploader?: string; duration?: string | number }[],
+    biliResults: SearchMenuResult[],
+    ytResults: SearchMenuResult[],
     keyword: string,
   ): ActionRowBuilder<StringSelectMenuBuilder> {
     const safeKeyword = (keyword || 'search').replace(/\s+/g, '_');
@@ -447,7 +505,7 @@ class ButtonBuilders {
       selectMenu.addOptions({
         label: `B${index + 1}. ${title}`,
         description: `Bilibili | ${uploader}`,
-        value: `bili_${index}`,
+        value: createSelectionValue('bilibili', result, `bili_${index}`),
         emoji: '📺',
       });
     });
@@ -458,7 +516,7 @@ class ButtonBuilders {
       selectMenu.addOptions({
         label: `Y${index + 1}. ${title}`,
         description: `YouTube | ${uploader}`,
-        value: `yt_${index}`,
+        value: createSelectionValue('youtube', result, `yt_${index}`),
         emoji: '▶️',
       });
     });
