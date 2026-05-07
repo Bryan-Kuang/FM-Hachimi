@@ -6,6 +6,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { SlashCommandBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { routeQuery } from '../../utils/url_router';
+import EmbedBuilders = require('../../ui/embeds');
+import ButtonBuilders = require('../../ui/buttons');
 import * as logger from '../../services/logger_service';
 
 const createPlayCommand = (playbackService: any, queueService: any) => ({
@@ -150,50 +152,48 @@ const createPlayCommand = (playbackService: any, queueService: any) => ({
         return;
       }
 
-      // ─── Keyword search (fallback to Bilibili) ──────────────────────────────
-      await interaction.editReply({ content: `🔍 搜索 "${query}"...` });
+      // ─── Keyword search (Bilibili + YouTube) ─────────────────────────────────
+      await interaction.editReply({ content: `🔍 Searching "${query}" on Bilibili & YouTube...` });
 
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const bilibiliApi = require('../../bilibili/api') as any;
-      const results = await bilibiliApi.searchVideos(query, 1, 5) as any[];
+      const ytExtractorForSearch = playbackService.getYouTubeExtractor();
+      const biliExtractor = playbackService.getExtractor();
 
-      if (!results || results.length === 0) {
-        await interaction.editReply({ content: `未找到 "${query}" 相关视频` });
+      // Search both platforms in parallel
+      const [biliResponse, ytResponse] = await Promise.allSettled([
+        biliExtractor
+          ? biliExtractor.searchVideos(query as string, 3)
+          : Promise.resolve({ success: false, results: [] }),
+        ytExtractorForSearch
+          ? ytExtractorForSearch.searchVideos(query as string, 3)
+          : Promise.resolve({ success: false, results: [] }),
+      ]);
+
+      const biliResults: any[] = biliResponse.status === 'fulfilled'
+        ? (Array.isArray(biliResponse.value) ? biliResponse.value : (biliResponse.value as any)?.results ?? [])
+        : [];
+      const ytResults: any[] = ytResponse.status === 'fulfilled'
+        ? ((ytResponse.value as any)?.results ?? [])
+        : [];
+
+      if (biliResults.length === 0 && ytResults.length === 0) {
+        await interaction.editReply({ content: `No results found for "${query}"` });
         return;
       }
 
-      const url = results[0].url as string;
-      logger.info('Keyword search resolved to URL', {
-        keyword: query,
-        resolvedUrl: url,
-        title: results[0].title,
-      });
+      const searchEmbed = EmbedBuilders.createDualSearchEmbed(biliResults, ytResults, query as string);
+      let components: any[] = [];
+      try {
+        components = [ButtonBuilders.createDualSearchMenu(biliResults, ytResults, query as string)];
+      } catch { /* select menu unavailable */ }
 
-      const player = playbackService.getPlayer(interaction.guild.id);
-      const joined = await player.joinVoiceChannel(member.voice.channel) as boolean;
-      if (!joined) {
-        await interaction.editReply({ content: 'Failed to join voice' });
-        return;
-      }
+      const payload: Record<string, unknown> = { embeds: [searchEmbed] };
+      if (components.length > 0) payload.components = components;
+      await interaction.editReply(payload);
 
-      const track = await queueService.addTrack(interaction.guild.id, url, `<@${user.id}>`);
-      if (!track) {
-        await interaction.editReply({ content: 'Add failed' });
-        return;
-      }
-
-      playbackService.setUIContext(interaction.guild.id, interaction.channelId);
-      if (!player.isPlaying && !player.isPaused) {
-        await playbackService.play(interaction.guild.id);
-      } else {
-        playbackService.notifyState(interaction.guild.id);
-      }
-
-      await interaction.editReply({ content: `🎵 已添加: ${track.title || url}` });
-      logger.info('Play command completed (keyword search)', {
+      logger.info('Play keyword search: showing dual results', {
         query,
-        url,
-        title: track.title,
+        biliCount: biliResults.length,
+        ytCount: ytResults.length,
         user: user.username,
       });
     } catch (e: unknown) {

@@ -388,6 +388,53 @@ class EmbedBuilders {
 
     return embed;
   }
+
+  /**
+   * Create a dual-platform search results embed (Bilibili + YouTube).
+   */
+  static createDualSearchEmbed(
+    biliResults: SearchResultItem[],
+    ytResults: SearchResultItem[],
+    keyword: string,
+  ): EmbedBuilder {
+    const total = biliResults.length + ytResults.length;
+    const embed = new EmbedBuilder()
+      .setTitle('🔍 Search Results')
+      .setDescription(`Found ${total} results for "**${Formatters.escapeMarkdown(keyword)}**"`)
+      .setColor(0x00ae86)
+      .setTimestamp();
+
+    if (biliResults.length > 0) {
+      embed.addFields({ name: '📺 Bilibili', value: '​', inline: false });
+      biliResults.forEach((result, index) => {
+        const title = result.title.length > 70 ? result.title.substring(0, 70) + '...' : result.title;
+        const uploader = result.uploader || 'Unknown';
+        const duration = result.duration || '?';
+        embed.addFields({
+          name: `B${index + 1}. ${Formatters.escapeMarkdown(title)}`,
+          value: `👤 ${Formatters.escapeMarkdown(uploader)} | ⏱️ ${duration}`,
+          inline: false,
+        });
+      });
+    }
+
+    if (ytResults.length > 0) {
+      embed.addFields({ name: '▶️ YouTube', value: '​', inline: false });
+      ytResults.forEach((result, index) => {
+        const title = result.title.length > 70 ? result.title.substring(0, 70) + '...' : result.title;
+        const uploader = result.uploader || 'Unknown';
+        const duration = result.duration || '?';
+        embed.addFields({
+          name: `Y${index + 1}. ${Formatters.escapeMarkdown(title)}`,
+          value: `👤 ${Formatters.escapeMarkdown(uploader)} | ⏱️ ${duration}`,
+          inline: false,
+        });
+      });
+    }
+
+    embed.setFooter({ text: 'Select a video from the dropdown menu below' });
+    return embed;
+  }
 }
 
 export = EmbedBuilders;

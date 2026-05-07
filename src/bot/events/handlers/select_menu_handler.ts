@@ -30,6 +30,10 @@ function createSelectMenuHandler(playerService: any) {
       if (customId.startsWith('search_select_')) {
         return await handleSearchSelect(interaction, customId, playerService);
       }
+
+      if (customId.startsWith('play_search_')) {
+        return await handlePlaySearch(interaction, customId, playerService);
+      }
     } catch (error: unknown) {
       await handleSelectMenuError(interaction, error as Error);
     }
@@ -287,6 +291,150 @@ async function handleSearchSelect(interaction: any, customId: string, playerServ
       'Error Adding Video', 'An error occurred while adding the video to queue.',
       { suggestion: 'Please try again.' },
     );
+    await interaction.editReply({ embeds: [errorEmbed] });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Play Search (dual-platform: Bilibili + YouTube from /play keyword)
+// ---------------------------------------------------------------------------
+
+async function handlePlaySearch(interaction: any, customId: string, playerService: any): Promise<void> {
+  const user          = interaction.user;
+  const selectedValue = interaction.values[0] as string; // "bili_0", "yt_2", etc.
+  const member        = interaction.member;
+
+  logger.debug('Play search select menu interaction received', {
+    selectedValue,
+    user:  user.username,
+    guild: interaction.guild?.name,
+  });
+
+  if (!member?.voice?.channel) {
+    await interaction.reply({ content: 'Voice channel required', flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  await interaction.deferReply();
+
+  const keyword     = customId.replace('play_search_', '').replace(/_/g, ' ');
+  const isBilibili  = selectedValue.startsWith('bili_');
+  const resultIndex = parseInt(selectedValue.replace(/^(bili|yt)_/, ''));
+
+  try {
+    if (isBilibili) {
+      // ── Bilibili path ───────────────────────────────────────────────────
+      const extractor = playerService.getExtractor();
+      if (!extractor) {
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          'Extractor Not Available', 'Bilibili extractor is not available.',
+          { suggestion: 'Please try again later.' },
+        );
+        return await interaction.editReply({ embeds: [errorEmbed] });
+      }
+
+      const searchResults = await extractor.searchVideos(keyword, 10);
+      const results = Array.isArray(searchResults) ? searchResults : (searchResults?.results ?? []);
+
+      if (resultIndex >= results.length) {
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          'Video Not Found', 'The selected video is no longer available.',
+          { suggestion: 'Please search again.' },
+        );
+        return await interaction.editReply({ embeds: [errorEmbed] });
+      }
+
+      const selectedVideo = results[resultIndex];
+      const videoUrl = selectedVideo.url || `https://www.bilibili.com/video/${selectedVideo.bvid || 'av' + selectedVideo.id}`;
+      const addResult = await playerService.playBilibiliVideo(interaction, videoUrl);
+
+      if (!addResult.success) {
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          'Failed to Add Video', addResult.error || 'Failed to add the video to queue.',
+          { suggestion: addResult.suggestion || 'Please try again.' },
+        );
+        return await interaction.editReply({ embeds: [errorEmbed] });
+      }
+
+      const successEmbed = EmbedBuilders.createSuccessEmbed(
+        'Added to Queue',
+        `📺 **${selectedVideo.title}** has been added to the queue`,
+      );
+      await interaction.editReply({ embeds: [successEmbed] });
+    } else {
+      // ── YouTube path ────────────────────────────────────────────────────
+      const ytExtractor = playerService.getYouTubeExtractor();
+      if (!ytExtractor) {
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          'YouTube Not Available', 'YouTube extractor is not available.',
+          { suggestion: 'Please try again later.' },
+        );
+        return await interaction.editReply({ embeds: [errorEmbed] });
+      }
+
+      const searchResponse = await ytExtractor.searchVideos(keyword, 10);
+      const results = searchResponse?.results ?? [];
+
+      if (resultIndex >= results.length) {
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          'Video Not Found', 'The selected video is no longer available.',
+          { suggestion: 'Please search again.' },
+        );
+        return await interaction.editReply({ embeds: [errorEmbed] });
+      }
+
+      const selectedVideo = results[resultIndex];
+      const videoUrl = selectedVideo.url || `https://www.youtube.com/watch?v=${selectedVideo.id}`;
+
+      // Extract audio and add to queue
+      const videoData = await ytExtractor.extractAudio(videoUrl);
+
+      const player = playerService.getPlayer(interaction.guild.id);
+      const joined = await player.joinVoiceChannel(member.voice.channel);
+      if (!joined) {
+        return await interaction.editReply({ content: 'Failed to join voice channel' });
+      }
+
+      const track = await playerService.addTrack(interaction.guild.id, videoData, `<@${user.id}>`);
+      if (!track) {
+        return await interaction.editReply({ content: 'Failed to add track to queue' });
+      }
+
+      playerService.setUIContext(interaction.guild.id, interaction.channelId);
+      if (!player.isPlaying && !player.isPaused) {
+        await playerService.play(interaction.guild.id);
+      } else {
+        playerService.notifyState(interaction.guild.id);
+      }
+
+      const successEmbed = EmbedBuilders.createSuccessEmbed(
+        'Added to Queue',
+        `▶️ **${selectedVideo.title}** has been added to the queue`,
+      );
+      await interaction.editReply({ embeds: [successEmbed] });
+    }
+
+    logger.info('Video added to queue from play search', {
+      platform: isBilibili ? 'bilibili' : 'youtube',
+      index:    resultIndex,
+      user:     user.username,
+      guild:    interaction.guild?.name,
+    });
+  } catch (innerError: unknown) {
+    logger.error('Failed to add video from play search', {
+      error:    (innerError as Error).message,
+      platform: isBilibili ? 'bilibili' : 'youtube',
+      user:     user.username,
+      guild:    interaction.guild?.name,
+    });
+
+    const msg = (innerError as Error).message || '';
+    let content = 'An error occurred while adding the video.';
+    if (msg.includes('cookies expired')) {
+      content = '🔒 YouTube cookies expired. Ask the bot admin to refresh cookies.';
+    }
+
+    const errorEmbed = EmbedBuilders.createErrorEmbed('Error Adding Video', content, { suggestion: 'Please try again.' });
     await interaction.editReply({ embeds: [errorEmbed] });
   }
 }
