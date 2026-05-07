@@ -370,14 +370,14 @@ class EmbedBuilders {
     results.slice(0, 10).forEach((result, index) => {
       const title = result.title.length > 80 ? result.title.substring(0, 80) + '...' : result.title;
       const uploader = result.uploader || 'Unknown';
-      const duration = result.duration || 'Unknown';
+      const duration = Formatters.formatInlineTimeHms(result.duration);
       const viewCount = result.viewCount
         ? Formatters.formatNumber(parseInt(String(result.viewCount)))
         : 'Unknown';
 
       embed.addFields({
         name: `${index + 1}. ${Formatters.escapeMarkdown(title)}`,
-        value: `👤 **${Formatters.escapeMarkdown(uploader)}** | ⏱️ **${duration}** | 👁️ **${viewCount} views**`,
+        value: `👤 **${Formatters.escapeMarkdown(uploader)}** | ${duration} | 👁️ **${viewCount} views**`,
         inline: false,
       });
     });
@@ -409,10 +409,10 @@ class EmbedBuilders {
       biliResults.forEach((result, index) => {
         const title = result.title.length > 70 ? result.title.substring(0, 70) + '...' : result.title;
         const uploader = result.uploader || 'Unknown';
-        const duration = result.duration || '?';
+        const duration = Formatters.formatInlineTimeHms(result.duration);
         embed.addFields({
           name: `B${index + 1}. ${Formatters.escapeMarkdown(title)}`,
-          value: `👤 ${Formatters.escapeMarkdown(uploader)} | ⏱️ ${duration}`,
+          value: `👤 ${Formatters.escapeMarkdown(uploader)} | ${duration}`,
           inline: false,
         });
       });
@@ -423,10 +423,10 @@ class EmbedBuilders {
       ytResults.forEach((result, index) => {
         const title = result.title.length > 70 ? result.title.substring(0, 70) + '...' : result.title;
         const uploader = result.uploader || 'Unknown';
-        const duration = result.duration || '?';
+        const duration = Formatters.formatInlineTimeHms(result.duration);
         embed.addFields({
           name: `Y${index + 1}. ${Formatters.escapeMarkdown(title)}`,
-          value: `👤 ${Formatters.escapeMarkdown(uploader)} | ⏱️ ${duration}`,
+          value: `👤 ${Formatters.escapeMarkdown(uploader)} | ${duration}`,
           inline: false,
         });
       });

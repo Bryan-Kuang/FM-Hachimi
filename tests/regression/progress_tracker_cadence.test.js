@@ -68,7 +68,7 @@ jest.mock("../../src/ui/embeds", () => ({
     description: `t=${opts?.currentTime ?? 0}`,
     fields: [
       {
-        name: "⏱️ Progress",
+        name: "Progress",
         value: `bar-${opts?.currentTime ?? 0}`,
       },
     ],

@@ -266,12 +266,12 @@ class DailyHachimiService {
   }
 
   private _buildVideoEmbed(video: VideoInfo): EmbedBuilder {
-    const durationStr = video.duration > 0 ? Formatters.formatTime(video.duration) : '未知';
+    const durationStr = Formatters.formatInlineTimeHms(video.duration, '未知');
 
     const embed = new EmbedBuilder()
       .setColor(0x00B5FF) // Bilibili blue
       .setTitle(video.title || '未知标题')
-      .setDescription(`⏱️ ${durationStr}`)
+      .setDescription(durationStr)
       .setURL(video.url || `https://www.bilibili.com/video/${video.bvid}`);
 
     if (video.pic) {

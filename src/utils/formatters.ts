@@ -18,6 +18,55 @@ class Formatters {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   }
 
+  static formatTimeHms(seconds: number): string {
+    const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const remainingSeconds = safeSeconds % 60;
+
+    return [
+      hours.toString().padStart(2, '0'),
+      minutes.toString().padStart(2, '0'),
+      remainingSeconds.toString().padStart(2, '0'),
+    ].join(':');
+  }
+
+  static parseDurationSeconds(duration: string | number | null | undefined): number | null {
+    if (typeof duration === 'number') {
+      return Number.isFinite(duration) && duration > 0 ? Math.floor(duration) : null;
+    }
+
+    if (typeof duration !== 'string') return null;
+
+    const trimmed = duration.trim();
+    if (!trimmed || trimmed === '?' || /^unknown/i.test(trimmed)) return null;
+
+    if (/^\d+$/.test(trimmed)) {
+      const seconds = parseInt(trimmed, 10);
+      return seconds > 0 ? seconds : null;
+    }
+
+    const parts = trimmed.split(':').map(part => parseInt(part, 10));
+    if (parts.some(part => Number.isNaN(part))) return null;
+
+    if (parts.length === 2) {
+      const seconds = parts[0] * 60 + parts[1];
+      return seconds > 0 ? seconds : null;
+    }
+
+    if (parts.length === 3) {
+      const seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+      return seconds > 0 ? seconds : null;
+    }
+
+    return null;
+  }
+
+  static formatInlineTimeHms(duration: string | number | null | undefined, fallback = 'Unknown'): string {
+    const seconds = this.parseDurationSeconds(duration);
+    return seconds === null ? fallback : `\`${this.formatTimeHms(seconds)}\``;
+  }
+
   static parseTime(timeString: string): number {
     if (!timeString || typeof timeString !== 'string') {
       return 0;
