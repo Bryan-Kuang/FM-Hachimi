@@ -423,6 +423,48 @@ class ButtonBuilders {
 
     return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
   }
+
+  /**
+   * Create a dual-platform search results selection menu.
+   * Values are prefixed with platform: "bili_0", "yt_0", etc.
+   */
+  static createDualSearchMenu(
+    biliResults: { title: string; uploader?: string; duration?: string | number }[],
+    ytResults: { title: string; uploader?: string; duration?: string | number }[],
+    keyword: string,
+  ): ActionRowBuilder<StringSelectMenuBuilder> {
+    const safeKeyword = (keyword || 'search').replace(/\s+/g, '_');
+
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId(`play_search_${safeKeyword}`)
+      .setPlaceholder('Choose a video to play...')
+      .setMinValues(1)
+      .setMaxValues(1);
+
+    biliResults.slice(0, 10).forEach((result, index) => {
+      const title = result.title.length > 80 ? result.title.substring(0, 80) + '...' : result.title;
+      const uploader = result.uploader || 'Unknown';
+      selectMenu.addOptions({
+        label: `B${index + 1}. ${title}`,
+        description: `Bilibili | ${uploader}`,
+        value: `bili_${index}`,
+        emoji: '📺',
+      });
+    });
+
+    ytResults.slice(0, 10).forEach((result, index) => {
+      const title = result.title.length > 80 ? result.title.substring(0, 80) + '...' : result.title;
+      const uploader = result.uploader || 'Unknown';
+      selectMenu.addOptions({
+        label: `Y${index + 1}. ${title}`,
+        description: `YouTube | ${uploader}`,
+        value: `yt_${index}`,
+        emoji: '▶️',
+      });
+    });
+
+    return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
+  }
 }
 
 export = ButtonBuilders;

@@ -623,7 +623,7 @@ describe("Bot Commands Coverage", () => {
         },
       },
       {
-        description: "关键词搜索无结果",
+        description: "keyword search no results",
         scene: {
           userVc: "vc-1",
           botVc: null,
@@ -632,10 +632,15 @@ describe("Bot Commands Coverage", () => {
         },
         setup: () => {
           UrlValidator.isValidBilibiliUrl.mockReturnValue(false);
-          const bilibiliApi = require("../../src/bilibili/api");
-          bilibiliApi.searchVideos = jest.fn().mockResolvedValue([]);
+          // Mock both extractors to return empty results
+          mockPlaybackService.getExtractor.mockReturnValue({
+            searchVideos: jest.fn().mockResolvedValue({ success: true, results: [] }),
+          });
+          mockPlaybackService.getYouTubeExtractor.mockReturnValue({
+            searchVideos: jest.fn().mockResolvedValue({ success: true, results: [] }),
+          });
         },
-        expected: { editReplyContains: "未找到", deferCalled: true },
+        expected: { editReplyContains: "No results found", deferCalled: true },
       },
       {
         description: "加入语音失败",
