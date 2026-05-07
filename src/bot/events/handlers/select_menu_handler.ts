@@ -196,6 +196,174 @@ async function handleLoopSelect(interaction: any, playerService: any): Promise<v
   });
 }
 
+type DirectSelectionPlatform = 'bilibili' | 'youtube';
+
+interface DirectVideoSelection {
+  platform: DirectSelectionPlatform;
+  url: string;
+}
+
+function isDirectSelectionValue(value: string): boolean {
+  return value.startsWith('bili:') || value.startsWith('yt:');
+}
+
+function normalizeBilibiliSelection(rawIdentity: string): string | null {
+  const identity = rawIdentity.trim();
+  if (!identity) return null;
+
+  if (/^https?:\/\//i.test(identity)) {
+    const match = identity.match(/\/video\/(BV[a-zA-Z0-9]+|av\d+)/i);
+    return match ? `https://www.bilibili.com/video/${match[1]}` : null;
+  }
+
+  if (/^BV[a-zA-Z0-9]+$/.test(identity)) {
+    return `https://www.bilibili.com/video/${identity}`;
+  }
+
+  if (/^av\d+$/i.test(identity)) {
+    return `https://www.bilibili.com/video/av${identity.replace(/^av/i, '')}`;
+  }
+
+  if (/^\d+$/.test(identity)) {
+    return `https://www.bilibili.com/video/av${identity}`;
+  }
+
+  return null;
+}
+
+function normalizeYouTubeSelection(rawIdentity: string): string | null {
+  const identity = rawIdentity.trim();
+  if (!identity) return null;
+
+  if (/^[a-zA-Z0-9_-]{11}$/.test(identity)) {
+    return `https://www.youtube.com/watch?v=${identity}`;
+  }
+
+  if (/^https?:\/\//i.test(identity)) {
+    const watchMatch = identity.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+    if (watchMatch) return `https://www.youtube.com/watch?v=${watchMatch[1]}`;
+
+    const pathMatch = identity.match(/(?:youtu\.be\/|\/shorts\/|\/embed\/|\/live\/)([a-zA-Z0-9_-]{11})/);
+    if (pathMatch) return `https://www.youtube.com/watch?v=${pathMatch[1]}`;
+  }
+
+  return null;
+}
+
+function parseDirectSelectionValue(value: string): DirectVideoSelection | null {
+  if (value.startsWith('bili:')) {
+    const url = normalizeBilibiliSelection(value.slice('bili:'.length));
+    return url ? { platform: 'bilibili', url } : null;
+  }
+
+  if (value.startsWith('yt:')) {
+    const url = normalizeYouTubeSelection(value.slice('yt:'.length));
+    return url ? { platform: 'youtube', url } : null;
+  }
+
+  return null;
+}
+
+function getTitle(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null;
+  const title = (value as { title?: unknown }).title;
+  return typeof title === 'string' && title.trim() ? title : null;
+}
+
+async function editInvalidSelection(interaction: any): Promise<void> {
+  const errorEmbed = EmbedBuilders.createErrorEmbed(
+    'Invalid Selection', 'Invalid search result selection format',
+    { suggestion: 'Please try selecting a result again.' },
+  );
+  await interaction.editReply({ embeds: [errorEmbed] });
+}
+
+async function playBilibiliSelection(
+  interaction: any,
+  playerService: any,
+  videoUrl: string,
+  titleHint?: string,
+): Promise<void> {
+  const addResult = await playerService.playBilibiliVideo(interaction, videoUrl);
+
+  if (!addResult || !addResult.success) {
+    const errorEmbed = EmbedBuilders.createErrorEmbed(
+      'Failed to Add Video',
+      addResult?.error || 'Failed to add the selected video to queue.',
+      { suggestion: addResult?.suggestion || 'Please try again.' },
+    );
+    await interaction.editReply({ embeds: [errorEmbed] });
+    return;
+  }
+
+  const title = getTitle(addResult.track) || titleHint || 'selected video';
+  const successEmbed = EmbedBuilders.createSuccessEmbed(
+    'Added to Queue',
+    `📺 **${title}** has been added to the queue`,
+  );
+  await interaction.editReply({ embeds: [successEmbed] });
+}
+
+async function playYouTubeSelection(
+  interaction: any,
+  playerService: any,
+  videoUrl: string,
+  titleHint?: string,
+): Promise<void> {
+  const member = interaction.member;
+  if (!member?.voice?.channel) {
+    await interaction.editReply({ content: 'Voice channel required' });
+    return;
+  }
+
+  const ytExtractor = playerService.getYouTubeExtractor();
+  if (!ytExtractor) {
+    const errorEmbed = EmbedBuilders.createErrorEmbed(
+      'YouTube Not Available', 'YouTube extractor is not available.',
+      { suggestion: 'Please try again later.' },
+    );
+    await interaction.editReply({ embeds: [errorEmbed] });
+    return;
+  }
+
+  const videoData = await ytExtractor.extractAudio(videoUrl);
+  const player = playerService.getPlayer(interaction.guild.id);
+  const joined = await player.joinVoiceChannel(member.voice.channel);
+  if (!joined) {
+    await interaction.editReply({ content: 'Failed to join voice channel' });
+    return;
+  }
+
+  const track = await playerService.addTrack(interaction.guild.id, videoData, `<@${interaction.user.id}>`);
+  if (!track) {
+    await interaction.editReply({ content: 'Failed to add track to queue' });
+    return;
+  }
+
+  playerService.setUIContext(interaction.guild.id, interaction.channelId);
+  if (!player.isPlaying && !player.isPaused) {
+    await playerService.play(interaction.guild.id);
+  } else {
+    playerService.notifyState(interaction.guild.id);
+  }
+
+  const title = getTitle(track) || getTitle(videoData) || titleHint || 'selected video';
+  const successEmbed = EmbedBuilders.createSuccessEmbed(
+    'Added to Queue',
+    `▶️ **${title}** has been added to the queue`,
+  );
+  await interaction.editReply({ embeds: [successEmbed] });
+}
+
+async function playDirectSelection(interaction: any, playerService: any, selection: DirectVideoSelection): Promise<void> {
+  if (selection.platform === 'bilibili') {
+    await playBilibiliSelection(interaction, playerService, selection.url);
+    return;
+  }
+
+  await playYouTubeSelection(interaction, playerService, selection.url);
+}
+
 // ---------------------------------------------------------------------------
 // Search Select
 // ---------------------------------------------------------------------------
@@ -212,28 +380,39 @@ async function handleSearchSelect(interaction: any, customId: string, playerServ
 
   await interaction.deferReply();
 
-  const originalEmbed = interaction.message.embeds[0];
-  if (!originalEmbed || !originalEmbed.description) {
-    const errorEmbed = EmbedBuilders.createErrorEmbed(
-      'Search Results Not Found', 'Could not find the original search results.',
-      { suggestion: 'Please perform a new search.' },
-    );
-    return await interaction.editReply({ embeds: [errorEmbed] });
-  }
-
-  const indexMatch = selectedValue.match(/^search_result_(\d+)$/);
-  if (!indexMatch) {
-    const errorEmbed = EmbedBuilders.createErrorEmbed(
-      'Invalid Selection', 'Invalid search result selection format',
-      { suggestion: 'Please try selecting a result again.' },
-    );
-    return await interaction.editReply({ embeds: [errorEmbed] });
-  }
-
-  const resultIndex = parseInt(indexMatch[1]);
   const keyword     = customId.replace('search_select_', '').replace(/_/g, ' ');
 
   try {
+    const directSelection = parseDirectSelectionValue(selectedValue);
+    if (directSelection) {
+      await playDirectSelection(interaction, playerService, directSelection);
+      logger.info('Video added to queue from direct search result', {
+        platform: directSelection.platform,
+        user:     user.username,
+        guild:    interaction.guild?.name,
+      });
+      return;
+    }
+
+    if (isDirectSelectionValue(selectedValue)) {
+      return await editInvalidSelection(interaction);
+    }
+
+    const originalEmbed = interaction.message.embeds[0];
+    if (!originalEmbed || !originalEmbed.description) {
+      const errorEmbed = EmbedBuilders.createErrorEmbed(
+        'Search Results Not Found', 'Could not find the original search results.',
+        { suggestion: 'Please perform a new search.' },
+      );
+      return await interaction.editReply({ embeds: [errorEmbed] });
+    }
+
+    const indexMatch = selectedValue.match(/^search_result_(\d+)$/);
+    if (!indexMatch) {
+      return await editInvalidSelection(interaction);
+    }
+
+    const resultIndex = parseInt(indexMatch[1], 10);
     const extractor = playerService.getExtractor();
     if (!extractor) {
       const errorEmbed = EmbedBuilders.createErrorEmbed(
@@ -256,22 +435,7 @@ async function handleSearchSelect(interaction: any, customId: string, playerServ
     const selectedVideo = searchResults.results[resultIndex];
     const videoUrl      = selectedVideo.url || `https://www.bilibili.com/video/av${selectedVideo.id}`;
 
-    const addResult = await playerService.playBilibiliVideo(interaction, videoUrl);
-
-    if (!addResult.success) {
-      const errorEmbed = EmbedBuilders.createErrorEmbed(
-        'Failed to Add Video',
-        addResult.error || 'Failed to add the selected video to queue.',
-        { suggestion: addResult.suggestion || 'Please try again.' },
-      );
-      return await interaction.editReply({ embeds: [errorEmbed] });
-    }
-
-    const successEmbed = EmbedBuilders.createSuccessEmbed(
-      'Video Added to Queue',
-      `\u{1F3B5} **${selectedVideo.title}** has been added to the queue`,
-    );
-    await interaction.editReply({ embeds: [successEmbed] });
+    await playBilibiliSelection(interaction, playerService, videoUrl, selectedVideo.title);
 
     logger.info('Video added to queue from search results', {
       videoTitle: selectedVideo.title,
@@ -318,10 +482,25 @@ async function handlePlaySearch(interaction: any, customId: string, playerServic
   await interaction.deferReply();
 
   const keyword     = customId.replace('play_search_', '').replace(/_/g, ' ');
-  const isBilibili  = selectedValue.startsWith('bili_');
-  const resultIndex = parseInt(selectedValue.replace(/^(bili|yt)_/, ''));
+  const isBilibili  = selectedValue.startsWith('bili:') || selectedValue.startsWith('bili_');
+  const resultIndex = parseInt(selectedValue.replace(/^(bili|yt)_/, ''), 10);
 
   try {
+    const directSelection = parseDirectSelectionValue(selectedValue);
+    if (directSelection) {
+      await playDirectSelection(interaction, playerService, directSelection);
+      logger.info('Video added to queue from direct play search', {
+        platform: directSelection.platform,
+        user:     user.username,
+        guild:    interaction.guild?.name,
+      });
+      return;
+    }
+
+    if (isDirectSelectionValue(selectedValue) || Number.isNaN(resultIndex)) {
+      return await editInvalidSelection(interaction);
+    }
+
     if (isBilibili) {
       // ── Bilibili path (use HTTP API, not yt-dlp extractor) ──────────────
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -338,21 +517,7 @@ async function handlePlaySearch(interaction: any, customId: string, playerServic
 
       const selectedVideo = results[resultIndex];
       const videoUrl = selectedVideo.url || `https://www.bilibili.com/video/${selectedVideo.bvid || 'av' + selectedVideo.id}`;
-      const addResult = await playerService.playBilibiliVideo(interaction, videoUrl);
-
-      if (!addResult.success) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          'Failed to Add Video', addResult.error || 'Failed to add the video to queue.',
-          { suggestion: addResult.suggestion || 'Please try again.' },
-        );
-        return await interaction.editReply({ embeds: [errorEmbed] });
-      }
-
-      const successEmbed = EmbedBuilders.createSuccessEmbed(
-        'Added to Queue',
-        `📺 **${selectedVideo.title}** has been added to the queue`,
-      );
-      await interaction.editReply({ embeds: [successEmbed] });
+      await playBilibiliSelection(interaction, playerService, videoUrl, selectedVideo.title);
     } else {
       // ── YouTube path ────────────────────────────────────────────────────
       const ytExtractor = playerService.getYouTubeExtractor();
@@ -377,33 +542,7 @@ async function handlePlaySearch(interaction: any, customId: string, playerServic
 
       const selectedVideo = results[resultIndex];
       const videoUrl = selectedVideo.url || `https://www.youtube.com/watch?v=${selectedVideo.id}`;
-
-      // Extract audio and add to queue
-      const videoData = await ytExtractor.extractAudio(videoUrl);
-
-      const player = playerService.getPlayer(interaction.guild.id);
-      const joined = await player.joinVoiceChannel(member.voice.channel);
-      if (!joined) {
-        return await interaction.editReply({ content: 'Failed to join voice channel' });
-      }
-
-      const track = await playerService.addTrack(interaction.guild.id, videoData, `<@${user.id}>`);
-      if (!track) {
-        return await interaction.editReply({ content: 'Failed to add track to queue' });
-      }
-
-      playerService.setUIContext(interaction.guild.id, interaction.channelId);
-      if (!player.isPlaying && !player.isPaused) {
-        await playerService.play(interaction.guild.id);
-      } else {
-        playerService.notifyState(interaction.guild.id);
-      }
-
-      const successEmbed = EmbedBuilders.createSuccessEmbed(
-        'Added to Queue',
-        `▶️ **${selectedVideo.title}** has been added to the queue`,
-      );
-      await interaction.editReply({ embeds: [successEmbed] });
+      await playYouTubeSelection(interaction, playerService, videoUrl, selectedVideo.title);
     }
 
     logger.info('Video added to queue from play search', {

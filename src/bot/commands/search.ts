@@ -78,7 +78,7 @@ const createSearchCommand = (playbackService: any) => ({
         const searchEmbed = EmbedBuilders.createSearchResultsEmbed(results, keyword);
         let components: any[] = [];
         try {
-          components = [ButtonBuilders.createSearchResultsMenu(results, keyword)];
+          components = [ButtonBuilders.createSearchResultsMenu(results, keyword, 'youtube')];
         } catch { /* StringSelectMenuBuilder unavailable */ }
 
         const payload: Record<string, unknown> = { embeds: [searchEmbed] };
@@ -123,7 +123,7 @@ const createSearchCommand = (playbackService: any) => ({
       // Build the select menu; may not be available in all runtime environments
       let components: any[] = [];
       try {
-        components = [ButtonBuilders.createSearchResultsMenu(results, keyword)];
+        components = [ButtonBuilders.createSearchResultsMenu(results, keyword, 'bilibili')];
       } catch { /* StringSelectMenuBuilder unavailable — reply with embeds only */ }
 
       const payload: Record<string, unknown> = { embeds: [searchEmbed] };
