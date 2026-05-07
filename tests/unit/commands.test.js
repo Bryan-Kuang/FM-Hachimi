@@ -77,6 +77,10 @@ jest.mock("../../src/services/logger_service", () => ({
   debug: jest.fn(),
 }));
 
+jest.mock("../../src/bilibili/api", () => ({
+  searchVideos: jest.fn().mockResolvedValue([]),
+}));
+
 // Mock player used by SceneFactory
 const mockPlayer = {
   isPlaying: false,
@@ -115,6 +119,7 @@ const mockQueueService = {
 const SceneFactory = require("../utils/scene_factory");
 
 const logger = require("../../src/services/logger_service");
+const bilibiliApi = require("../../src/bilibili/api");
 const snapshotMinimal = (embed) => ({
   title: embed?.data?.title,
   description: embed?.data?.description,
@@ -125,6 +130,7 @@ describe("Bot Commands Coverage", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    bilibiliApi.searchVideos.mockResolvedValue([]);
     // Reset mockPlayer state
     mockPlayer.isPlaying = false;
     mockPlayer.isPaused = false;

@@ -316,6 +316,20 @@ describe("_buildVideoEmbed", () => {
     const embed = EmbedBuilder.mock.results[0].value;
     expect(embed.setImage).not.toHaveBeenCalled();
   });
+
+  test("shows duration as inline hh:mm:ss without clock icon", () => {
+    const service = makeService();
+    service._buildVideoEmbed({
+      bvid: "BV1abc",
+      title: "Test",
+      duration: 90,
+      pic: "",
+      url: "https://www.bilibili.com/video/BV1abc",
+    });
+
+    const embed = EmbedBuilder.mock.results[0].value;
+    expect(embed.setDescription).toHaveBeenCalledWith("`00:01:30`");
+  });
 });
 
 // ─── _fire ──────────────────────────────────────────────────

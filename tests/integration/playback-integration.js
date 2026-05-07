@@ -59,7 +59,7 @@ class PlaybackIntegrationTest {
       if (videoData && videoData.audioUrl) {
         console.log("   ✅ 音频URL提取成功");
         console.log(`   📊 标题: ${videoData.title}`);
-        console.log(`   ⏱️  时长: ${videoData.duration}秒`);
+        console.log(`   时长: ${videoData.duration}秒`);
         console.log(`   🔗 URL长度: ${videoData.audioUrl.length}字符`);
 
         this.results.extraction = {

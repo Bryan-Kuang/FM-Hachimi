@@ -87,7 +87,7 @@ class RealisticIntegrationTest {
   }
 
   async testTimedAudioExtraction() {
-    console.log("\n2. ⏱️ 测试音频提取时间...");
+    console.log("\n2. 测试音频提取时间...");
 
     try {
       const extractor = new BilibiliExtractor();
@@ -97,7 +97,7 @@ class RealisticIntegrationTest {
       const duration = Date.now() - startTime;
 
       console.log("   ✅ 音频提取成功");
-      console.log(`   ⏱️  耗时: ${duration}ms`);
+      console.log(`   耗时: ${duration}ms`);
       console.log(`   📊 标题: ${result.title}`);
 
       // 检查是否会导致Discord超时（3秒）
@@ -151,7 +151,7 @@ class RealisticIntegrationTest {
       } catch (error) {
         const duration = Date.now() - startTime;
         console.log(`   ✅ 超时机制正常工作`);
-        console.log(`   ⏱️  超时时间: ${duration}ms`);
+        console.log(`   超时时间: ${duration}ms`);
 
         if (error.message === "No voice connection") {
           this.results.voice_connection = {
@@ -248,7 +248,7 @@ class RealisticIntegrationTest {
 
       console.log(`${icon} ${name}: ${result.success ? "通过" : "失败"}`);
       if (result.duration) {
-        console.log(`   ⏱️  时间: ${result.duration}ms`);
+        console.log(`   时间: ${result.duration}ms`);
       }
       if (!result.success && result.error) {
         console.log(`   错误: ${result.error}`);
