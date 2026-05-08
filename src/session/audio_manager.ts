@@ -85,6 +85,37 @@ class AudioManager {
     return this.extractor;
   }
 
+  prewarmPlaybackTools(extraExtractors: any[] = []): void {
+    const tasks: Array<Promise<unknown>> = [];
+
+    if (this.extractor?.prewarm) {
+      tasks.push(this.extractor.prewarm());
+    } else if (this.extractor?.checkYtDlpAvailability) {
+      tasks.push(this.extractor.checkYtDlpAvailability());
+    }
+
+    for (const extractor of extraExtractors) {
+      if (extractor?.prewarm) {
+        tasks.push(extractor.prewarm());
+      }
+    }
+
+    tasks.push(AudioPlayer.prewarmFFmpeg());
+
+    Promise.allSettled(tasks).then((results) => {
+      const failed = results.filter((result) => result.status === 'rejected');
+      if (failed.length > 0) {
+        logger.warn('Playback tool prewarm completed with failures', {
+          failedCount: failed.length,
+          totalCount: results.length,
+        });
+        return;
+      }
+
+      logger.info('Playback tool prewarm completed', { totalCount: results.length });
+    });
+  }
+
   /**
    * Get or create audio player for a guild.
    */
@@ -145,6 +176,39 @@ class AudioManager {
 
       // Get or create player for this guild
       const player = this.getPlayer(guildId);
+      const totalStartedAt = Date.now();
+      const timings: Record<string, number> = {};
+      const markTotal = () => {
+        timings.totalMs = Date.now() - totalStartedAt;
+      };
+      const logTiming = (success: boolean, extra: Record<string, unknown> = {}) => {
+        markTotal();
+        logger.info('Bilibili direct playback timing', {
+          guild: guild.name,
+          guildId,
+          user: user.username,
+          success,
+          ...timings,
+          ...extra,
+        });
+      };
+      const timed = async <T>(stage: string, promise: Promise<T>): Promise<T> => {
+        const startedAt = Date.now();
+        try {
+          return await promise;
+        } finally {
+          timings[stage] = Date.now() - startedAt;
+        }
+      };
+      const settle = async <T>(
+        promise: Promise<T>,
+      ): Promise<{ ok: true; value: T } | { ok: false; error: Error }> => {
+        try {
+          return { ok: true, value: await promise };
+        } catch (error: unknown) {
+          return { ok: false, error: error as Error };
+        }
+      };
 
       // Extract video information
       logger.info('Extracting Bilibili video for playback', {
@@ -153,29 +217,60 @@ class AudioManager {
         guild: guild.name,
       });
 
-      const videoData = await (this.extractor as any).extractAudio(url);
-
-      // Join voice channel if not already connected
-      if (
+      const wasActiveBeforeCommand = Boolean(player.isPlaying || player.isPaused);
+      const hadVoiceConnectionBeforeCommand = Boolean(player.voiceConnection);
+      const targetChannelId = (voiceChannel as any).id;
+      const needsVoiceJoin =
         !player.voiceConnection ||
-        player.voiceConnection.joinConfig.channelId !== (voiceChannel as any).id
-      ) {
-        const joinSuccess = await player.joinVoiceChannel(voiceChannel);
-        if (!joinSuccess) {
-          return {
-            success: false,
-            error: 'Failed to join voice channel',
-            suggestion: 'Make sure the bot has permission to join and speak in the voice channel.',
-          };
+        player.voiceConnection.joinConfig.channelId !== targetChannelId;
+
+      const extractionPromise = timed('extractionMs', (this.extractor as any).extractAudio(url));
+      const joinPromise = needsVoiceJoin
+        ? timed('voiceJoinMs', player.joinVoiceChannel(voiceChannel))
+        : Promise.resolve(true);
+
+      const [extractionResult, joinResult] = await Promise.all([
+        settle(extractionPromise),
+        settle(joinPromise),
+      ]);
+
+      if (!extractionResult.ok) {
+        if (
+          joinResult.ok &&
+          joinResult.value &&
+          needsVoiceJoin &&
+          !wasActiveBeforeCommand &&
+          !hadVoiceConnectionBeforeCommand
+        ) {
+          player.leaveVoiceChannel();
         }
+        logTiming(false, { failedStage: 'extraction' });
+        return {
+          success: false,
+          error: extractionResult.error.message,
+          suggestion: 'Please check the URL and try again. If the problem persists, the video might be private or region-locked.',
+        };
+      }
+
+      if (!joinResult.ok || !joinResult.value) {
+        logTiming(false, { failedStage: 'voiceJoin' });
+        return {
+          success: false,
+          error: 'Failed to join voice channel',
+          suggestion: 'Make sure the bot has permission to join and speak in the voice channel.',
+        };
       }
 
       // Add to queue
+      const queueStartedAt = Date.now();
+      const videoData = extractionResult.value;
       const track = player.addToQueue(videoData, `<@${user.id}>`);
+      timings.queueAddMs = Date.now() - queueStartedAt;
 
       // Start playing if nothing is currently playing
       if (!player.isPlaying && !player.isPaused) {
         try {
+          const playbackStartedAt = Date.now();
           let playSuccess: boolean;
           // Fix: if queue ended and a new song is added, start from the newest song
           if (player.currentTrack === null && player.queue.length > 0) {
@@ -185,8 +280,10 @@ class AudioManager {
           } else {
             playSuccess = await player.playNext();
           }
+          timings.playbackStartMs = Date.now() - playbackStartedAt;
 
           if (!playSuccess) {
+            logTiming(false, { failedStage: 'playbackStart' });
             return {
               success: false,
               error: 'Failed to start playback',
@@ -202,6 +299,7 @@ class AudioManager {
             guild: guildId,
           });
 
+          logTiming(false, { failedStage: 'playbackStart' });
           return {
             success: false,
             error: msg,
@@ -213,6 +311,7 @@ class AudioManager {
         }
       }
 
+      logTiming(true);
       return {
         success: true,
         track,

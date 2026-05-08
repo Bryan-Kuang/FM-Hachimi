@@ -23,6 +23,13 @@ services:
     env_file:
       - .env
 
+    # Docker is the blessed setup path, so the in-container health endpoint is
+    # always enabled. The host binding below keeps metrics/health local to the VPS.
+    environment:
+      METRICS_ENABLED: "true"
+      METRICS_HOST: "0.0.0.0"
+      METRICS_PORT: "9090"
+
     # Expose the in-container metrics server to the host's loopback only.
     # The metrics server must also be told to bind on all interfaces inside
     # the container (not 127.0.0.1), otherwise the port forward has no one
@@ -53,7 +60,7 @@ services:
 
     # Health check
     healthcheck:
-      test: ["CMD", "node", "-e", "require('./dist/index.js')"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/healthz >/dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

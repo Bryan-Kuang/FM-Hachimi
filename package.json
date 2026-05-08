@@ -4,12 +4,17 @@
   "description": "Discord bot for streaming Bilibili video audio",
   "main": "dist/index.js",
   "scripts": {
-    "start": "node dist/index.js",
-    "dev": "nodemon src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node scripts/start.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "setup:check": "node scripts/doctor.js",
     "tools": "node scripts/tools/bot-tools.js",
-    "docker:dev": "docker compose -f docker-compose.dev.yml up",
-    "docker:build": "bash scripts/deploy/build.sh",
-    "deploy": "bash scripts/deploy/release.sh",
+    "docker:up": "docker compose up -d --build",
+    "docker:logs": "docker compose logs -f bilibili-bot",
+    "docker:down": "docker compose down",
+    "docker:dev": "docker compose -f docker-compose.dev.yml up --build",
+    "docker:build": "docker build .",
+    "deploy": "bash scripts/deploy/deploy.sh",
     "deploy:commands": "node scripts/deploy-commands.js",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
@@ -21,6 +26,7 @@
     "test:system": "node tests/utils/test-runner-fixed.js system",
     "test:playback": "node tests/utils/test-runner-fixed.js playback",
     "test:ci": "CI_SMOKE=1 npm run lint && CI_SMOKE=1 npm run test:system",
+    "ci": "npm run lint && npm run typecheck && npm test && npm run build",
     "prepare": "husky"
   },
   "keywords": [
@@ -60,7 +66,7 @@
     "typescript": "^5.4.5"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "lint-staged": {
     "src/**/*.js": "eslint --fix"

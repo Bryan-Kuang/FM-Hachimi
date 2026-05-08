@@ -39,6 +39,31 @@ interface ExtractorLike {
   getAudioStreamUrl(normalizedUrl: string): Promise<string>;
 }
 
+let ffmpegAvailabilityPromise: Promise<void> | null = null;
+
+function checkFFmpegAvailability(): Promise<void> {
+  if (ffmpegAvailabilityPromise) {
+    return ffmpegAvailabilityPromise;
+  }
+
+  ffmpegAvailabilityPromise = new Promise<void>((resolve, reject) => {
+    const ffmpegCheck = spawn('ffmpeg', ['-version']);
+    ffmpegCheck.on('error', (error) => {
+      logger.error('FFmpeg not available', { error: error.message });
+      reject(new Error('FFmpeg is not installed. Please install FFmpeg to enable audio playback.'));
+    });
+    ffmpegCheck.on('close', (code) => {
+      if (code !== 0) reject(new Error('FFmpeg check failed'));
+      else resolve();
+    });
+  }).catch((error) => {
+    ffmpegAvailabilityPromise = null;
+    throw error;
+  });
+
+  return ffmpegAvailabilityPromise;
+}
+
 class AudioPlayer {
   // ── Dependencies ─────────────────────────────────────────────────────
   extractor: ExtractorLike | null;
@@ -96,6 +121,10 @@ class AudioPlayer {
     this._inactivityTimer = null;
 
     this.setupAudioPlayerEvents();
+  }
+
+  static prewarmFFmpeg(): Promise<void> {
+    return checkFFmpegAvailability();
   }
 
   // ── Convenience accessors (keep existing API surface) ────────────────
@@ -498,17 +527,7 @@ class AudioPlayer {
   async createAudioResource(audioUrl: string): Promise<AudioResource | null> {
     // Lazy FFmpeg availability check
     if (!this._ffmpegChecked) {
-      await new Promise<void>((resolve, reject) => {
-        const ffmpegCheck = spawn('ffmpeg', ['-version']);
-        ffmpegCheck.on('error', (error) => {
-          logger.error('FFmpeg not available', { error: error.message });
-          reject(new Error('FFmpeg is not installed. Please install FFmpeg to enable audio playback.'));
-        });
-        ffmpegCheck.on('close', (code) => {
-          if (code !== 0) reject(new Error('FFmpeg check failed'));
-          else resolve();
-        });
-      });
+      await checkFFmpegAvailability();
       this._ffmpegChecked = true;
       logger.info('FFmpeg availability confirmed');
     }

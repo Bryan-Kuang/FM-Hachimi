@@ -40,9 +40,12 @@ COPY --from=builder /app/dist ./dist
 RUN chown -R node:node /app
 USER node
 
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    METRICS_ENABLED=true \
+    METRICS_HOST=127.0.0.1 \
+    METRICS_PORT=9090
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD node -e "require('./dist/index.js')" || exit 1
+    CMD wget -qO- http://127.0.0.1:9090/healthz >/dev/null || exit 1
 
 CMD ["node", "dist/index.js"]

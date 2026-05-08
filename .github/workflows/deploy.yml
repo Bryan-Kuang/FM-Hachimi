@@ -1,0 +1,40 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Deploy to Oracle Cloud
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          timeout: 30s
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            cd ~/bilibili-bot
+
+            echo "[deploy] fetching origin/main..."
+            timeout 120 git fetch --prune origin main
+
+            echo "[deploy] fast-forward pulling..."
+            timeout 60 git pull --ff-only origin main
+
+            bash scripts/deploy/remote-deploy.sh
+
+      - name: Notify Discord on failure
+        if: failure()
+        run: |
+          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"embeds\":[{\"title\":\"Deploy Failed\",\"color\":15158332,\"description\":\"**Branch:** \`${{ github.event.workflow_run.head_branch }}\`\\n**Commit:** \`${{ github.event.workflow_run.head_sha }}\`\\n[View run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\"}]}"

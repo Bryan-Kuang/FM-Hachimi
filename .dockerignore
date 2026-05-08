@@ -8,6 +8,8 @@ yarn-error.log*
 .env
 .env.*
 !.env.example
+cookies.txt
+youtube_cookies.txt
 
 # Logs
 logs/

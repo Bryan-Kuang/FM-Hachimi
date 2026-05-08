@@ -108,6 +108,7 @@ const mockPlaybackService = {
   getPlayer: jest.fn().mockReturnValue(mockPlayer),
   getExtractor: jest.fn(),
   getYouTubeExtractor: jest.fn().mockReturnValue(null),
+  playBilibiliVideo: jest.fn().mockResolvedValue({ success: true, track: { title: "Track" } }),
   notifyState: jest.fn(),
 };
 
@@ -137,6 +138,7 @@ describe("Bot Commands Coverage", () => {
     mockPlayer.queue = [];
     mockPlayer.voiceConnection = null;
     mockPlaybackService.getPlayer.mockReturnValue(mockPlayer);
+    mockPlaybackService.playBilibiliVideo.mockResolvedValue({ success: true, track: { title: "Track" } });
     interaction = {
       user: { username: "TestUser" },
       member: { voice: { channel: { id: "vc-1" } } },
@@ -656,9 +658,12 @@ describe("Bot Commands Coverage", () => {
           playerState: "idle",
           options: { query: "https://bili/1" },
         },
-        setup: ({ player }) => {
+        setup: () => {
           UrlValidator.isValidBilibiliUrl.mockReturnValue(true);
-          player.joinVoiceChannel.mockResolvedValue(false);
+          mockPlaybackService.playBilibiliVideo.mockResolvedValue({
+            success: false,
+            error: "Failed to join voice",
+          });
         },
         expected: {
           editReplyContains: "Failed to join voice",
@@ -675,7 +680,10 @@ describe("Bot Commands Coverage", () => {
         },
         setup: () => {
           UrlValidator.isValidBilibiliUrl.mockReturnValue(true);
-          mockQueueService.addTrack.mockResolvedValue(null);
+          mockPlaybackService.playBilibiliVideo.mockResolvedValue({
+            success: false,
+            error: "Add failed",
+          });
         },
         expected: { editReplyContains: "Add failed", deferCalled: true },
       },
@@ -689,13 +697,15 @@ describe("Bot Commands Coverage", () => {
         },
         setup: () => {
           UrlValidator.isValidBilibiliUrl.mockReturnValue(true);
-          mockQueueService.addTrack.mockResolvedValue({ title: "Track" });
-          mockPlaybackService.play.mockResolvedValue(true);
+          mockPlaybackService.playBilibiliVideo.mockResolvedValue({
+            success: true,
+            track: { title: "Track" },
+          });
         },
         expected: {
           editReplyContains: "🎵 已添加",
           deferCalled: true,
-          playCalled: true,
+          playBilibiliCalled: true,
         },
       },
     ];
@@ -727,8 +737,11 @@ describe("Bot Commands Coverage", () => {
       } else {
         expect(interaction.deferReply).not.toHaveBeenCalled();
       }
-      if (expected.playCalled) {
-        expect(mockPlaybackService.play).toHaveBeenCalledWith("guild-1");
+      if (expected.playBilibiliCalled) {
+        expect(mockPlaybackService.playBilibiliVideo).toHaveBeenCalledWith(
+          interaction,
+          "https://bili/1"
+        );
         expect(mockPlaybackService.setUIContext).toHaveBeenCalledWith(
           "guild-1",
           "channel-1"

@@ -48,7 +48,7 @@ class BilibiliDiscordBot {
         throw new Error(`Environment validation failed: ${envCheck.errors.join('; ')}`);
       }
 
-      this.metricsServer = startMetricsServerFromEnv();
+      this.metricsServer = startMetricsServerFromEnv(() => this.getStatus());
 
       const tokenCheck = await TokenPrecheck.validate();
       if (!tokenCheck.valid) {
@@ -104,6 +104,7 @@ class BilibiliDiscordBot {
 
       // Initialize daily hachimi service after bot is ready (needs Discord client)
       dailyHachimiService.initialize(this.botClient.getClient() as any, bilibiliApi);
+      audioManager.prewarmPlaybackTools([youtubeExtractor]);
       Debug.trace('client.initialize.done');
 
       this.isRunning = true;

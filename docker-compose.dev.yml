@@ -1,11 +1,10 @@
-version: "3.9"
 services:
-  bot:
-    image: node:20-alpine
+  bilibili-bot-dev:
+    image: node:22-alpine
     working_dir: /app
     volumes:
-      - ../../:/app
+      - .:/app
     env_file:
-      - ../../.env
+      - .env
     command: sh -c "npm install && npm run dev"
     restart: unless-stopped

@@ -131,7 +131,7 @@ describe("Extractor", () => {
         uploader: "Author",
         webpage_url: "https://www.bilibili.com/video/BV1abc",
       });
-      spawn.mockReturnValue(createMockProcess({ stdout: json, exitCode: 0 }));
+      spawn.mockImplementation(() => createMockProcess({ stdout: json, exitCode: 0 }));
 
       const result = await extractor.getVideoInfo("https://www.bilibili.com/video/BV1abc");
 
@@ -201,7 +201,7 @@ describe("Extractor", () => {
 
     test("caches successful results", async () => {
       const json = JSON.stringify({ title: "Cached", duration: 60, webpage_url: "https://www.bilibili.com/video/BV1abc" });
-      spawn.mockReturnValue(createMockProcess({ stdout: json, exitCode: 0 }));
+      spawn.mockImplementation(() => createMockProcess({ stdout: json, exitCode: 0 }));
 
       await extractor.getVideoInfo("https://www.bilibili.com/video/BV1abc");
 
@@ -238,6 +238,50 @@ describe("Extractor", () => {
       await expect(
         extractor.getAudioStreamUrl("https://www.bilibili.com/video/BV1abc")
       ).rejects.toThrow("SSL certificate error");
+    });
+  });
+
+  describe("extractAudio caching", () => {
+    const url = "https://www.bilibili.com/video/BV1xx411c7BF";
+
+    beforeEach(() => {
+      extractor._ytdlpChecked = true;
+      extractor.videoInfoCache = new Map();
+    });
+
+    function mockExtractionProcess(title = "Cached Audio") {
+      const json = JSON.stringify({
+        id: "BV1xx411c7BF",
+        title,
+        duration: 120,
+        webpage_url: url,
+        requested_downloads: [{ url: "https://cdn.bilibili.com/audio.m4a" }],
+      });
+      spawn.mockImplementation(() => createMockProcess({ stdout: json, exitCode: 0 }));
+    }
+
+    test("full extraction cache skips a second yt-dlp call for the same URL", async () => {
+      mockExtractionProcess();
+
+      const first = await extractor.extractAudio(url);
+      const second = await extractor.extractAudio(url);
+
+      expect(first.audioUrl).toBe("https://cdn.bilibili.com/audio.m4a");
+      expect(second.audioUrl).toBe("https://cdn.bilibili.com/audio.m4a");
+      expect(spawn).toHaveBeenCalledTimes(1);
+    });
+
+    test("duplicate in-flight extractions share one yt-dlp process", async () => {
+      mockExtractionProcess("Shared Audio");
+
+      const [first, second] = await Promise.all([
+        extractor.extractAudio(url),
+        extractor.extractAudio(url),
+      ]);
+
+      expect(first.title).toBe("Shared Audio");
+      expect(second.title).toBe("Shared Audio");
+      expect(spawn).toHaveBeenCalledTimes(1);
     });
   });
 });
