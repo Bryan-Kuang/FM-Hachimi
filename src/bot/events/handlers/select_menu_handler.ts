@@ -284,6 +284,7 @@ async function playBilibiliSelection(
   videoUrl: string,
   titleHint?: string,
 ): Promise<void> {
+  playerService.setUIContext(interaction.guild.id, interaction.channelId);
   const addResult = await playerService.playBilibiliVideo(interaction, videoUrl);
 
   if (!addResult || !addResult.success) {
@@ -302,6 +303,7 @@ async function playBilibiliSelection(
     `📺 **${title}** has been added to the queue`,
   );
   await interaction.editReply({ embeds: [successEmbed] });
+  playerService.notifyState(interaction.guild.id);
 }
 
 async function playYouTubeSelection(

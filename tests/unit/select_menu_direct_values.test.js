@@ -102,6 +102,32 @@ describe("select menu direct video values", () => {
     expect(playerService._extractor.searchVideos).not.toHaveBeenCalled();
   });
 
+  test("/play Bilibili direct value sets UI context before playback and notifies state", async () => {
+    const playerService = makePlayerService();
+    const handler = createSelectMenuHandler(playerService);
+    const interaction = makeInteraction({ customId: "play_search_hachimi", value: "bili:BV1abc" });
+
+    await handler(interaction);
+
+    expect(playerService.setUIContext).toHaveBeenCalledWith("guild-1", "channel-1");
+    const setOrder = playerService.setUIContext.mock.invocationCallOrder[0];
+    const playOrder = playerService.playBilibiliVideo.mock.invocationCallOrder[0];
+    expect(setOrder).toBeLessThan(playOrder);
+    expect(playerService.notifyState).toHaveBeenCalledWith("guild-1");
+  });
+
+  test("/play Bilibili direct value does not notify state when playback fails", async () => {
+    const playerService = makePlayerService();
+    playerService.playBilibiliVideo.mockResolvedValue({ success: false, error: "Network error" });
+    const handler = createSelectMenuHandler(playerService);
+    const interaction = makeInteraction({ customId: "play_search_hachimi", value: "bili:BV1abc" });
+
+    await handler(interaction);
+
+    expect(playerService.setUIContext).toHaveBeenCalledWith("guild-1", "channel-1");
+    expect(playerService.notifyState).not.toHaveBeenCalled();
+  });
+
   test("/play YouTube direct value extracts audio without repeating keyword search", async () => {
     const playerService = makePlayerService();
     const handler = createSelectMenuHandler(playerService);
