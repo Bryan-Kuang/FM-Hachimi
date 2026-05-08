@@ -79,6 +79,7 @@ class YouTubeExtractor {
 
   // Extraction result cache — avoids repeated yt-dlp calls for the same video
   private _cache: Map<string, CacheEntry>;
+  private _inFlightExtractions: Map<string, Promise<ExtractedAudio>>;
   private _cacheExpiry: number;
   private _maxCacheSize: number;
   private _cacheCleanupInterval: NodeJS.Timeout | null;
@@ -94,6 +95,7 @@ class YouTubeExtractor {
 
     // URL cache (mirrors BilibiliExtractor pattern)
     this._cache = new Map();
+    this._inFlightExtractions = new Map();
     this._cacheExpiry = 25 * 60 * 1000; // 25 minutes
     this._maxCacheSize = 50;
     this._cacheCleanupInterval = setInterval(() => {
@@ -129,6 +131,15 @@ class YouTubeExtractor {
       this._cacheCleanupInterval = null;
     }
     this._cache.clear();
+    this._inFlightExtractions.clear();
+  }
+
+  async prewarm(): Promise<{ ytdlpAvailable: boolean }> {
+    const ytdlpAvailable = await this.checkYtDlpAvailability();
+    if (ytdlpAvailable) {
+      this._ytdlpChecked = true;
+    }
+    return { ytdlpAvailable };
   }
 
   /** Wait for the rate limiter cooldown before the next yt-dlp call. */
@@ -240,6 +251,40 @@ class YouTubeExtractor {
         return cached.data;
       }
 
+      if (retryCount === 0) {
+        const inFlight = this._inFlightExtractions.get(normalizedUrl);
+        if (inFlight) {
+          logger.info('YouTube extraction joined in-flight request', { url: normalizedUrl });
+          return inFlight;
+        }
+
+        const extraction = this._extractAudioUncached(url, normalizedUrl, retryCount, maxRetries)
+          .finally(() => {
+            this._inFlightExtractions.delete(normalizedUrl);
+          });
+        this._inFlightExtractions.set(normalizedUrl, extraction);
+        return extraction;
+      }
+
+      return await this._extractAudioUncached(url, normalizedUrl, retryCount, maxRetries);
+    } catch (error) {
+      logger.error('YouTube audio extraction failed', {
+        url,
+        error: (error as Error).message,
+        attempt: retryCount + 1,
+      });
+
+      throw new Error(`YouTube extraction failed: ${(error as Error).message}`);
+    }
+  }
+
+  private async _extractAudioUncached(
+    url: string,
+    normalizedUrl: string,
+    retryCount: number,
+    maxRetries: number,
+  ): Promise<ExtractedAudio> {
+    try {
       // Rate limit — wait if too soon after last extraction
       await this._waitForRateLimit();
 
@@ -268,20 +313,14 @@ class YouTubeExtractor {
 
       return result;
     } catch (error) {
-      logger.error('YouTube audio extraction failed', {
-        url,
-        error: (error as Error).message,
-        attempt: retryCount + 1,
-      });
-
       if (retryCount < maxRetries && this.isRetryableError(error as Error)) {
         const delay = (retryCount + 1) * 2000;
         logger.info('Retrying YouTube extraction', { url, nextAttempt: retryCount + 2, delay });
         await new Promise(resolve => setTimeout(resolve, delay));
-        return this.extractAudio(url, retryCount + 1, maxRetries);
+        return this._extractAudioUncached(url, normalizedUrl, retryCount + 1, maxRetries);
       }
 
-      throw new Error(`YouTube extraction failed: ${(error as Error).message}`);
+      throw error;
     }
   }
 

@@ -104,6 +104,7 @@ class BilibiliDiscordBot {
 
       // Initialize daily hachimi service after bot is ready (needs Discord client)
       dailyHachimiService.initialize(this.botClient.getClient() as any, bilibiliApi);
+      audioManager.prewarmPlaybackTools([youtubeExtractor]);
       Debug.trace('client.initialize.done');
 
       this.isRunning = true;

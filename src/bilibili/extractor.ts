@@ -73,6 +73,11 @@ interface CacheEntry {
   timestamp: number;
 }
 
+interface ExtractedAudioCacheEntry {
+  data: ExtractedAudio;
+  timestamp: number;
+}
+
 interface ThumbnailEntry {
   url: string;
   width?: number;
@@ -84,7 +89,10 @@ class BilibiliExtractor {
   private _ytdlpChecked: boolean;
   private _cookiesFile: string | null;
   private videoInfoCache: Map<string, CacheEntry>;
+  private extractionCache: Map<string, ExtractedAudioCacheEntry>;
+  private inFlightExtractions: Map<string, Promise<ExtractedAudio>>;
   private cacheExpiry: number;
+  private extractionCacheExpiry: number;
   private maxCacheSize: number;
   private cacheCleanupInterval: NodeJS.Timeout | null;
 
@@ -96,7 +104,10 @@ class BilibiliExtractor {
 
     // Video info cache to avoid repeated yt-dlp calls
     this.videoInfoCache = new Map();
+    this.extractionCache = new Map();
+    this.inFlightExtractions = new Map();
     this.cacheExpiry = 30 * 60 * 1000; // 30 minutes cache expiry
+    this.extractionCacheExpiry = 10 * 60 * 1000; // signed audio URLs are short-lived; keep this conservative
     this.maxCacheSize = 100; // Maximum number of cached entries
 
     // Start cache cleanup interval (.unref() so it doesn't block process exit)
@@ -120,6 +131,13 @@ class BilibiliExtractor {
       }
     }
 
+    for (const [key, entry] of this.extractionCache) {
+      if (now - entry.timestamp > this.extractionCacheExpiry) {
+        this.extractionCache.delete(key);
+        removedCount++;
+      }
+    }
+
     // Enforce size limit by removing oldest entries
     if (this.videoInfoCache.size > this.maxCacheSize) {
       const entries = Array.from(this.videoInfoCache.entries());
@@ -128,6 +146,17 @@ class BilibiliExtractor {
       const toRemove = entries.slice(0, this.videoInfoCache.size - this.maxCacheSize);
       toRemove.forEach(([key]) => {
         this.videoInfoCache.delete(key);
+        removedCount++;
+      });
+    }
+
+    if (this.extractionCache.size > this.maxCacheSize) {
+      const entries = Array.from(this.extractionCache.entries());
+      entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+
+      const toRemove = entries.slice(0, this.extractionCache.size - this.maxCacheSize);
+      toRemove.forEach(([key]) => {
+        this.extractionCache.delete(key);
         removedCount++;
       });
     }
@@ -145,7 +174,17 @@ class BilibiliExtractor {
    */
   clearCache(): void {
     this.videoInfoCache.clear();
-    logger.info("Video info cache cleared");
+    this.extractionCache.clear();
+    this.inFlightExtractions.clear();
+    logger.info("Bilibili extractor caches cleared");
+  }
+
+  async prewarm(): Promise<{ ytdlpAvailable: boolean }> {
+    const ytdlpAvailable = await this.checkYtDlpAvailability();
+    if (ytdlpAvailable) {
+      this._ytdlpChecked = true;
+    }
+    return { ytdlpAvailable };
   }
 
   /**
@@ -198,6 +237,65 @@ class BilibiliExtractor {
     logger.info("Starting audio extraction", { url, attempt: retryCount + 1 });
 
     try {
+      // Validate URL first
+      if (!UrlValidator.isValidBilibiliUrl(url)) {
+        throw new Error("Invalid Bilibili URL format");
+      }
+
+      // Normalize URL
+      const normalizedUrl = UrlValidator.normalizeUrl(url);
+      if (!normalizedUrl) {
+        throw new Error("Failed to normalize URL");
+      }
+
+      const cached = this.extractionCache.get(normalizedUrl);
+      if (cached && Date.now() - cached.timestamp < this.extractionCacheExpiry) {
+        logger.info("Bilibili extraction cache hit", {
+          url: normalizedUrl,
+          title: cached.data.title,
+          cacheAgeMs: Date.now() - cached.timestamp,
+        });
+        return cached.data;
+      }
+
+      if (retryCount === 0) {
+        const inFlight = this.inFlightExtractions.get(normalizedUrl);
+        if (inFlight) {
+          logger.info("Bilibili extraction joined in-flight request", { url: normalizedUrl });
+          return inFlight;
+        }
+
+        const extraction = this.extractAudioUncached(url, normalizedUrl, retryCount, maxRetries)
+          .finally(() => {
+            this.inFlightExtractions.delete(normalizedUrl);
+          });
+        this.inFlightExtractions.set(normalizedUrl, extraction);
+        return extraction;
+      }
+
+      return await this.extractAudioUncached(url, normalizedUrl, retryCount, maxRetries);
+    } catch (error) {
+      logger.error("Audio extraction failed", {
+        url,
+        error: (error as Error).message,
+        attempt: retryCount + 1,
+        maxRetries: maxRetries,
+      });
+
+      const message = (error as Error).message;
+      throw new Error(message.startsWith('Audio extraction failed:')
+        ? message
+        : `Audio extraction failed: ${message}`);
+    }
+  }
+
+  private async extractAudioUncached(
+    url: string,
+    normalizedUrl: string,
+    retryCount: number,
+    maxRetries: number,
+  ): Promise<ExtractedAudio> {
+    try {
       // Check yt-dlp availability on first use (lazy check)
       if (!this._ytdlpChecked) {
         const ytdlpAvailable = await this.checkYtDlpAvailability();
@@ -208,17 +306,6 @@ class BilibiliExtractor {
         }
         this._ytdlpChecked = true;
         logger.info("yt-dlp availability confirmed");
-      }
-
-      // Validate URL first
-      if (!UrlValidator.isValidBilibiliUrl(url)) {
-        throw new Error("Invalid Bilibili URL format");
-      }
-
-      // Normalize URL
-      const normalizedUrl = UrlValidator.normalizeUrl(url);
-      if (!normalizedUrl) {
-        throw new Error("Failed to normalize URL");
       }
 
       // Single yt-dlp call: --dump-json with --format bestaudio/best gives us
@@ -236,6 +323,11 @@ class BilibiliExtractor {
           userAgent: this.userAgent,
         },
       };
+
+      this.extractionCache.set(normalizedUrl, {
+        data: result,
+        timestamp: Date.now(),
+      });
 
       logger.info("Audio extraction completed successfully", {
         url,
@@ -262,7 +354,7 @@ class BilibiliExtractor {
 
         // 等待递增延迟后重试
         await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 3000));
-        return await this.extractAudio(url, retryCount + 1, maxRetries);
+        return await this.extractAudioUncached(url, normalizedUrl, retryCount + 1, maxRetries);
       }
 
       throw new Error(`Audio extraction failed: ${(error as Error).message}`);
