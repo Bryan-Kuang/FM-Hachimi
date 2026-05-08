@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/index.js",
+    "start": "node scripts/start.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "setup:check": "node scripts/doctor.js",
     "tools": "node scripts/tools/bot-tools.js",
