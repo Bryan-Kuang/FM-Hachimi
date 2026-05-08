@@ -8,6 +8,8 @@
 import { MessageFlags } from 'discord.js';
 import EmbedBuilders = require('../../../ui/embeds');
 import ButtonBuilders = require('../../../ui/buttons');
+import SearchService = require('../../../search/search_service');
+import PlaybackCoordinator = require('../../../playback/playback_coordinator');
 import * as logger from '../../../services/logger_service';
 import * as Lock from '../../../utils/lock';
 
@@ -284,8 +286,11 @@ async function playBilibiliSelection(
   videoUrl: string,
   titleHint?: string,
 ): Promise<void> {
-  playerService.setUIContext(interaction.guild.id, interaction.channelId);
-  const addResult = await playerService.playBilibiliVideo(interaction, videoUrl);
+  const addResult = await PlaybackCoordinator.playBilibiliUrl({
+    interaction,
+    playerService,
+    url: videoUrl,
+  });
 
   if (!addResult || !addResult.success) {
     const errorEmbed = EmbedBuilders.createErrorEmbed(
@@ -303,7 +308,6 @@ async function playBilibiliSelection(
     `📺 **${title}** has been added to the queue`,
   );
   await interaction.editReply({ embeds: [successEmbed] });
-  playerService.notifyState(interaction.guild.id);
 }
 
 async function playYouTubeSelection(
@@ -312,44 +316,23 @@ async function playYouTubeSelection(
   videoUrl: string,
   titleHint?: string,
 ): Promise<void> {
-  const member = interaction.member;
-  if (!member?.voice?.channel) {
-    await interaction.editReply({ content: 'Voice channel required' });
-    return;
-  }
+  const addResult = await PlaybackCoordinator.playYouTubeUrl({
+    interaction,
+    playerService,
+    url: videoUrl,
+  });
 
-  const ytExtractor = playerService.getYouTubeExtractor();
-  if (!ytExtractor) {
+  if (!addResult.success) {
     const errorEmbed = EmbedBuilders.createErrorEmbed(
-      'YouTube Not Available', 'YouTube extractor is not available.',
-      { suggestion: 'Please try again later.' },
+      'Failed to Add Video',
+      addResult.error || 'Failed to add the selected video to queue.',
+      { suggestion: addResult.suggestion || 'Please try again.' },
     );
     await interaction.editReply({ embeds: [errorEmbed] });
     return;
   }
 
-  const videoData = await ytExtractor.extractAudio(videoUrl);
-  const player = playerService.getPlayer(interaction.guild.id);
-  const joined = await player.joinVoiceChannel(member.voice.channel);
-  if (!joined) {
-    await interaction.editReply({ content: 'Failed to join voice channel' });
-    return;
-  }
-
-  const track = await playerService.addTrack(interaction.guild.id, videoData, `<@${interaction.user.id}>`);
-  if (!track) {
-    await interaction.editReply({ content: 'Failed to add track to queue' });
-    return;
-  }
-
-  playerService.setUIContext(interaction.guild.id, interaction.channelId);
-  if (!player.isPlaying && !player.isPaused) {
-    await playerService.play(interaction.guild.id);
-  } else {
-    playerService.notifyState(interaction.guild.id);
-  }
-
-  const title = getTitle(track) || getTitle(videoData) || titleHint || 'selected video';
+  const title = getTitle(addResult.track) || getTitle(addResult.videoData) || titleHint || 'selected video';
   const successEmbed = EmbedBuilders.createSuccessEmbed(
     'Added to Queue',
     `▶️ **${title}** has been added to the queue`,
@@ -424,9 +407,13 @@ async function handleSearchSelect(interaction: any, customId: string, playerServ
       return await interaction.editReply({ embeds: [errorEmbed] });
     }
 
-    const searchResults = await extractor.searchVideos(keyword, 25);
+    const searchResults = await SearchService.searchBilibili({
+      keyword,
+      limit: 25,
+      extractor,
+    });
 
-    if (!searchResults.success || !searchResults.results || resultIndex >= searchResults.results.length) {
+    if (resultIndex >= searchResults.length) {
       const errorEmbed = EmbedBuilders.createErrorEmbed(
         'Video Not Found', 'The selected video is no longer available.',
         { suggestion: 'Please perform a new search.' },
@@ -434,7 +421,7 @@ async function handleSearchSelect(interaction: any, customId: string, playerServ
       return await interaction.editReply({ embeds: [errorEmbed] });
     }
 
-    const selectedVideo = searchResults.results[resultIndex];
+    const selectedVideo = searchResults[resultIndex];
     const videoUrl      = selectedVideo.url || `https://www.bilibili.com/video/av${selectedVideo.id}`;
 
     await playBilibiliSelection(interaction, playerService, videoUrl, selectedVideo.title);
@@ -507,7 +494,12 @@ async function handlePlaySearch(interaction: any, customId: string, playerServic
       // ── Bilibili path (use HTTP API, not yt-dlp extractor) ──────────────
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const bilibiliApi = require('../../../bilibili/api') as any;
-      const results = await bilibiliApi.searchVideos(keyword, 1, 10) as any[];
+      const results = await SearchService.searchBilibili({
+        keyword,
+        limit: 10,
+        bilibiliApi,
+        source: 'api',
+      });
 
       if (!results || resultIndex >= results.length) {
         const errorEmbed = EmbedBuilders.createErrorEmbed(
@@ -531,8 +523,11 @@ async function handlePlaySearch(interaction: any, customId: string, playerServic
         return await interaction.editReply({ embeds: [errorEmbed] });
       }
 
-      const searchResponse = await ytExtractor.searchVideos(keyword, 10);
-      const results = searchResponse?.results ?? [];
+      const results = await SearchService.searchYouTube({
+        keyword,
+        limit: 10,
+        youtubeExtractor: ytExtractor,
+      });
 
       if (resultIndex >= results.length) {
         const errorEmbed = EmbedBuilders.createErrorEmbed(

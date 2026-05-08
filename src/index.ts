@@ -48,7 +48,7 @@ class BilibiliDiscordBot {
         throw new Error(`Environment validation failed: ${envCheck.errors.join('; ')}`);
       }
 
-      this.metricsServer = startMetricsServerFromEnv();
+      this.metricsServer = startMetricsServerFromEnv(() => this.getStatus());
 
       const tokenCheck = await TokenPrecheck.validate();
       if (!tokenCheck.valid) {

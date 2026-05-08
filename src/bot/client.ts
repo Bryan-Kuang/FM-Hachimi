@@ -18,6 +18,7 @@ import {
 import * as logger from '../services/logger_service';
 import config = require('../config/config');
 import Debug = require('../utils/debug');
+import CommandRegistry = require('./commands');
 
 // Augment discord.js Client with bot-specific properties
 declare module 'discord.js' {
@@ -339,37 +340,16 @@ class BotClient {
 
   /**
    * Load slash commands.
-   * Commands that export a factory function receive playerService;
-   * commands that export a plain object are used as-is.
    */
   async loadCommands(): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const commandModules: any[] = [
-      require('./commands/play'),
-      require('./commands/pause'),
-      require('./commands/resume'),
-      require('./commands/skip'),
-      require('./commands/prev'),
-      require('./commands/stop'),
-      require('./commands/queue'),
-      require('./commands/nowplaying'),
-      require('./commands/help'),
-      require('./commands/search'),
-      require('./commands/hachimi'),
-      require('./commands/daily_hachimi'),
-    ];
+    const commands = CommandRegistry.createCommands(this.playerService, this.dailyHachimiService);
 
-    for (const mod of commandModules) {
+    for (const command of commands) {
       try {
-        // Factory functions receive (playerService[, playerService, dailyHachimiService]);
-        // second arg is legacy compat — same service passed twice.
-        const command: any = typeof mod === 'function'
-          ? mod(this.playerService, this.playerService, this.dailyHachimiService)
-          : mod;
-
-        if (command.data && command.execute) {
-          this.client.commands.set(command.data.name, command);
-          logger.debug('Loaded command', { name: command.data.name });
+        const candidate = command as Partial<CommandDef>;
+        if (candidate.data && candidate.execute) {
+          this.client.commands.set(candidate.data.name, candidate as CommandDef);
+          logger.debug('Loaded command', { name: candidate.data.name });
         } else {
           logger.warn('Invalid command structure', { command });
         }

@@ -8,10 +8,11 @@ import { SlashCommandBuilder, ChatInputCommandInteraction, MessageFlags } from '
 import { routeQuery } from '../../utils/url_router';
 import EmbedBuilders = require('../../ui/embeds');
 import ButtonBuilders = require('../../ui/buttons');
-import SearchRanker = require('../../utils/search_ranker');
+import SearchService = require('../../search/search_service');
+import PlaybackCoordinator = require('../../playback/playback_coordinator');
 import * as logger from '../../services/logger_service';
 
-const createPlayCommand = (playbackService: any, queueService: any) => ({
+const createPlayCommand = (playbackService: any, _queueService: any) => ({
   data: new SlashCommandBuilder()
     .setName('play')
     .setDescription('播放 Bilibili / YouTube 视频（链接或关键词搜索）')
@@ -58,11 +59,13 @@ const createPlayCommand = (playbackService: any, queueService: any) => ({
 
         await interaction.editReply({ content: '🎬 Extracting YouTube audio...' });
 
-        let videoData;
-        try {
-          videoData = await ytExtractor.extractAudio(route.normalizedUrl || route.raw);
-        } catch (ytErr: unknown) {
-          const msg = (ytErr as Error).message || '';
+        const result = await PlaybackCoordinator.playYouTubeUrl({
+          interaction,
+          playerService: playbackService,
+          url:           route.normalizedUrl || route.raw,
+        });
+        if (!result.success) {
+          const msg = result.error || '';
           if (msg.includes('cookies expired')) {
             await interaction.editReply({
               content: '🔒 YouTube cookies expired. Ask the bot admin to run `bash scripts/refresh-cookies.sh`',
@@ -82,31 +85,12 @@ const createPlayCommand = (playbackService: any, queueService: any) => ({
           return;
         }
 
-        const player = playbackService.getPlayer(interaction.guild.id);
-        const joined = await player.joinVoiceChannel(member.voice.channel) as boolean;
-        if (!joined) {
-          await interaction.editReply({ content: 'Failed to join voice' });
-          return;
-        }
-
-        const track = await queueService.addTrack(interaction.guild.id, videoData, `<@${user.id}>`);
-        if (!track) {
-          await interaction.editReply({ content: 'Add failed' });
-          return;
-        }
-
-        playbackService.setUIContext(interaction.guild.id, interaction.channelId);
-        if (!player.isPlaying && !player.isPaused) {
-          await playbackService.play(interaction.guild.id);
-        } else {
-          playbackService.notifyState(interaction.guild.id);
-        }
-
-        await interaction.editReply({ content: `🎵 Added: ${track.title || route.raw}` });
+        const trackTitle = (result.track as { title?: string } | undefined)?.title;
+        await interaction.editReply({ content: `🎵 Added: ${trackTitle || route.raw}` });
         logger.info('Play command completed (YouTube)', {
           query,
           url: route.normalizedUrl,
-          title: track.title,
+          title: trackTitle,
           user: user.username,
         });
         return;
@@ -115,31 +99,22 @@ const createPlayCommand = (playbackService: any, queueService: any) => ({
       // ─── Bilibili URL ───────────────────────────────────────────────────────
       if (route.platform === 'bilibili' && route.isUrl) {
         const url = route.normalizedUrl || route.raw;
-        const player = playbackService.getPlayer(interaction.guild.id);
-        const joined = await player.joinVoiceChannel(member.voice.channel) as boolean;
-        if (!joined) {
-          await interaction.editReply({ content: 'Failed to join voice' });
+        const result = await PlaybackCoordinator.playBilibiliUrl({
+          interaction,
+          playerService: playbackService,
+          url,
+        });
+        if (!result.success) {
+          await interaction.editReply({ content: result.error || 'Add failed' });
           return;
         }
 
-        const track = await queueService.addTrack(interaction.guild.id, url, `<@${user.id}>`);
-        if (!track) {
-          await interaction.editReply({ content: 'Add failed' });
-          return;
-        }
-
-        playbackService.setUIContext(interaction.guild.id, interaction.channelId);
-        if (!player.isPlaying && !player.isPaused) {
-          await playbackService.play(interaction.guild.id);
-        } else {
-          playbackService.notifyState(interaction.guild.id);
-        }
-
-        await interaction.editReply({ content: `🎵 已添加: ${track.title || url}` });
+        const trackTitle = (result.track as { title?: string } | undefined)?.title;
+        await interaction.editReply({ content: `🎵 已添加: ${trackTitle || url}` });
         logger.info('Play command completed (Bilibili)', {
           query,
           url,
-          title: track.title,
+          title: trackTitle,
           user: user.username,
         });
         return;
@@ -159,42 +134,18 @@ const createPlayCommand = (playbackService: any, queueService: any) => ({
       const ytExtractorForSearch = playbackService.getYouTubeExtractor();
       const perPlatformLimit = 5;
 
-      // Search both platforms in parallel
-      // Bilibili: use the HTTP API (fast, ~1s) not the yt-dlp extractor (slow, ~10s)
-      // Rank the returned pool locally by title relevance before displaying it.
+      // Bilibili uses the HTTP API here so initial discovery stays fast.
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const bilibiliApi = require('../../bilibili/api') as any;
 
-      const [biliResponse, ytResponse] = await Promise.allSettled([
-        bilibiliApi.searchVideos(query as string, 1, perPlatformLimit) as Promise<any[]>,
-        ytExtractorForSearch
-          ? ytExtractorForSearch.searchVideos(query as string, perPlatformLimit)
-          : Promise.resolve({ success: false, results: [] }),
-      ]);
-
-      // Bilibili API returns a plain array with `author`/`view` fields;
-      // normalize to `uploader`/`viewCount` so the embed/menu builders work
-      const rawBili: any[] = biliResponse.status === 'fulfilled'
-        ? (Array.isArray(biliResponse.value) ? biliResponse.value : [])
-        : [];
-      const normalizedBiliResults: any[] = rawBili.map(r => ({
-        ...r,
-        uploader: r.uploader || r.author || 'Unknown',
-        viewCount: r.viewCount ?? r.view ?? 0,
-      }));
-      const rawYtResults: any[] = ytResponse.status === 'fulfilled'
-        ? ((ytResponse.value as any)?.results ?? [])
-        : [];
-      const biliResults = SearchRanker.rankAndLimitSearchResults(
-        normalizedBiliResults,
-        query as string,
-        perPlatformLimit,
-      );
-      const ytResults = SearchRanker.rankAndLimitSearchResults(
-        rawYtResults,
-        query as string,
-        perPlatformLimit,
-      );
+      const searchResult = await SearchService.searchDualPlatforms({
+        keyword:          query as string,
+        limitPerPlatform: perPlatformLimit,
+        bilibiliApi,
+        youtubeExtractor: ytExtractorForSearch,
+      });
+      const biliResults = searchResult.bilibili;
+      const ytResults   = searchResult.youtube;
 
       if (biliResults.length === 0 && ytResults.length === 0) {
         await interaction.editReply({ content: `No results found for "${query}"` });
@@ -215,8 +166,8 @@ const createPlayCommand = (playbackService: any, queueService: any) => ({
         query,
         biliCount: biliResults.length,
         ytCount: ytResults.length,
-        rawBiliCount: normalizedBiliResults.length,
-        rawYtCount: rawYtResults.length,
+        rawBiliCount: searchResult.rawBilibiliCount,
+        rawYtCount:   searchResult.rawYouTubeCount,
         user: user.username,
       });
     } catch (e: unknown) {

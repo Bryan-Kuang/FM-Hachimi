@@ -7,7 +7,7 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import EmbedBuilders = require('../../ui/embeds');
 import ButtonBuilders = require('../../ui/buttons');
-import SearchRanker = require('../../utils/search_ranker');
+import SearchService = require('../../search/search_service');
 import * as logger from '../../services/logger_service';
 
 const createSearchCommand = (playbackService: any) => ({
@@ -64,9 +64,11 @@ const createSearchCommand = (playbackService: any) => ({
           return;
         }
 
-        const response = await ytExtractor.searchVideos(keyword, maxResults) as any;
-        const rawResults: any[] = response?.results ?? [];
-        const results = SearchRanker.rankAndLimitSearchResults(rawResults, keyword, maxResults);
+        const results = await SearchService.searchYouTube({
+          keyword,
+          limit: maxResults,
+          youtubeExtractor: ytExtractor,
+        });
 
         if (results.length === 0) {
           const noResultsEmbed = EmbedBuilders.createErrorEmbed(
@@ -92,7 +94,7 @@ const createSearchCommand = (playbackService: any) => ({
           guild: interaction.guild.name,
           keyword,
           resultsFound: results.length,
-          rawResultsFound: rawResults.length,
+          rawResultsFound: results.length,
         });
         return;
       }
@@ -108,10 +110,11 @@ const createSearchCommand = (playbackService: any) => ({
         return;
       }
 
-      // extractor.searchVideos may return a plain array or { success, results }
-      const response = await extractor.searchVideos(keyword, maxResults) as any;
-      const rawResults: any[] = Array.isArray(response) ? response : (response?.results ?? []);
-      const results = SearchRanker.rankAndLimitSearchResults(rawResults, keyword, maxResults);
+      const results = await SearchService.searchBilibili({
+        keyword,
+        limit: maxResults,
+        extractor,
+      });
 
       if (results.length === 0) {
         const noResultsEmbed = EmbedBuilders.createErrorEmbed(
@@ -140,7 +143,7 @@ const createSearchCommand = (playbackService: any) => ({
         guild: interaction.guild.name,
         keyword,
         resultsFound: results.length,
-        rawResultsFound: rawResults.length,
+        rawResultsFound: results.length,
       });
     } catch (e: unknown) {
       logger.error('Search command failed', {

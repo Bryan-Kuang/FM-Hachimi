@@ -10,22 +10,7 @@ require("ts-node").register({ transpileOnly: true });
 const { REST, Routes } = require("discord.js");
 const config = require("../src/config/config");
 const logger = require("../src/services/logger_service");
-
-// Import all commands
-const commandModules = [
-  require("../src/bot/commands/play"),
-  require("../src/bot/commands/pause"),
-  require("../src/bot/commands/resume"),
-  require("../src/bot/commands/skip"),
-  require("../src/bot/commands/prev"),
-  require("../src/bot/commands/stop"),
-  require("../src/bot/commands/queue"),
-  require("../src/bot/commands/nowplaying"),
-  require("../src/bot/commands/help"),
-  require("../src/bot/commands/search"),
-  require("../src/bot/commands/hachimi"),
-  require("../src/bot/commands/daily_hachimi"),
-];
+const CommandRegistry = require("../src/bot/commands");
 
 async function deployCommands() {
   try {
@@ -34,10 +19,8 @@ async function deployCommands() {
       throw new Error("Discord token or client ID is not configured");
     }
 
-    // Factory functions receive (playbackService, queueService, ...) — pass null for deploy-only use
-    const commands = commandModules.map((mod) =>
-      typeof mod === "function" ? mod(null, null, null) : mod
-    );
+    // Command factories receive services at runtime; deploy only needs the data builders.
+    const commands = CommandRegistry.createCommands(null, null);
 
     // Extract command data
     const commandData = commands.map((command) => command.data.toJSON());
