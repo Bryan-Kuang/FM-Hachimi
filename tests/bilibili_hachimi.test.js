@@ -126,6 +126,78 @@ describe("BilibiliAPI Hachimi Logic", () => {
     expect(ids).not.toContain("drop2");
   });
 
+  test("processCandidates excludes explicit BVIDs when enough fresh candidates exist", () => {
+    const rawList = Array.from({ length: 5 }, (_, index) => ({
+      bvid: `BVfresh${index + 1}`,
+      tid: 22,
+      title: `哈基米新歌 ${index + 1}`,
+      tag: "",
+      duration: 90,
+      view: 20000,
+      like: 1000,
+      url: `https://bilibili.com/video/BVfresh${index + 1}`,
+    }));
+
+    const { results } = BilibiliAPI.processCandidates(rawList, null, 5, {
+      excludeBvids: ["BVfresh1"],
+      fillFromExcluded: false,
+    });
+
+    expect(results).toHaveLength(4);
+    expect(results.map((video) => video.bvid)).not.toContain("BVfresh1");
+  });
+
+  test("processCandidates backfills from guild history to preserve requested count", () => {
+    const originalHistoryStore = BilibiliAPI.historyStore;
+    const rawList = Array.from({ length: 5 }, (_, index) => ({
+      bvid: `BVhistory${index + 1}`,
+      tid: 22,
+      title: `哈基米历史歌 ${index + 1}`,
+      tag: "",
+      duration: 90,
+      view: 20000,
+      like: 1000,
+      url: `https://bilibili.com/video/BVhistory${index + 1}`,
+    }));
+
+    BilibiliAPI.setHistoryStore({
+      filter: (_guildId, candidates) => candidates.slice(0, 2),
+    });
+
+    try {
+      const { results, meta } = BilibiliAPI.processCandidates(rawList, "guild1", 5);
+
+      expect(results).toHaveLength(5);
+      expect(new Set(results.map((video) => video.bvid)).size).toBe(5);
+      expect(meta.excludedByHistory).toBe(3);
+      expect(meta.historyBackfillApplied).toBe(true);
+    } finally {
+      BilibiliAPI.historyStore = originalHistoryStore;
+    }
+  });
+
+  test("processCandidates can backfill from explicit exclusions to keep daily recommendations showing", () => {
+    const rawList = Array.from({ length: 3 }, (_, index) => ({
+      bvid: `BVdaily${index + 1}`,
+      tid: 22,
+      title: `哈基米每日歌 ${index + 1}`,
+      tag: "",
+      duration: 90,
+      view: 20000,
+      like: 1000,
+      url: `https://bilibili.com/video/BVdaily${index + 1}`,
+    }));
+
+    const { results, meta } = BilibiliAPI.processCandidates(rawList, null, 3, {
+      excludeBvids: ["BVdaily1", "BVdaily2", "BVdaily3"],
+      fillFromExcluded: true,
+    });
+
+    expect(results).toHaveLength(3);
+    expect(new Set(results.map((video) => video.bvid)).size).toBe(3);
+    expect(meta.explicitBackfillApplied).toBe(true);
+  });
+
   describe("filterByPartition", () => {
     const videos = [
       { bvid: "a", tid: 22 },   // 鬼畜调教 → allowed

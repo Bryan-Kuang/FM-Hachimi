@@ -36,6 +36,7 @@ interface GuildScheduleConfig {
 interface AppConfig {
   dailyHachimi?: {
     dataFile?: string;
+    historyFile?: string;
     defaultTimezone?: string;
     defaultCount?: number;
   };
@@ -63,8 +64,14 @@ interface VideoInfo {
 }
 
 interface BilibiliApi {
-  searchHachimiVideos(count: number, guildId: string): Promise<{ results: VideoInfo[] }>;
+  searchHachimiVideos(
+    count: number,
+    guildId: string,
+    options?: { excludeBvids?: string[]; fillFromExcluded?: boolean },
+  ): Promise<{ results: VideoInfo[] }>;
 }
+
+type MonthlyRecommendationHistory = Record<string, Record<string, string[]>>;
 
 class DailyHachimiService {
   private config: AppConfig;
@@ -73,6 +80,8 @@ class DailyHachimiService {
   private client: DiscordClient | null;
   private bilibiliApi: BilibiliApi | null;
   private _dataFile: string;
+  private _historyFile: string;
+  private _recommendationHistory: MonthlyRecommendationHistory;
 
   constructor(config: AppConfig) {
     this.config = config;
@@ -80,10 +89,14 @@ class DailyHachimiService {
     this.schedules  = {};
     this.client     = null;
     this.bilibiliApi = null;
+    this._recommendationHistory = {};
 
     this._dataFile =
       config.dailyHachimi?.dataFile ??
       path.join(process.cwd(), 'data', 'daily_hachimi.json');
+    this._historyFile =
+      config.dailyHachimi?.historyFile ??
+      path.join(process.cwd(), 'data', 'daily_hachimi_history.json');
   }
 
   // ---------------------------------------------------------------------------
@@ -99,6 +112,7 @@ class DailyHachimiService {
 
     this._checkDataDirWritable();
     this._loadSchedules();
+    this._loadRecommendationHistory();
 
     for (const [guildId, cfg] of Object.entries(this.schedules)) {
       this._scheduleGuild(guildId, cfg);
@@ -209,10 +223,17 @@ class DailyHachimiService {
       return;
     }
 
+    const timezone = cfg.timezone || this.config.dailyHachimi?.defaultTimezone || 'America/Toronto';
+    const monthKey = this._getMonthKey(timezone);
+    this._pruneGuildHistory(guildId, monthKey);
+
     // Search for videos
     let videos: VideoInfo[] = [];
     try {
-      const { results } = await this.bilibiliApi!.searchHachimiVideos(count, guildId);
+      const { results } = await this.bilibiliApi!.searchHachimiVideos(count, guildId, {
+        excludeBvids: this._getMonthlyHistory(guildId, monthKey),
+        fillFromExcluded: true,
+      });
       videos = results;
     } catch (err: unknown) {
       logger.error('DailyHachimi: searchHachimiVideos threw', {
@@ -232,7 +253,7 @@ class DailyHachimiService {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
-      timeZone: cfg.timezone || this.config.dailyHachimi?.defaultTimezone || 'America/Toronto',
+      timeZone: timezone,
     });
 
     // Send header message
@@ -252,6 +273,10 @@ class DailyHachimiService {
         const embed = this._buildVideoEmbed(video);
         const row   = this._buildActionRow(video);
         await channel.send({ embeds: [embed], components: [row] });
+        const bvid = this._extractBvid(video);
+        if (bvid) {
+          this._recordMonthlyHistory(guildId, monthKey, bvid);
+        }
       } catch (err: unknown) {
         logger.error('DailyHachimi: failed to send video card', {
           guildId,
@@ -305,6 +330,61 @@ class DailyHachimiService {
     return new ActionRowBuilder<ButtonBuilder>().addComponents(listenBtn, linkBtn);
   }
 
+  private _extractBvid(video: VideoInfo): string | null {
+    if (video.bvid) return video.bvid;
+    const match = /\/video\/(BV[0-9A-Za-z]+)/.exec(video.url || '');
+    return match ? match[1] : null;
+  }
+
+  private _getMonthKey(timezone: string, date = new Date()): string {
+    try {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+      }).formatToParts(date);
+      const year = parts.find((part) => part.type === 'year')?.value;
+      const month = parts.find((part) => part.type === 'month')?.value;
+      if (year && month) return `${year}-${month}`;
+    } catch (err: unknown) {
+      logger.warn('DailyHachimi: invalid timezone for history month, using UTC', {
+        timezone,
+        error: (err as Error).message,
+      });
+    }
+    return date.toISOString().slice(0, 7);
+  }
+
+  private _getMonthlyHistory(guildId: string, monthKey: string): string[] {
+    return [...(this._recommendationHistory[guildId]?.[monthKey] || [])];
+  }
+
+  private _recordMonthlyHistory(guildId: string, monthKey: string, bvid: string): void {
+    if (!this._recommendationHistory[guildId]) {
+      this._recommendationHistory[guildId] = {};
+    }
+    const current = this._recommendationHistory[guildId][monthKey] || [];
+    if (!current.includes(bvid)) {
+      this._recommendationHistory[guildId][monthKey] = [...current, bvid];
+      this._saveRecommendationHistory();
+    }
+  }
+
+  private _pruneGuildHistory(guildId: string, monthKey: string): void {
+    const guildHistory = this._recommendationHistory[guildId];
+    if (!guildHistory) return;
+    let changed = false;
+    for (const existingMonth of Object.keys(guildHistory)) {
+      if (existingMonth !== monthKey) {
+        delete guildHistory[existingMonth];
+        changed = true;
+      }
+    }
+    if (changed) {
+      this._saveRecommendationHistory();
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Persistence
   // ---------------------------------------------------------------------------
@@ -324,6 +404,62 @@ class DailyHachimiService {
         error: (err as Error).message,
       });
       this.schedules = {};
+    }
+  }
+
+  private _loadRecommendationHistory(): void {
+    try {
+      if (!fs.existsSync(this._historyFile)) {
+        this._recommendationHistory = {};
+        return;
+      }
+
+      const raw = fs.readFileSync(this._historyFile, 'utf8');
+      const parsed = JSON.parse(raw) as unknown;
+      this._recommendationHistory = this._normalizeRecommendationHistory(parsed);
+    } catch (err: unknown) {
+      logger.warn('DailyHachimi: failed to load recommendation history file, starting fresh', {
+        file: this._historyFile,
+        error: (err as Error).message,
+      });
+      this._recommendationHistory = {};
+    }
+  }
+
+  private _normalizeRecommendationHistory(value: unknown): MonthlyRecommendationHistory {
+    const normalized: MonthlyRecommendationHistory = {};
+    if (!value || typeof value !== 'object') return normalized;
+
+    for (const [guildId, months] of Object.entries(value as Record<string, unknown>)) {
+      if (!months || typeof months !== 'object') continue;
+      for (const [monthKey, bvids] of Object.entries(months as Record<string, unknown>)) {
+        if (!/^\d{4}-\d{2}$/.test(monthKey) || !Array.isArray(bvids)) continue;
+        const cleanBvids = [...new Set(bvids.filter((bvid): bvid is string => typeof bvid === 'string' && bvid.length > 0))];
+        if (cleanBvids.length === 0) continue;
+        if (!normalized[guildId]) normalized[guildId] = {};
+        normalized[guildId][monthKey] = cleanBvids;
+      }
+    }
+
+    return normalized;
+  }
+
+  private _saveRecommendationHistory(): void {
+    try {
+      const dir = path.dirname(this._historyFile);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(
+        this._historyFile,
+        JSON.stringify(this._recommendationHistory, null, 2),
+        'utf8',
+      );
+    } catch (err: unknown) {
+      logger.warn('DailyHachimi: failed to save recommendation history', {
+        file: this._historyFile,
+        error: (err as Error).message,
+      });
     }
   }
 

@@ -12,6 +12,12 @@ import commandQueue = require('../../utils/command_queue');
 // Maximum number of videos to add in a single batch (recommended: 1-10)
 const MAX_VIDEO_BATCH_SIZE = 5;
 
+function getBvidFromVideo(video: { bvid?: string; url?: string }): string | null {
+  if (video.bvid) return video.bvid;
+  const match = /\/video\/(BV[0-9A-Za-z]+)/.exec(video.url || '');
+  return match ? match[1] : null;
+}
+
 const createHachimiCommand = (playbackService: any, queueService: any) => {
   const command = {
     data: new SlashCommandBuilder()
@@ -177,12 +183,19 @@ const createHachimiCommand = (playbackService: any, queueService: any) => {
         for (const video of qualifiedVideos) {
           if (signal?.aborted) break;
           try {
-            await queueService.addTrack(
+            const track = await queueService.addTrack(
               interaction.guild.id,
               video.url,
               `<@${interaction.user.id}>`,
             );
+            if (!track) {
+              throw new Error('Track could not be queued');
+            }
             addedCount++;
+            const bvid = getBvidFromVideo(video);
+            if (bvid && typeof bilibiliApi.recordHachimiHistory === 'function') {
+              bilibiliApi.recordHachimiHistory(interaction.guild.id, bvid);
+            }
 
             if (addedCount === 1 && !player.isPlaying && !player.isPaused) {
               try {
