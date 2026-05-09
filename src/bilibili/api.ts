@@ -46,10 +46,19 @@ interface ProcessCandidatesResult {
     durationFilteredCount: number;
     compilationFilteredCount: number;
     qualifiedCount: number;
+    excludedByExplicit: number;
     excludedByHistory: number;
     softFallbackApplied: boolean;
+    historyBackfillApplied: boolean;
+    explicitBackfillApplied: boolean;
     returnedCount: number;
   };
+}
+
+interface ProcessCandidatesOptions {
+  excludeBvids?: string[];
+  fillFromHistory?: boolean;
+  fillFromExcluded?: boolean;
 }
 
 interface SearchHachimiResult {
@@ -87,6 +96,11 @@ class BilibiliAPI {
    */
   setHistoryStore(historyStore: HistoryStoreInstance): void {
     this.historyStore = historyStore;
+  }
+
+  recordHachimiHistory(guildId: string, bvid: string): void {
+    if (!this.historyStore || !guildId || !bvid) return;
+    this.historyStore.add(guildId, bvid);
   }
 
   /**
@@ -446,7 +460,29 @@ class BilibiliAPI {
     }
   }
 
-  processCandidates(rawList: VideoInfo[], guildId: string | null, maxResults = 5): ProcessCandidatesResult {
+  private getCandidateKey(video: VideoInfo): string | null {
+    if (video.bvid) return video.bvid;
+    if (video.aid) return `av${video.aid}`;
+    return null;
+  }
+
+  private addUniqueCandidates(target: VideoInfo[], source: VideoInfo[], limit: number): void {
+    const seen = new Set(target.map((video) => this.getCandidateKey(video) || video.url));
+    for (const video of source) {
+      if (target.length >= limit) break;
+      const key = this.getCandidateKey(video) || video.url;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      target.push(video);
+    }
+  }
+
+  processCandidates(
+    rawList: VideoInfo[],
+    guildId: string | null,
+    maxResults = 5,
+    options: ProcessCandidatesOptions = {},
+  ): ProcessCandidatesResult {
     // Deduplicate by bvid
     const seen = new Set<string>();
     const deduped: VideoInfo[] = [];
@@ -467,13 +503,39 @@ class BilibiliAPI {
     // Compilation filter: reject obvious 合集/总集/排行 videos by title pattern
     const compilationFiltered = this.filterCompilations(durationFiltered);
     const qualified = this.filterQualityVideos(compilationFiltered);
+
+    const explicitExcludes = new Set((options.excludeBvids || []).filter(Boolean));
+    const explicitFresh: VideoInfo[] = [];
+    const explicitExcluded: VideoInfo[] = [];
+    for (const video of qualified) {
+      const key = this.getCandidateKey(video);
+      if (key && explicitExcludes.has(key)) {
+        explicitExcluded.push(video);
+      } else {
+        explicitFresh.push(video);
+      }
+    }
+
     // historyStore.filter is now generic (T extends { bvid: string }) so no
     // cast is needed — VideoInfo has a `bvid` field.
-    const afterHistory: VideoInfo[] = this.historyStore
-      ? this.historyStore.filter(guildId!, qualified)
-      : qualified;
-    const softFallback = afterHistory.length === 0 && qualified.length > 0;
-    const pool = softFallback ? qualified : afterHistory;
+    const afterHistory: VideoInfo[] = this.historyStore && guildId
+      ? this.historyStore.filter(guildId, explicitFresh)
+      : explicitFresh;
+
+    const pool = afterHistory.slice();
+    const fillFromHistory = options.fillFromHistory !== false;
+    const historyBeforeBackfill = pool.length;
+    if (fillFromHistory && pool.length < maxResults) {
+      this.addUniqueCandidates(pool, explicitFresh, maxResults);
+    }
+    const historyBackfillApplied = pool.length > historyBeforeBackfill;
+
+    const explicitBeforeBackfill = pool.length;
+    if (options.fillFromExcluded && pool.length < maxResults) {
+      this.addUniqueCandidates(pool, explicitExcluded, maxResults);
+    }
+    const explicitBackfillApplied = pool.length > explicitBeforeBackfill;
+    const softFallback = historyBackfillApplied && afterHistory.length === 0 && explicitFresh.length > 0;
 
     // Fisher–Yates shuffle
     for (let i = pool.length - 1; i > 0; i--) {
@@ -494,14 +556,21 @@ class BilibiliAPI {
         durationFilteredCount: durationFiltered.length,
         compilationFilteredCount: compilationFiltered.length,
         qualifiedCount: qualified.length,
-        excludedByHistory: qualified.length - afterHistory.length,
+        excludedByExplicit: explicitExcluded.length,
+        excludedByHistory: explicitFresh.length - afterHistory.length,
         softFallbackApplied: softFallback,
+        historyBackfillApplied,
+        explicitBackfillApplied,
         returnedCount: selected.length,
       },
     };
   }
 
-  async searchHachimiVideos(maxResults = 5, guildId: string | null = null): Promise<SearchHachimiResult> {
+  async searchHachimiVideos(
+    maxResults = 5,
+    guildId: string | null = null,
+    options: ProcessCandidatesOptions = {},
+  ): Promise<SearchHachimiResult> {
     try {
       logger.info("Searching for Hachimi videos (Randomized)", {
         maxResults,
@@ -522,7 +591,8 @@ class BilibiliAPI {
       const { results, meta } = this.processCandidates(
         rawCandidates,
         guildId,
-        maxResults
+        maxResults,
+        options
       );
 
       logger.info("Hachimi video search completed", meta);

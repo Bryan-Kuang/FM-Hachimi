@@ -70,6 +70,7 @@ interface YouTubeConfig {
 
 interface DailyHachimiConfig {
   dataFile: string;
+  historyFile: string;
   defaultTimezone: string;
   defaultCount: number;
 }
@@ -198,6 +199,8 @@ const config: BotConfig = {
   dailyHachimi: {
     dataFile: process.env.DAILY_HACHIMI_DATA_FILE
       || path.join(process.cwd(), "data", "daily_hachimi.json"),
+    historyFile: process.env.DAILY_HACHIMI_HISTORY_FILE
+      || path.join(process.cwd(), "data", "daily_hachimi_history.json"),
     defaultTimezone: "America/Toronto",
     defaultCount: 1,
   },

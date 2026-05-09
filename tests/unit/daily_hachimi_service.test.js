@@ -34,6 +34,7 @@ const DailyHachimiService = require("../../src/services/daily_hachimi_service");
 const mockConfig = {
   dailyHachimi: {
     dataFile: "/tmp/test_daily_hachimi.json",
+    historyFile: "/tmp/test_daily_hachimi_history.json",
     defaultTimezone: "America/Toronto",
     defaultCount: 1,
   },
@@ -403,6 +404,138 @@ describe("_fire", () => {
     const actionRow = card1.components[0];
     const listenBtn = actionRow.components[0];
     expect(listenBtn.data.custom_id).toBe("daily_play_BV1abc");
+  });
+
+  test("passes monthly exclusions and records successfully posted videos", async () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-05-15T12:00:00Z"));
+    fs.existsSync.mockImplementation((file) => file === mockConfig.dailyHachimi.historyFile);
+    fs.readFileSync.mockImplementation((file) => {
+      if (file === mockConfig.dailyHachimi.historyFile) {
+        return JSON.stringify({ guild1: { "2026-05": ["BVold"] } });
+      }
+      return "{}";
+    });
+
+    const channel = makeMockChannel();
+    const client = makeMockClient(channel);
+    const mockApi = {
+      searchHachimiVideos: jest.fn().mockResolvedValue({
+        results: [
+          {
+            bvid: "BVnew",
+            title: "哈基米新推荐",
+            duration: 90,
+            pic: "",
+            url: "https://www.bilibili.com/video/BVnew",
+          },
+        ],
+      }),
+    };
+
+    const service = makeService();
+    service.initialize(client, mockApi);
+    service.schedules["guild1"] = {
+      channelId: "ch1",
+      hour: 12,
+      minute: 0,
+      count: 1,
+      timezone: "America/Toronto",
+    };
+
+    await service._fire("guild1");
+
+    expect(mockApi.searchHachimiVideos).toHaveBeenCalledWith(1, "guild1", {
+      excludeBvids: ["BVold"],
+      fillFromExcluded: true,
+    });
+
+    const historyWrite = fs.writeFileSync.mock.calls.find(
+      ([file]) => file === mockConfig.dailyHachimi.historyFile
+    );
+    expect(historyWrite).toBeTruthy();
+    const saved = JSON.parse(historyWrite[1]);
+    expect(saved.guild1["2026-05"]).toEqual(["BVold", "BVnew"]);
+    jest.useRealTimers();
+  });
+
+  test("does not mark daily videos when their card fails to send", async () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-05-15T12:00:00Z"));
+    fs.existsSync.mockReturnValue(false);
+    const channel = {
+      isTextBased: () => true,
+      send: jest
+        .fn()
+        .mockResolvedValueOnce({})
+        .mockRejectedValueOnce(new Error("send failed"))
+        .mockResolvedValueOnce({}),
+    };
+    const client = makeMockClient(channel);
+    const mockApi = {
+      searchHachimiVideos: jest.fn().mockResolvedValue({
+        results: [
+          { bvid: "BVfailed", title: "Video 1", duration: 60, pic: "", url: "https://bilibili.com/video/BVfailed" },
+          { bvid: "BVsaved", title: "Video 2", duration: 60, pic: "", url: "https://bilibili.com/video/BVsaved" },
+        ],
+      }),
+    };
+
+    const service = makeService();
+    service.initialize(client, mockApi);
+    service.schedules["guild1"] = {
+      channelId: "ch1", hour: 12, minute: 0, count: 2, timezone: "America/Toronto",
+    };
+
+    await service._fire("guild1");
+
+    const historyWrite = fs.writeFileSync.mock.calls.find(
+      ([file]) => file === mockConfig.dailyHachimi.historyFile
+    );
+    expect(historyWrite).toBeTruthy();
+    const saved = JSON.parse(historyWrite[1]);
+    expect(saved.guild1["2026-05"]).toEqual(["BVsaved"]);
+    jest.useRealTimers();
+  });
+
+  test("prunes older daily history months for the guild being fired", async () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-05-15T12:00:00Z"));
+    fs.existsSync.mockImplementation((file) => file === mockConfig.dailyHachimi.historyFile);
+    fs.readFileSync.mockImplementation((file) => {
+      if (file === mockConfig.dailyHachimi.historyFile) {
+        return JSON.stringify({
+          guild1: {
+            "2026-04": ["BVoldMonth"],
+            "2026-05": ["BVcurrentMonth"],
+          },
+        });
+      }
+      return "{}";
+    });
+
+    const channel = makeMockChannel();
+    const client = makeMockClient(channel);
+    const mockApi = {
+      searchHachimiVideos: jest.fn().mockResolvedValue({
+        results: [
+          { bvid: "BVnewMonth", title: "Video", duration: 60, pic: "", url: "https://bilibili.com/video/BVnewMonth" },
+        ],
+      }),
+    };
+
+    const service = makeService();
+    service.initialize(client, mockApi);
+    service.schedules["guild1"] = {
+      channelId: "ch1", hour: 12, minute: 0, count: 1, timezone: "America/Toronto",
+    };
+
+    await service._fire("guild1");
+
+    const historyWrites = fs.writeFileSync.mock.calls.filter(
+      ([file]) => file === mockConfig.dailyHachimi.historyFile
+    );
+    const saved = JSON.parse(historyWrites[historyWrites.length - 1][1]);
+    expect(saved.guild1["2026-04"]).toBeUndefined();
+    expect(saved.guild1["2026-05"]).toEqual(["BVcurrentMonth", "BVnewMonth"]);
+    jest.useRealTimers();
   });
 
   test("skips sending when API returns empty results", async () => {
