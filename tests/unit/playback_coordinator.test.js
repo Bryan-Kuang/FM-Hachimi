@@ -13,7 +13,9 @@ function makePlayerService() {
   const player = {
     isPlaying: false,
     isPaused: false,
+    voiceConnection: null,
     joinVoiceChannel: jest.fn().mockResolvedValue(true),
+    leaveVoiceChannel: jest.fn(),
   };
   const youtubeExtractor = {
     extractAudio: jest.fn().mockResolvedValue({ title: "YT", audioUrl: "audio", duration: 10 }),
@@ -84,6 +86,67 @@ describe("PlaybackCoordinator", () => {
     );
     expect(playerService.setUIContext).toHaveBeenCalledWith("guild-1", "channel-1");
     expect(playerService.play).toHaveBeenCalledWith("guild-1");
+  });
+
+  test("YouTube URL playback starts joining voice before extraction resolves", async () => {
+    const coordinator = PlaybackCoordinator();
+    const playerService = makePlayerService();
+    const interaction = makeInteraction();
+    let resolveExtraction;
+    playerService._youtubeExtractor.extractAudio.mockImplementation(() => new Promise(resolve => {
+      resolveExtraction = resolve;
+    }));
+
+    const resultPromise = coordinator.playYouTubeUrl({
+      interaction,
+      playerService,
+      url: "https://youtube.com/watch?v=abc",
+    });
+
+    await Promise.resolve();
+
+    expect(playerService._youtubeExtractor.extractAudio).toHaveBeenCalledWith("https://youtube.com/watch?v=abc");
+    expect(playerService._player.joinVoiceChannel).toHaveBeenCalledWith({ id: "voice-1" });
+    expect(playerService.addTrack).not.toHaveBeenCalled();
+
+    resolveExtraction({ title: "YT", audioUrl: "audio", duration: 10 });
+    const result = await resultPromise;
+
+    expect(result.success).toBe(true);
+    expect(playerService.addTrack).toHaveBeenCalled();
+  });
+
+  test("YouTube playback leaves early voice join when extraction fails while idle", async () => {
+    const coordinator = PlaybackCoordinator();
+    const playerService = makePlayerService();
+    playerService._youtubeExtractor.extractAudio.mockRejectedValue(new Error("extract failed"));
+
+    const result = await coordinator.playYouTubeUrl({
+      interaction: makeInteraction(),
+      playerService,
+      url: "https://youtube.com/watch?v=abc",
+    });
+
+    expect(result.success).toBe(false);
+    expect(playerService._player.joinVoiceChannel).toHaveBeenCalled();
+    expect(playerService._player.leaveVoiceChannel).toHaveBeenCalled();
+  });
+
+  test("YouTube playback keeps existing active connection when extraction fails", async () => {
+    const coordinator = PlaybackCoordinator();
+    const playerService = makePlayerService();
+    playerService._player.isPlaying = true;
+    playerService._player.voiceConnection = { joinConfig: { channelId: "voice-1" } };
+    playerService._youtubeExtractor.extractAudio.mockRejectedValue(new Error("extract failed"));
+
+    const result = await coordinator.playYouTubeUrl({
+      interaction: makeInteraction(),
+      playerService,
+      url: "https://youtube.com/watch?v=abc",
+    });
+
+    expect(result.success).toBe(false);
+    expect(playerService._player.leaveVoiceChannel).not.toHaveBeenCalled();
   });
 
   test("YouTube playback notifies instead of restarting when player is already active", async () => {

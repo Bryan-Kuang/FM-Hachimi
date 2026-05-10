@@ -73,4 +73,17 @@ describe("YouTubeExtractor extraction cache behavior", () => {
     expect(spawn).toHaveBeenCalledTimes(2);
     expect(extractor._waitForRateLimit).toHaveBeenCalledTimes(2);
   });
+
+  test("uses audio-first low-bandwidth fallback format for extraction", async () => {
+    spawn.mockImplementation(() => createMockProcess({
+      stdout: youtubeJson("dQw4w9WgXcQ", "Format YouTube"),
+      exitCode: 0,
+    }));
+
+    await extractor.extractAudio("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+
+    const args = spawn.mock.calls[0][1];
+    expect(args[args.indexOf("--format") + 1])
+      .toBe("bestaudio[acodec!=none]/best[height<=360][acodec!=none]/worst[acodec!=none]/best");
+  });
 });
