@@ -151,6 +151,7 @@ describe("select menu direct video values", () => {
 
     await handler(interaction);
 
+    expect(interaction.deferReply).toHaveBeenCalledWith({ flags: 64 });
     expect(interaction.editReply).toHaveBeenCalledWith({
       embeds: [expect.objectContaining({ title: "Failed to Add Video" })],
     });
@@ -158,6 +159,20 @@ describe("select menu direct video values", () => {
       "Video added to queue from direct play search",
       expect.any(Object),
     );
+  });
+
+  test("/search YouTube direct value defers failure replies ephemerally", async () => {
+    const playerService = makePlayerService();
+    playerService._ytExtractor.extractAudio.mockRejectedValue(new Error("extract failed"));
+    const handler = createSelectMenuHandler(playerService);
+    const interaction = makeInteraction({ customId: "search_select_hachimi", value: "yt:abcdefghijk" });
+
+    await handler(interaction);
+
+    expect(interaction.deferReply).toHaveBeenCalledWith({ flags: 64 });
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      embeds: [expect.objectContaining({ title: "Failed to Add Video" })],
+    });
   });
 
   test("/search Bilibili direct value plays without repeating keyword search", async () => {
