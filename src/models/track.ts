@@ -19,7 +19,7 @@ class Track implements TrackData {
   duration!: number;
   thumbnail?: string;
   author?: string;
-  platform?: 'bilibili';
+  platform?: 'bilibili' | 'youtube';
   extractedAt?: string;
   id?: string;
   videoId?: string;

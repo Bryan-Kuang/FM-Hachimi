@@ -121,13 +121,14 @@ class InterfaceUpdater {
         loopMode: state.loopMode,
       });
       const options = { embeds: [embed], components };
+      const shouldTrackProgress = Boolean(state.currentTrack && !state.isPaused);
 
       if (ctx.messageId) {
         try {
           const msg = await channel.messages.edit(ctx.messageId, options);
           if (!msg) throw new Error('Message edit returned null');
           if ((session.uiSeq || 0) !== s) return;
-          if (state.isPlaying && state.currentTrack) {
+          if (shouldTrackProgress) {
             this.progressTracker.startTracking(guildId, msg as unknown as Parameters<ProgressTracker['startTracking']>[1], () => this._getPlayerState(guildId));
           } else {
             this.progressTracker.stopTracking(guildId);
@@ -143,7 +144,7 @@ class InterfaceUpdater {
           if ((session.uiSeq || 0) !== s) return;
           const sent = await channel.send(options);
           session.uiContext = { channelId: ctx.channelId, messageId: sent.id };
-          if (state.isPlaying && state.currentTrack) {
+          if (shouldTrackProgress) {
             this.progressTracker.startTracking(guildId, sent as unknown as Parameters<ProgressTracker['startTracking']>[1], () => this._getPlayerState(guildId));
           } else {
             this.progressTracker.stopTracking(guildId);
@@ -158,7 +159,7 @@ class InterfaceUpdater {
         if ((session.uiSeq || 0) !== s) return;
         const sent = await channel.send(options);
         session.uiContext = { channelId: ctx.channelId, messageId: sent.id };
-        if (state.isPlaying && state.currentTrack) {
+        if (shouldTrackProgress) {
           this.progressTracker.startTracking(guildId, sent as unknown as Parameters<ProgressTracker['startTracking']>[1], () => this._getPlayerState(guildId));
         } else {
           this.progressTracker.stopTracking(guildId);
@@ -179,6 +180,7 @@ class InterfaceUpdater {
     return {
       currentTrack: player.currentTrack,
       isPlaying: player.isPlaying,
+      isPaused: player.isPaused,
       currentTime: player.getCurrentTime(),
       currentIndex: player.currentIndex,
       queueLength: player.queue ? player.queue.length : 0,  // queue.length works on both Queue class and raw array

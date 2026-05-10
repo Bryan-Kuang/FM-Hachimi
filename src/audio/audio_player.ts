@@ -39,6 +39,9 @@ interface ExtractorLike {
   getAudioStreamUrl(normalizedUrl: string): Promise<string>;
 }
 
+type TrackPlatform = 'bilibili' | 'youtube';
+type PlatformExtractors = Partial<Record<TrackPlatform, ExtractorLike | null>>;
+
 let ffmpegAvailabilityPromise: Promise<void> | null = null;
 
 function checkFFmpegAvailability(): Promise<void> {
@@ -67,6 +70,7 @@ function checkFFmpegAvailability(): Promise<void> {
 class AudioPlayer {
   // ── Dependencies ─────────────────────────────────────────────────────
   extractor: ExtractorLike | null;
+  private extractorsByPlatform: PlatformExtractors;
 
   // ── Queue (delegated) ────────────────────────────────────────────────
   readonly queue: Queue;
@@ -97,8 +101,12 @@ class AudioPlayer {
   _trackEndInProgress: boolean;
   _inactivityTimer: ReturnType<typeof setTimeout> | null;
 
-  constructor(extractor?: ExtractorLike | null) {
-    this.extractor = extractor ?? null;
+  constructor(extractor?: ExtractorLike | null, platformExtractors: PlatformExtractors = {}) {
+    this.extractor = extractor ?? platformExtractors.bilibili ?? null;
+    this.extractorsByPlatform = {
+      bilibili: this.extractor,
+      ...platformExtractors,
+    };
     this.audioPlayer = createAudioPlayer();
     this.voiceConnection = null;
     this.queue = new Queue();
@@ -125,6 +133,50 @@ class AudioPlayer {
 
   static prewarmFFmpeg(): Promise<void> {
     return checkFFmpegAvailability();
+  }
+
+  setExtractorForPlatform(platform: TrackPlatform, extractor: ExtractorLike | null): void {
+    this.extractorsByPlatform[platform] = extractor;
+    if (platform === 'bilibili') {
+      this.extractor = extractor;
+    }
+  }
+
+  private inferTrackPlatform(track: Track | null): TrackPlatform | null {
+    if (!track) return null;
+    if (track.platform === 'bilibili' || track.platform === 'youtube') {
+      return track.platform;
+    }
+
+    const candidates = [track.normalizedUrl, track.originalUrl, track.url]
+      .filter((value): value is string => typeof value === 'string')
+      .map((value) => value.toLowerCase());
+
+    if (candidates.some((value) => value.includes('youtube.com') || value.includes('youtu.be'))) {
+      return 'youtube';
+    }
+    if (candidates.some((value) => value.includes('bilibili.com') || value.includes('b23.tv'))) {
+      return 'bilibili';
+    }
+    if (track.bvid) {
+      return 'bilibili';
+    }
+
+    return null;
+  }
+
+  private getRefreshExtractor(track: Track | null): ExtractorLike | null {
+    const platform = this.inferTrackPlatform(track);
+    if (platform && this.extractorsByPlatform[platform]) {
+      return this.extractorsByPlatform[platform] ?? null;
+    }
+
+    // Legacy fallback for old Bilibili tracks that predate platform metadata.
+    if (!platform || platform === 'bilibili') {
+      return this.extractor;
+    }
+
+    return null;
   }
 
   // ── Convenience accessors (keep existing API surface) ────────────────
@@ -475,11 +527,20 @@ class AudioPlayer {
       // Re-extract audio URL if stale
       if (this.currentTrack.normalizedUrl && this.currentTrack.isExpired()) {
         try {
-          if (this.extractor) {
-            const freshUrl = await this.extractor.getAudioStreamUrl(this.currentTrack.normalizedUrl);
+          const refreshExtractor = this.getRefreshExtractor(this.currentTrack);
+          if (refreshExtractor) {
+            const freshUrl = await refreshExtractor.getAudioStreamUrl(this.currentTrack.normalizedUrl);
             this.currentTrack.audioUrl = freshUrl;
             this.currentTrack.extractedAt = new Date().toISOString();
-            logger.info('Refreshed stale audio URL', { title: this.currentTrack.title });
+            logger.info('Refreshed stale audio URL', {
+              title: this.currentTrack.title,
+              platform: this.inferTrackPlatform(this.currentTrack),
+            });
+          } else {
+            logger.warn('No extractor configured for stale audio URL refresh', {
+              title: this.currentTrack.title,
+              platform: this.inferTrackPlatform(this.currentTrack),
+            });
           }
         } catch (e: any) {
           logger.warn('Failed to refresh audio URL, using cached', { error: e.message });
@@ -891,15 +952,24 @@ class AudioPlayer {
 
     if (trackAtStart.normalizedUrl) {
       try {
-        if (this.extractor) {
-          const freshUrl = await this.extractor.getAudioStreamUrl(trackAtStart.normalizedUrl);
+        const refreshExtractor = this.getRefreshExtractor(trackAtStart);
+        if (refreshExtractor) {
+          const freshUrl = await refreshExtractor.getAudioStreamUrl(trackAtStart.normalizedUrl);
           if (this.currentTrack !== trackAtStart) {
             logger.info('Track changed during URL refresh; aborting retry', { original: trackAtStart.title });
             return;
           }
           trackAtStart.audioUrl = freshUrl;
           trackAtStart.extractedAt = new Date().toISOString();
-          logger.info('Refreshed audio URL for retry', { title: trackAtStart.title });
+          logger.info('Refreshed audio URL for retry', {
+            title: trackAtStart.title,
+            platform: this.inferTrackPlatform(trackAtStart),
+          });
+        } else {
+          logger.warn('No extractor configured for retry URL refresh', {
+            title: trackAtStart.title,
+            platform: this.inferTrackPlatform(trackAtStart),
+          });
         }
       } catch (e: any) {
         logger.warn('Failed to refresh audio URL for retry', { error: e.message });

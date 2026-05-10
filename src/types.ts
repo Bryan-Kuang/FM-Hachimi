@@ -25,7 +25,7 @@ export interface TrackData {
   duration: number;          // seconds; 0 = unknown
   thumbnail?: string;
   author?: string;
-  platform?: 'bilibili';
+  platform?: 'bilibili' | 'youtube';
   extractedAt?: string;      // ISO 8601 string from new Date().toISOString()
   /** Selected yt-dlp format metadata for diagnostics. */
   formatId?: string;
@@ -71,6 +71,7 @@ export interface PlayerState {
     [key: string]: unknown;
   } | null;
   isPlaying: boolean;
+  isPaused: boolean;
   currentTime: number;
   currentIndex: number;
   queueLength: number;

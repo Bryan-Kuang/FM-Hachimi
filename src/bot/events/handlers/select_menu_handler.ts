@@ -285,7 +285,7 @@ async function playBilibiliSelection(
   playerService: any,
   videoUrl: string,
   titleHint?: string,
-): Promise<void> {
+): Promise<boolean> {
   const addResult = await PlaybackCoordinator.playBilibiliUrl({
     interaction,
     playerService,
@@ -299,7 +299,7 @@ async function playBilibiliSelection(
       { suggestion: addResult?.suggestion || 'Please try again.' },
     );
     await interaction.editReply({ embeds: [errorEmbed] });
-    return;
+    return false;
   }
 
   const title = getTitle(addResult.track) || titleHint || 'selected video';
@@ -308,6 +308,7 @@ async function playBilibiliSelection(
     `📺 **${title}** has been added to the queue`,
   );
   await interaction.editReply({ embeds: [successEmbed] });
+  return true;
 }
 
 async function playYouTubeSelection(
@@ -315,7 +316,7 @@ async function playYouTubeSelection(
   playerService: any,
   videoUrl: string,
   titleHint?: string,
-): Promise<void> {
+): Promise<boolean> {
   const addResult = await PlaybackCoordinator.playYouTubeUrl({
     interaction,
     playerService,
@@ -329,7 +330,7 @@ async function playYouTubeSelection(
       { suggestion: addResult.suggestion || 'Please try again.' },
     );
     await interaction.editReply({ embeds: [errorEmbed] });
-    return;
+    return false;
   }
 
   const title = getTitle(addResult.track) || getTitle(addResult.videoData) || titleHint || 'selected video';
@@ -338,15 +339,15 @@ async function playYouTubeSelection(
     `▶️ **${title}** has been added to the queue`,
   );
   await interaction.editReply({ embeds: [successEmbed] });
+  return true;
 }
 
-async function playDirectSelection(interaction: any, playerService: any, selection: DirectVideoSelection): Promise<void> {
+async function playDirectSelection(interaction: any, playerService: any, selection: DirectVideoSelection): Promise<boolean> {
   if (selection.platform === 'bilibili') {
-    await playBilibiliSelection(interaction, playerService, selection.url);
-    return;
+    return playBilibiliSelection(interaction, playerService, selection.url);
   }
 
-  await playYouTubeSelection(interaction, playerService, selection.url);
+  return playYouTubeSelection(interaction, playerService, selection.url);
 }
 
 // ---------------------------------------------------------------------------
@@ -370,7 +371,8 @@ async function handleSearchSelect(interaction: any, customId: string, playerServ
   try {
     const directSelection = parseDirectSelectionValue(selectedValue);
     if (directSelection) {
-      await playDirectSelection(interaction, playerService, directSelection);
+      const played = await playDirectSelection(interaction, playerService, directSelection);
+      if (!played) return;
       logger.info('Video added to queue from direct search result', {
         platform: directSelection.platform,
         user:     user.username,
@@ -424,7 +426,8 @@ async function handleSearchSelect(interaction: any, customId: string, playerServ
     const selectedVideo = searchResults[resultIndex];
     const videoUrl      = selectedVideo.url || `https://www.bilibili.com/video/av${selectedVideo.id}`;
 
-    await playBilibiliSelection(interaction, playerService, videoUrl, selectedVideo.title);
+    const played = await playBilibiliSelection(interaction, playerService, videoUrl, selectedVideo.title);
+    if (!played) return;
 
     logger.info('Video added to queue from search results', {
       videoTitle: selectedVideo.title,
@@ -477,7 +480,8 @@ async function handlePlaySearch(interaction: any, customId: string, playerServic
   try {
     const directSelection = parseDirectSelectionValue(selectedValue);
     if (directSelection) {
-      await playDirectSelection(interaction, playerService, directSelection);
+      const played = await playDirectSelection(interaction, playerService, directSelection);
+      if (!played) return;
       logger.info('Video added to queue from direct play search', {
         platform: directSelection.platform,
         user:     user.username,
@@ -511,7 +515,8 @@ async function handlePlaySearch(interaction: any, customId: string, playerServic
 
       const selectedVideo = results[resultIndex];
       const videoUrl = selectedVideo.url || `https://www.bilibili.com/video/${selectedVideo.bvid || 'av' + selectedVideo.id}`;
-      await playBilibiliSelection(interaction, playerService, videoUrl, selectedVideo.title);
+      const played = await playBilibiliSelection(interaction, playerService, videoUrl, selectedVideo.title);
+      if (!played) return;
     } else {
       // ── YouTube path ────────────────────────────────────────────────────
       const ytExtractor = playerService.getYouTubeExtractor();
@@ -539,7 +544,8 @@ async function handlePlaySearch(interaction: any, customId: string, playerServic
 
       const selectedVideo = results[resultIndex];
       const videoUrl = selectedVideo.url || `https://www.youtube.com/watch?v=${selectedVideo.id}`;
-      await playYouTubeSelection(interaction, playerService, videoUrl, selectedVideo.title);
+      const played = await playYouTubeSelection(interaction, playerService, videoUrl, selectedVideo.title);
+      if (!played) return;
     }
 
     logger.info('Video added to queue from play search', {

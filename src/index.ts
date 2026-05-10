@@ -69,7 +69,7 @@ class BilibiliDiscordBot {
       const youtubeExtractor = new YouTubeExtractor();
       logger.info('YouTube extractor initialized (requires yt-dlp)');
 
-      const audioManager    = new AudioManager(sessionManager, extractor);
+      const audioManager    = new AudioManager(sessionManager, extractor, youtubeExtractor);
       const progressTracker = new ProgressTracker(sessionManager);
       const historyStore    = new HistoryStore(sessionManager);
       const interfaceUpdater = new InterfaceUpdater(sessionManager, progressTracker, audioManager);

@@ -116,6 +116,7 @@ export interface ExtractedTrackData {
   title: string;
   audioUrl: string;
   duration: number;
+  platform?: 'bilibili' | 'youtube';
   url?: string;
   originalUrl?: string;
   normalizedUrl?: string;

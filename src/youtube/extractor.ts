@@ -36,6 +36,7 @@ interface StreamHeaders {
 
 interface ExtractedAudio extends VideoMetadata {
   audioUrl: string;
+  platform: 'youtube';
   originalUrl: string;
   normalizedUrl: string;
   extractedAt: string;
@@ -330,6 +331,7 @@ class YouTubeExtractor {
         ...metadata,
         audioUrl,
         ...selectedFormat,
+        platform: 'youtube',
         originalUrl: url,
         normalizedUrl,
         extractedAt: new Date().toISOString(),

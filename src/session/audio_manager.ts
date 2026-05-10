@@ -64,10 +64,12 @@ import AudioPlayer = require('../audio/audio_player');
 class AudioManager {
   private sessionManager: SessionManager;
   private extractor: any;
+  private youtubeExtractor: any;
 
-  constructor(sessionManager: SessionManager, extractor?: any) {
+  constructor(sessionManager: SessionManager, extractor?: any, youtubeExtractor?: any) {
     this.sessionManager = sessionManager;
     this.extractor = extractor ?? null;
+    this.youtubeExtractor = youtubeExtractor ?? null;
   }
 
   /**
@@ -76,6 +78,14 @@ class AudioManager {
   setExtractor(extractor: any): void {
     this.extractor = extractor;
     logger.info('Bilibili extractor attached to audio manager');
+  }
+
+  /**
+   * Set the YouTube extractor used for refreshing stale YouTube stream URLs.
+   */
+  setYouTubeExtractor(extractor: any): void {
+    this.youtubeExtractor = extractor;
+    logger.info('YouTube extractor attached to audio manager');
   }
 
   /**
@@ -127,7 +137,7 @@ class AudioManager {
       // Without this, `this.extractor` is null and every `if (this.extractor)`
       // silently falls through — a stale audioUrl gets replayed forever on
       // CDN failures (prod 2026-04-22: 600 × 403 with zero URL refreshes).
-      session.player = new AudioPlayer(this.extractor);
+      session.player = new AudioPlayer(this.extractor, { youtube: this.youtubeExtractor });
       logger.info('Created new audio player for guild', { guildId });
     }
     return session.player;

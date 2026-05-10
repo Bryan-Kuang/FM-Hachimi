@@ -34,6 +34,7 @@ interface StreamHeaders {
 
 interface ExtractedAudio extends VideoMetadata {
   audioUrl: string;
+  platform: 'bilibili';
   originalUrl: string;
   normalizedUrl: string;
   extractedAt: string;
@@ -345,6 +346,7 @@ class BilibiliExtractor {
         ...metadata,
         audioUrl,
         ...selectedFormat,
+        platform: 'bilibili',
         originalUrl: url,
         normalizedUrl: normalizedUrl,
         extractedAt: new Date().toISOString(),
