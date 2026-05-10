@@ -31,6 +31,7 @@ jest.mock("../../src/bilibili/api", () => ({
 
 const createSelectMenuHandler = require("../../src/bot/events/handlers/select_menu_handler");
 const bilibiliApi = require("../../src/bilibili/api");
+const logger = require("../../src/services/logger_service");
 
 function makeInteraction({ customId, value }) {
   return {
@@ -140,6 +141,23 @@ describe("select menu direct video values", () => {
     );
     expect(playerService._ytExtractor.searchVideos).not.toHaveBeenCalled();
     expect(playerService.addTrack).toHaveBeenCalled();
+  });
+
+  test("/play YouTube direct value does not log queue success when extraction fails", async () => {
+    const playerService = makePlayerService();
+    playerService._ytExtractor.extractAudio.mockRejectedValue(new Error("extract failed"));
+    const handler = createSelectMenuHandler(playerService);
+    const interaction = makeInteraction({ customId: "play_search_hachimi", value: "yt:dQw4w9WgXcQ" });
+
+    await handler(interaction);
+
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      embeds: [expect.objectContaining({ title: "Failed to Add Video" })],
+    });
+    expect(logger.info).not.toHaveBeenCalledWith(
+      "Video added to queue from direct play search",
+      expect.any(Object),
+    );
   });
 
   test("/search Bilibili direct value plays without repeating keyword search", async () => {

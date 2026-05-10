@@ -16,6 +16,7 @@ describe("beginner setup scripts", () => {
     expect(scripts["docker:up"]).toBe("docker compose up -d --build");
     expect(scripts["docker:logs"]).toBe("docker compose logs -f bilibili-bot");
     expect(scripts["docker:down"]).toBe("docker compose down");
+    expect(scripts["bench:extractors"]).toBe("node scripts/bench-extractors.js");
   });
 
   test("scripts that execute local files point at files that exist", () => {
@@ -44,5 +45,21 @@ describe("beginner setup scripts", () => {
     expect(devCompose).toContain("- .:/app");
     expect(devCompose).toContain("- .env");
     expect(devCompose).not.toContain("../../");
+  });
+
+  test("doctor warns when yt-dlp is stale or lacks js runtime support", () => {
+    const { evaluateYtDlpEnvironment } = require("../../scripts/doctor");
+
+    const result = evaluateYtDlpEnvironment({
+      installed: true,
+      version: "2025.08.27",
+      helpText: "Usage: yt-dlp [OPTIONS] URL",
+    });
+
+    expect(result.notes).toContain("yt-dlp version: 2025.08.27");
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining("yt-dlp is older than"),
+      expect.stringContaining("--js-runtimes"),
+    ]));
   });
 });

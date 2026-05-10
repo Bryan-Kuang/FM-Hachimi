@@ -34,9 +34,14 @@ interface StreamHeaders {
 
 interface ExtractedAudio extends VideoMetadata {
   audioUrl: string;
+  platform: 'bilibili';
   originalUrl: string;
   normalizedUrl: string;
   extractedAt: string;
+  formatId?: string;
+  protocol?: string;
+  audioCodec?: string;
+  videoCodec?: string;
   /** Platform headers FFmpeg should send when fetching this audio URL. */
   streamHeaders: StreamHeaders;
 }
@@ -76,6 +81,21 @@ interface CacheEntry {
 interface ExtractedAudioCacheEntry {
   data: ExtractedAudio;
   timestamp: number;
+}
+
+interface SelectedFormatMetadata {
+  formatId?: string;
+  protocol?: string;
+  audioCodec?: string;
+  videoCodec?: string;
+}
+
+interface ExtractionPayload {
+  metadata: VideoMetadata;
+  audioUrl: string;
+  selectedFormat: SelectedFormatMetadata;
+  ytdlpMs: number;
+  parseMs: number;
 }
 
 interface ThumbnailEntry {
@@ -234,6 +254,7 @@ class BilibiliExtractor {
    * @returns {Promise<Object>} - Video metadata and audio stream info
    */
   async extractAudio(url: string, retryCount = 0, maxRetries = 2): Promise<ExtractedAudio> {
+    const totalStartedAt = Date.now();
     logger.info("Starting audio extraction", { url, attempt: retryCount + 1 });
 
     try {
@@ -255,6 +276,13 @@ class BilibiliExtractor {
           title: cached.data.title,
           cacheAgeMs: Date.now() - cached.timestamp,
         });
+        this.logExtractionTiming({
+          cacheHit: true,
+          ytdlpMs: 0,
+          parseMs: 0,
+          totalMs: Date.now() - totalStartedAt,
+          ...this.selectedFormatFromExtractedAudio(cached.data),
+        });
         return cached.data;
       }
 
@@ -265,7 +293,7 @@ class BilibiliExtractor {
           return inFlight;
         }
 
-        const extraction = this.extractAudioUncached(url, normalizedUrl, retryCount, maxRetries)
+        const extraction = this.extractAudioUncached(url, normalizedUrl, retryCount, maxRetries, totalStartedAt)
           .finally(() => {
             this.inFlightExtractions.delete(normalizedUrl);
           });
@@ -273,7 +301,7 @@ class BilibiliExtractor {
         return extraction;
       }
 
-      return await this.extractAudioUncached(url, normalizedUrl, retryCount, maxRetries);
+      return await this.extractAudioUncached(url, normalizedUrl, retryCount, maxRetries, totalStartedAt);
     } catch (error) {
       logger.error("Audio extraction failed", {
         url,
@@ -294,6 +322,7 @@ class BilibiliExtractor {
     normalizedUrl: string,
     retryCount: number,
     maxRetries: number,
+    totalStartedAt: number,
   ): Promise<ExtractedAudio> {
     try {
       // Check yt-dlp availability on first use (lazy check)
@@ -310,11 +339,14 @@ class BilibiliExtractor {
 
       // Single yt-dlp call: --dump-json with --format bestaudio/best gives us
       // both metadata AND the audio URL in one process spawn + HTTP round-trip.
-      const { metadata, audioUrl } = await this.extractMetadataAndUrl(normalizedUrl);
+      const { metadata, audioUrl, selectedFormat, ytdlpMs, parseMs } =
+        await this.extractMetadataAndUrl(normalizedUrl);
 
       const result: ExtractedAudio = {
         ...metadata,
         audioUrl,
+        ...selectedFormat,
+        platform: 'bilibili',
         originalUrl: url,
         normalizedUrl: normalizedUrl,
         extractedAt: new Date().toISOString(),
@@ -333,6 +365,14 @@ class BilibiliExtractor {
         url,
         title: result.title,
         duration: result.duration,
+      });
+
+      this.logExtractionTiming({
+        cacheHit: false,
+        ytdlpMs,
+        parseMs,
+        totalMs: Date.now() - totalStartedAt,
+        ...selectedFormat,
       });
 
       return result;
@@ -354,7 +394,7 @@ class BilibiliExtractor {
 
         // 等待递增延迟后重试
         await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 3000));
-        return await this.extractAudioUncached(url, normalizedUrl, retryCount + 1, maxRetries);
+        return await this.extractAudioUncached(url, normalizedUrl, retryCount + 1, maxRetries, totalStartedAt);
       }
 
       throw new Error(`Audio extraction failed: ${(error as Error).message}`);
@@ -367,8 +407,9 @@ class BilibiliExtractor {
    * download URL in `requested_downloads[0].url` — eliminating the need for
    * a separate --get-url call (saves 1-3 seconds of network latency).
    */
-  private async extractMetadataAndUrl(normalizedUrl: string): Promise<{ metadata: VideoMetadata; audioUrl: string }> {
+  private async extractMetadataAndUrl(normalizedUrl: string): Promise<ExtractionPayload> {
     return new Promise((resolve, reject) => {
+      const ytdlpStartedAt = Date.now();
       const args = [
         "--dump-json",
         "--format", "bestaudio/best",
@@ -395,6 +436,7 @@ class BilibiliExtractor {
       });
 
       ytdlp.on("close", (code: number | null) => {
+        const ytdlpMs = Date.now() - ytdlpStartedAt;
         if (code !== 0 && code !== null) {
           if (code === 137 || code === 143) {
             reject(new Error("Audio extraction timeout"));
@@ -417,6 +459,7 @@ class BilibiliExtractor {
         }
 
         try {
+          const parseStartedAt = Date.now();
           const lines = stdout.split('\n').filter(l => l.trim());
           const jsonLine = lines.find(l => l.trim().startsWith('{'));
           if (!jsonLine) {
@@ -424,6 +467,7 @@ class BilibiliExtractor {
           }
           const videoData = JSON.parse(jsonLine) as Record<string, unknown>;
           const metadata = this.parseVideoMetadata(videoData);
+          const selectedFormat = this.extractSelectedFormat(videoData);
 
           // Extract audio URL from requested_downloads or url field
           let audioUrl = '';
@@ -445,7 +489,13 @@ class BilibiliExtractor {
             timestamp: Date.now(),
           });
 
-          resolve({ metadata, audioUrl });
+          resolve({
+            metadata,
+            audioUrl,
+            selectedFormat,
+            ytdlpMs,
+            parseMs: Date.now() - parseStartedAt,
+          });
         } catch (parseError) {
           logger.error("Failed to parse yt-dlp JSON output", {
             error: (parseError as Error).message,
@@ -743,6 +793,40 @@ class BilibiliExtractor {
       ytdlp.on('close', clearKillTimeout);
       ytdlp.on('error', clearKillTimeout);
     });
+  }
+
+  private extractSelectedFormat(videoData: Record<string, unknown>): SelectedFormatMetadata {
+    const requestedDownloads = videoData.requested_downloads as Array<Record<string, unknown>> | undefined;
+    const selected = requestedDownloads?.[0] ?? videoData;
+    return {
+      formatId: this.asString(selected.format_id ?? videoData.format_id),
+      protocol: this.asString(selected.protocol ?? videoData.protocol),
+      audioCodec: this.asString(selected.acodec ?? videoData.acodec),
+      videoCodec: this.asString(selected.vcodec ?? videoData.vcodec),
+    };
+  }
+
+  private selectedFormatFromExtractedAudio(data: ExtractedAudio): SelectedFormatMetadata {
+    return {
+      formatId: data.formatId,
+      protocol: data.protocol,
+      audioCodec: data.audioCodec,
+      videoCodec: data.videoCodec,
+    };
+  }
+
+  private asString(value: unknown): string | undefined {
+    if (value === null || value === undefined) return undefined;
+    return String(value);
+  }
+
+  private logExtractionTiming(timing: {
+    cacheHit: boolean;
+    ytdlpMs: number;
+    parseMs: number;
+    totalMs: number;
+  } & SelectedFormatMetadata): void {
+    logger.info("Bilibili extraction timing", { ...timing });
   }
 
   /**

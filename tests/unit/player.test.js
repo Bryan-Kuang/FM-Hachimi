@@ -110,6 +110,48 @@ describe("AudioPlayer", () => {
       // retryCount becomes 3, exceeds max of 2
       expect(player.handleTrackEnd).toHaveBeenCalled();
     });
+
+    test("refreshes stale YouTube tracks with the YouTube extractor", async () => {
+      const Track = require("../../src/models/track");
+      const bilibiliExtractor = { getAudioStreamUrl: jest.fn().mockResolvedValue("bili-fresh-url") };
+      const youtubeExtractor = { getAudioStreamUrl: jest.fn().mockResolvedValue("yt-fresh-url") };
+      player = new AudioPlayer(bilibiliExtractor, { youtube: youtubeExtractor });
+      player.currentTrack = new Track({
+        title: "YouTube Track",
+        normalizedUrl: "https://www.youtube.com/watch?v=abc",
+        audioUrl: "old-url",
+        duration: 180,
+        platform: "youtube",
+        extractedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString()
+      }, "user");
+      player.playCurrentTrack = jest.fn().mockResolvedValue(true);
+
+      await player.retryCurrentTrack();
+
+      expect(youtubeExtractor.getAudioStreamUrl).toHaveBeenCalledWith("https://www.youtube.com/watch?v=abc");
+      expect(bilibiliExtractor.getAudioStreamUrl).not.toHaveBeenCalled();
+      expect(player.currentTrack.audioUrl).toBe("yt-fresh-url");
+    });
+
+    test("infers YouTube extractor for old queued tracks without platform metadata", async () => {
+      const Track = require("../../src/models/track");
+      const bilibiliExtractor = { getAudioStreamUrl: jest.fn().mockResolvedValue("bili-fresh-url") };
+      const youtubeExtractor = { getAudioStreamUrl: jest.fn().mockResolvedValue("yt-fresh-url") };
+      player = new AudioPlayer(bilibiliExtractor, { youtube: youtubeExtractor });
+      player.currentTrack = new Track({
+        title: "Legacy YouTube Track",
+        normalizedUrl: "https://youtu.be/abc",
+        audioUrl: "old-url",
+        duration: 180,
+        extractedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString()
+      }, "user");
+      player.playCurrentTrack = jest.fn().mockResolvedValue(true);
+
+      await player.retryCurrentTrack();
+
+      expect(youtubeExtractor.getAudioStreamUrl).toHaveBeenCalledWith("https://youtu.be/abc");
+      expect(bilibiliExtractor.getAudioStreamUrl).not.toHaveBeenCalled();
+    });
   });
 
   // ─── Queue operations ────────────────────────────────────────

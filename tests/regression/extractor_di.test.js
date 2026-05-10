@@ -90,4 +90,17 @@ describe("regression: AudioManager forwards extractor to AudioPlayer", () => {
 
     expect(p2.extractor).toBe(extractor);
   });
+
+  test("getPlayer() forwards the YouTube extractor for stale YouTube URL refreshes", () => {
+    const bilibiliExtractor = { getAudioStreamUrl: jest.fn(), extractAudio: jest.fn() };
+    const youtubeExtractor = { getAudioStreamUrl: jest.fn(), extractAudio: jest.fn() };
+    const mgr = new AudioManager(mkSessionManager(), bilibiliExtractor, youtubeExtractor);
+
+    const player = mgr.getPlayer("guild-1");
+
+    expect(player.getRefreshExtractor({
+      platform: "youtube",
+      normalizedUrl: "https://www.youtube.com/watch?v=abc",
+    })).toBe(youtubeExtractor);
+  });
 });

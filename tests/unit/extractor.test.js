@@ -14,6 +14,7 @@ jest.mock("../../src/services/logger_service", () => ({
 }));
 
 const { spawn } = require("child_process");
+const logger = require("../../src/services/logger_service");
 const Extractor = require("../../src/bilibili/extractor");
 
 describe("Extractor", () => {
@@ -255,7 +256,13 @@ describe("Extractor", () => {
         title,
         duration: 120,
         webpage_url: url,
-        requested_downloads: [{ url: "https://cdn.bilibili.com/audio.m4a" }],
+        requested_downloads: [{
+          url: "https://cdn.bilibili.com/audio.m4a",
+          format_id: "30280",
+          protocol: "https",
+          acodec: "mp4a.40.2",
+          vcodec: "none",
+        }],
       });
       spawn.mockImplementation(() => createMockProcess({ stdout: json, exitCode: 0 }));
     }
@@ -282,6 +289,47 @@ describe("Extractor", () => {
       expect(first.title).toBe("Shared Audio");
       expect(second.title).toBe("Shared Audio");
       expect(spawn).toHaveBeenCalledTimes(1);
+    });
+
+    test("preserves selected format metadata and logs extraction timing", async () => {
+      mockExtractionProcess("Timed Bilibili");
+
+      const result = await extractor.extractAudio(url);
+
+      expect(result).toMatchObject({
+        formatId: "30280",
+        protocol: "https",
+        audioCodec: "mp4a.40.2",
+        videoCodec: "none",
+      });
+      expect(logger.info).toHaveBeenCalledWith("Bilibili extraction timing", expect.objectContaining({
+        cacheHit: false,
+        ytdlpMs: expect.any(Number),
+        parseMs: expect.any(Number),
+        totalMs: expect.any(Number),
+        formatId: "30280",
+        protocol: "https",
+        audioCodec: "mp4a.40.2",
+        videoCodec: "none",
+      }));
+    });
+
+    test("logs cache-hit extraction timing", async () => {
+      mockExtractionProcess("Cached Bilibili");
+
+      await extractor.extractAudio(url);
+      logger.info.mockClear();
+      spawn.mockClear();
+
+      await extractor.extractAudio(url);
+
+      expect(spawn).not.toHaveBeenCalled();
+      expect(logger.info).toHaveBeenCalledWith("Bilibili extraction timing", expect.objectContaining({
+        cacheHit: true,
+        totalMs: expect.any(Number),
+        formatId: "30280",
+        protocol: "https",
+      }));
     });
   });
 });

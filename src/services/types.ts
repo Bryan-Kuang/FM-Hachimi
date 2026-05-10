@@ -116,10 +116,15 @@ export interface ExtractedTrackData {
   title: string;
   audioUrl: string;
   duration: number;
+  platform?: 'bilibili' | 'youtube';
   url?: string;
   originalUrl?: string;
   normalizedUrl?: string;
   extractedAt?: string;
+  formatId?: string;
+  protocol?: string;
+  audioCodec?: string;
+  videoCodec?: string;
 }
 
 export interface SearchResultResponse {
