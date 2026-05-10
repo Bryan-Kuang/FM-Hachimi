@@ -27,6 +27,11 @@ export interface TrackData {
   author?: string;
   platform?: 'bilibili';
   extractedAt?: string;      // ISO 8601 string from new Date().toISOString()
+  /** Selected yt-dlp format metadata for diagnostics. */
+  formatId?: string;
+  protocol?: string;
+  audioCodec?: string;
+  videoCodec?: string;
   /** Platform-specific headers for FFmpeg to send when fetching the audio stream. */
   streamHeaders?: StreamHeaders;
 }

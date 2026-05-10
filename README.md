@@ -3,6 +3,7 @@
 Discord music bot for Bilibili and YouTube audio playback.
 
 Docker is the recommended setup path because the image includes Node.js 22, FFmpeg, Python, and yt-dlp.
+It is also the preferred YouTube playback path because the image installs current `yt-dlp[default]` with its JavaScript solver support.
 
 ## Run With Docker
 
@@ -65,6 +66,7 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+npm run bench:extractors
 docker build .
 ```
 

@@ -23,6 +23,10 @@ class Track implements TrackData {
   extractedAt?: string;
   id?: string;
   videoId?: string;
+  formatId?: string;
+  protocol?: string;
+  audioCodec?: string;
+  videoCodec?: string;
   streamHeaders?: StreamHeaders;
 
   // Queue-time fields:

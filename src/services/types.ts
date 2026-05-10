@@ -120,6 +120,10 @@ export interface ExtractedTrackData {
   originalUrl?: string;
   normalizedUrl?: string;
   extractedAt?: string;
+  formatId?: string;
+  protocol?: string;
+  audioCodec?: string;
+  videoCodec?: string;
 }
 
 export interface SearchResultResponse {

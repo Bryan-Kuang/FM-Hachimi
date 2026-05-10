@@ -39,6 +39,10 @@ interface ExtractedAudio extends VideoMetadata {
   originalUrl: string;
   normalizedUrl: string;
   extractedAt: string;
+  formatId?: string;
+  protocol?: string;
+  audioCodec?: string;
+  videoCodec?: string;
   streamHeaders: StreamHeaders;
 }
 
@@ -72,8 +76,23 @@ interface CacheEntry {
   cachedAt: number;
 }
 
+interface SelectedFormatMetadata {
+  formatId?: string;
+  protocol?: string;
+  audioCodec?: string;
+  videoCodec?: string;
+}
+
+interface ExtractionPayload {
+  metadata: VideoMetadata;
+  audioUrl: string;
+  selectedFormat: SelectedFormatMetadata;
+  ytdlpMs: number;
+  parseMs: number;
+}
+
 const AUDIO_FORMAT_SELECTOR =
-  'bestaudio[acodec!=none]/best[height<=360][acodec!=none]/worst[acodec!=none]/best';
+  'bestaudio[vcodec=none][protocol^=http][acodec!=none]/bestaudio[vcodec=none][acodec!=none]/best[height<=360][protocol^=http][acodec!=none]/best[height<=360][protocol=m3u8_native][acodec!=none]/best[height<=360][acodec!=none]/worst[acodec!=none]';
 
 class YouTubeExtractor {
   private userAgent: string;
@@ -146,15 +165,18 @@ class YouTubeExtractor {
   }
 
   /** Wait for the rate limiter cooldown before the next yt-dlp call. */
-  private async _waitForRateLimit(): Promise<void> {
+  private async _waitForRateLimit(): Promise<number> {
     const minInterval = config.youtube.minExtractionIntervalMs;
     const elapsed = Date.now() - this._lastExtractionTime;
     if (elapsed < minInterval) {
       const wait = minInterval - elapsed;
-      logger.debug('YouTube rate limiter: waiting before next extraction', { waitMs: wait });
+      logger.info('YouTube extraction rate limit applied', { waitMs: wait });
       await new Promise(resolve => setTimeout(resolve, wait));
+      this._lastExtractionTime = Date.now();
+      return wait;
     }
     this._lastExtractionTime = Date.now();
+    return 0;
   }
 
   /**
@@ -223,6 +245,7 @@ class YouTubeExtractor {
    * Results are cached for 25 minutes to reduce yt-dlp calls.
    */
   async extractAudio(url: string, retryCount = 0, maxRetries = 2): Promise<ExtractedAudio> {
+    const totalStartedAt = Date.now();
     logger.info('Starting YouTube audio extraction', { url, attempt: retryCount + 1 });
 
     try {
@@ -251,6 +274,14 @@ class YouTubeExtractor {
           title: cached.data.title,
           cacheAgeMin: Math.round((Date.now() - cached.cachedAt) / 60000),
         });
+        this.logExtractionTiming({
+          cacheHit: true,
+          rateLimitWaitMs: 0,
+          ytdlpMs: 0,
+          parseMs: 0,
+          totalMs: Date.now() - totalStartedAt,
+          ...this.selectedFormatFromExtractedAudio(cached.data),
+        });
         return cached.data;
       }
 
@@ -261,7 +292,7 @@ class YouTubeExtractor {
           return inFlight;
         }
 
-        const extraction = this._extractAudioUncached(url, normalizedUrl, retryCount, maxRetries)
+        const extraction = this._extractAudioUncached(url, normalizedUrl, retryCount, maxRetries, totalStartedAt)
           .finally(() => {
             this._inFlightExtractions.delete(normalizedUrl);
           });
@@ -269,7 +300,7 @@ class YouTubeExtractor {
         return extraction;
       }
 
-      return await this._extractAudioUncached(url, normalizedUrl, retryCount, maxRetries);
+      return await this._extractAudioUncached(url, normalizedUrl, retryCount, maxRetries, totalStartedAt);
     } catch (error) {
       logger.error('YouTube audio extraction failed', {
         url,
@@ -286,16 +317,19 @@ class YouTubeExtractor {
     normalizedUrl: string,
     retryCount: number,
     maxRetries: number,
+    totalStartedAt: number,
   ): Promise<ExtractedAudio> {
     try {
       // Rate limit — wait if too soon after last extraction
-      await this._waitForRateLimit();
+      const rateLimitWaitMs = await this._waitForRateLimit() ?? 0;
 
-      const { metadata, audioUrl } = await this.extractMetadataAndUrl(normalizedUrl);
+      const { metadata, audioUrl, selectedFormat, ytdlpMs, parseMs } =
+        await this.extractMetadataAndUrl(normalizedUrl);
 
       const result: ExtractedAudio = {
         ...metadata,
         audioUrl,
+        ...selectedFormat,
         originalUrl: url,
         normalizedUrl,
         extractedAt: new Date().toISOString(),
@@ -314,13 +348,22 @@ class YouTubeExtractor {
         duration: result.duration,
       });
 
+      this.logExtractionTiming({
+        cacheHit: false,
+        rateLimitWaitMs,
+        ytdlpMs,
+        parseMs,
+        totalMs: Date.now() - totalStartedAt,
+        ...selectedFormat,
+      });
+
       return result;
     } catch (error) {
       if (retryCount < maxRetries && this.isRetryableError(error as Error)) {
         const delay = (retryCount + 1) * 2000;
         logger.info('Retrying YouTube extraction', { url, nextAttempt: retryCount + 2, delay });
         await new Promise(resolve => setTimeout(resolve, delay));
-        return this._extractAudioUncached(url, normalizedUrl, retryCount + 1, maxRetries);
+        return this._extractAudioUncached(url, normalizedUrl, retryCount + 1, maxRetries, totalStartedAt);
       }
 
       throw error;
@@ -468,8 +511,9 @@ class YouTubeExtractor {
 
   // ─── Private helpers ───────��──────────────────────────────────────────
 
-  private async extractMetadataAndUrl(normalizedUrl: string): Promise<{ metadata: VideoMetadata; audioUrl: string }> {
+  private async extractMetadataAndUrl(normalizedUrl: string): Promise<ExtractionPayload> {
     return new Promise((resolve, reject) => {
+      const ytdlpStartedAt = Date.now();
       const args = [
         '--dump-json',
         '--format', AUDIO_FORMAT_SELECTOR,
@@ -486,6 +530,7 @@ class YouTubeExtractor {
       ytdlp.stderr!.on('data', (data: Buffer) => { stderr += data.toString(); });
 
       ytdlp.on('close', (code: number | null) => {
+        const ytdlpMs = Date.now() - ytdlpStartedAt;
         if (code !== 0 && code !== null) {
           if (code === 137 || code === 143) {
             reject(new Error('YouTube extraction timeout'));
@@ -508,12 +553,14 @@ class YouTubeExtractor {
         }
 
         try {
+          const parseStartedAt = Date.now();
           const lines = stdout.split('\n').filter(l => l.trim());
           const jsonLine = lines.find(l => l.trim().startsWith('{'));
           if (!jsonLine) throw new Error('No JSON object in yt-dlp output');
 
           const videoData = JSON.parse(jsonLine) as Record<string, unknown>;
           const metadata = this.parseVideoMetadata(videoData);
+          const selectedFormat = this.extractSelectedFormat(videoData);
 
           // Extract audio URL from requested_downloads or url field
           let audioUrl = '';
@@ -529,7 +576,13 @@ class YouTubeExtractor {
             return;
           }
 
-          resolve({ metadata, audioUrl });
+          resolve({
+            metadata,
+            audioUrl,
+            selectedFormat,
+            ytdlpMs,
+            parseMs: Date.now() - parseStartedAt,
+          });
         } catch (parseError) {
           reject(new Error(`Parse error: ${(parseError as Error).message}`));
         }
@@ -548,6 +601,41 @@ class YouTubeExtractor {
       ytdlp.on('close', () => clearTimeout(timeoutId));
       ytdlp.on('error', () => clearTimeout(timeoutId));
     });
+  }
+
+  private extractSelectedFormat(videoData: Record<string, unknown>): SelectedFormatMetadata {
+    const requestedDownloads = videoData.requested_downloads as Array<Record<string, unknown>> | undefined;
+    const selected = requestedDownloads?.[0] ?? videoData;
+    return {
+      formatId: this.asString(selected.format_id ?? videoData.format_id),
+      protocol: this.asString(selected.protocol ?? videoData.protocol),
+      audioCodec: this.asString(selected.acodec ?? videoData.acodec),
+      videoCodec: this.asString(selected.vcodec ?? videoData.vcodec),
+    };
+  }
+
+  private selectedFormatFromExtractedAudio(data: ExtractedAudio): SelectedFormatMetadata {
+    return {
+      formatId: data.formatId,
+      protocol: data.protocol,
+      audioCodec: data.audioCodec,
+      videoCodec: data.videoCodec,
+    };
+  }
+
+  private asString(value: unknown): string | undefined {
+    if (value === null || value === undefined) return undefined;
+    return String(value);
+  }
+
+  private logExtractionTiming(timing: {
+    cacheHit: boolean;
+    rateLimitWaitMs: number;
+    ytdlpMs: number;
+    parseMs: number;
+    totalMs: number;
+  } & SelectedFormatMetadata): void {
+    logger.info('YouTube extraction timing', { ...timing });
   }
 
   private parseVideoMetadata(videoData: Record<string, unknown>): VideoMetadata {

@@ -6,6 +6,7 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 
 const root = path.resolve(__dirname, "..");
+const MIN_YTDLP_VERSION = "2026.01.01";
 
 function readEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {};
@@ -26,6 +27,71 @@ function readEnvFile(filePath) {
 function commandExists(command, args = ["--version"]) {
   const result = spawnSync(command, args, { stdio: "ignore" });
   return result.status === 0;
+}
+
+function commandOutput(command, args = ["--version"]) {
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return {
+    ok: result.status === 0,
+    stdout: result.stdout || "",
+    stderr: result.stderr || "",
+  };
+}
+
+function compareYtDlpVersions(a, b) {
+  const parse = (value) => String(value || "")
+    .split(/[.-]/)
+    .map((part) => Number.parseInt(part, 10) || 0);
+  const left = parse(a);
+  const right = parse(b);
+  const max = Math.max(left.length, right.length);
+  for (let i = 0; i < max; i++) {
+    const diff = (left[i] || 0) - (right[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+function evaluateYtDlpEnvironment({ installed, version = "", helpText = "" }) {
+  const warnings = [];
+  const notes = [];
+
+  if (!installed) {
+    warnings.push("yt-dlp is not installed locally. Docker installs yt-dlp[default] and is the recommended YouTube playback path.");
+    return { warnings, notes };
+  }
+
+  const trimmedVersion = String(version).trim();
+  if (trimmedVersion) {
+    notes.push(`yt-dlp version: ${trimmedVersion}`);
+    if (compareYtDlpVersions(trimmedVersion, MIN_YTDLP_VERSION) < 0) {
+      warnings.push(`yt-dlp is older than ${MIN_YTDLP_VERSION}. Rebuild Docker or upgrade yt-dlp for more reliable YouTube extraction.`);
+    }
+  } else {
+    warnings.push("Could not read yt-dlp version.");
+  }
+
+  if (!helpText.includes("--js-runtimes")) {
+    warnings.push("yt-dlp does not report --js-runtimes support. Docker installs yt-dlp[default] with the JS solver expected by YouTube extraction.");
+  }
+
+  return { warnings, notes };
+}
+
+function collectYtDlpEnvironment() {
+  const version = commandOutput("yt-dlp", ["--version"]);
+  if (!version.ok) {
+    return { installed: false };
+  }
+  const help = commandOutput("yt-dlp", ["--help"]);
+  return {
+    installed: true,
+    version: version.stdout.trim(),
+    helpText: `${help.stdout}\n${help.stderr}`,
+  };
 }
 
 function checkPortFree(port, host = "127.0.0.1") {
@@ -85,6 +151,10 @@ async function main() {
     notes.push("cookies.txt is missing. Bilibili usually works without it, but cloud IPs may need cookies.");
   }
 
+  const ytDlpEnvironment = evaluateYtDlpEnvironment(collectYtDlpEnvironment());
+  notes.push(...ytDlpEnvironment.notes);
+  warnings.push(...ytDlpEnvironment.warnings);
+
   const metricsPort = Number(env.METRICS_PORT || 9090);
   if (Number.isInteger(metricsPort) && metricsPort > 0) {
     const free = await checkPortFree(metricsPort);
@@ -114,4 +184,11 @@ if (require.main === module) {
   });
 }
 
-module.exports = { readEnvFile, commandExists, checkPortFree };
+module.exports = {
+  readEnvFile,
+  commandExists,
+  commandOutput,
+  compareYtDlpVersions,
+  evaluateYtDlpEnvironment,
+  checkPortFree,
+};
