@@ -72,6 +72,9 @@ interface CacheEntry {
   cachedAt: number;
 }
 
+const AUDIO_FORMAT_SELECTOR =
+  'bestaudio[acodec!=none]/best[height<=360][acodec!=none]/worst[acodec!=none]/best';
+
 class YouTubeExtractor {
   private userAgent: string;
   private _ytdlpChecked: boolean;
@@ -216,7 +219,7 @@ class YouTubeExtractor {
 
   /**
    * Extract audio from a YouTube video URL.
-   * Single yt-dlp invocation: --dump-json --format bestaudio/best.
+   * Single yt-dlp invocation with an audio-first format selector.
    * Results are cached for 25 minutes to reduce yt-dlp calls.
    */
   async extractAudio(url: string, retryCount = 0, maxRetries = 2): Promise<ExtractedAudio> {
@@ -332,7 +335,7 @@ class YouTubeExtractor {
     return new Promise((resolve, reject) => {
       const args = [
         '--get-url',
-        '--format', 'bestaudio/best',
+        '--format', AUDIO_FORMAT_SELECTOR,
         ...this._baseArgs(),
         url,
       ];
@@ -469,7 +472,7 @@ class YouTubeExtractor {
     return new Promise((resolve, reject) => {
       const args = [
         '--dump-json',
-        '--format', 'bestaudio/best',
+        '--format', AUDIO_FORMAT_SELECTOR,
         '--no-download',
         ...this._baseArgs(),
         normalizedUrl,

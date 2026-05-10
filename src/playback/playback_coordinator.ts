@@ -1,4 +1,5 @@
 import type { ExtractedTrackData, PlayResult } from '../services/types';
+import * as logger from '../services/logger_service';
 
 interface GuildLike {
   id: string;
@@ -22,7 +23,13 @@ interface InteractionLike {
 interface PlayerLike {
   isPlaying: boolean;
   isPaused: boolean;
+  voiceConnection?: {
+    joinConfig?: {
+      channelId?: string;
+    };
+  } | null;
   joinVoiceChannel(channel: unknown): Promise<boolean>;
+  leaveVoiceChannel?(): void;
 }
 
 interface YouTubeExtractorLike {
@@ -139,6 +146,17 @@ async function playYouTubeUrl({
   url,
   requestedBy,
 }: PlayUrlOptions): Promise<CoordinatorResult> {
+  const guildId = getGuildId(interaction);
+  const channelId = getChannelId(interaction);
+  const voiceChannel = interaction.member?.voice?.channel;
+
+  if (!guildId || !channelId) {
+    return { success: false, error: 'Missing guild or channel context' };
+  }
+  if (!voiceChannel) {
+    return { success: false, error: 'Voice channel required' };
+  }
+
   const ytExtractor = playerService.getYouTubeExtractor();
   if (!ytExtractor) {
     return {
@@ -149,8 +167,101 @@ async function playYouTubeUrl({
   }
 
   try {
-    const videoData = await ytExtractor.extractAudio(url);
-    return await playExtractedTrack({ interaction, playerService, videoData, requestedBy });
+    const player = playerService.getPlayer(guildId);
+    const totalStartedAt = Date.now();
+    const timings: Record<string, number> = {};
+    const markTotal = () => {
+      timings.totalMs = Date.now() - totalStartedAt;
+    };
+    const logTiming = (success: boolean, extra: Record<string, unknown> = {}) => {
+      markTotal();
+      logger.info('YouTube direct playback timing', {
+        guildId,
+        userId: interaction.user?.id,
+        url,
+        success,
+        ...timings,
+        ...extra,
+      });
+    };
+    const timed = async <T>(stage: string, promise: Promise<T>): Promise<T> => {
+      const startedAt = Date.now();
+      try {
+        return await promise;
+      } finally {
+        timings[stage] = Date.now() - startedAt;
+      }
+    };
+    const settle = async <T>(
+      promise: Promise<T>,
+    ): Promise<{ ok: true; value: T } | { ok: false; error: Error }> => {
+      try {
+        return { ok: true, value: await promise };
+      } catch (error: unknown) {
+        return { ok: false, error: error as Error };
+      }
+    };
+
+    const wasActiveBeforeCommand = Boolean(player.isPlaying || player.isPaused);
+    const hadVoiceConnectionBeforeCommand = Boolean(player.voiceConnection);
+    const targetChannelId = (voiceChannel as { id?: string }).id;
+    const needsVoiceJoin =
+      !player.voiceConnection ||
+      player.voiceConnection.joinConfig?.channelId !== targetChannelId;
+
+    const extractionPromise = timed('extractionMs', ytExtractor.extractAudio(url));
+    const joinPromise = needsVoiceJoin
+      ? timed('voiceJoinMs', player.joinVoiceChannel(voiceChannel))
+      : Promise.resolve(true);
+
+    const [extractionResult, joinResult] = await Promise.all([
+      settle(extractionPromise),
+      settle(joinPromise),
+    ]);
+
+    if (!extractionResult.ok) {
+      if (
+        joinResult.ok &&
+        joinResult.value &&
+        needsVoiceJoin &&
+        !wasActiveBeforeCommand &&
+        !hadVoiceConnectionBeforeCommand
+      ) {
+        player.leaveVoiceChannel?.();
+      }
+      logTiming(false, { failedStage: 'extraction' });
+      return { success: false, error: extractionResult.error.message };
+    }
+
+    if (!joinResult.ok || !joinResult.value) {
+      logTiming(false, { failedStage: 'voiceJoin' });
+      return { success: false, error: 'Failed to join voice channel' };
+    }
+
+    const queueStartedAt = Date.now();
+    const videoData = extractionResult.value;
+    const track = await playerService.addTrack(guildId, videoData, getRequestedBy(interaction, requestedBy));
+    timings.queueAddMs = Date.now() - queueStartedAt;
+    if (!track) {
+      logTiming(false, { failedStage: 'queueAdd' });
+      return { success: false, error: 'Failed to add track to queue' };
+    }
+
+    playerService.setUIContext(guildId, channelId);
+    if (!player.isPlaying && !player.isPaused) {
+      const playbackStartedAt = Date.now();
+      const playSuccess = await playerService.play(guildId);
+      timings.playbackStartMs = Date.now() - playbackStartedAt;
+      if (!playSuccess) {
+        logTiming(false, { failedStage: 'playbackStart' });
+        return { success: false, error: 'Failed to start playback' };
+      }
+    } else {
+      playerService.notifyState(guildId);
+    }
+
+    logTiming(true);
+    return { success: true, track, videoData };
   } catch (error: unknown) {
     return { success: false, error: (error as Error).message };
   }
