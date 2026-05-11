@@ -364,7 +364,7 @@ async function handleSearchSelect(interaction: any, customId: string, playerServ
     guild: interaction.guild?.name,
   });
 
-  await interaction.deferReply();
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const keyword     = customId.replace('search_select_', '').replace(/_/g, ' ');
 
@@ -471,7 +471,7 @@ async function handlePlaySearch(interaction: any, customId: string, playerServic
     return;
   }
 
-  await interaction.deferReply();
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const keyword     = customId.replace('play_search_', '').replace(/_/g, ' ');
   const isBilibili  = selectedValue.startsWith('bili:') || selectedValue.startsWith('bili_');
