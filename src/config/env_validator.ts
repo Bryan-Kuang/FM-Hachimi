@@ -65,6 +65,8 @@ export function validateEnv(env: NodeJS.ProcessEnv = process.env): EnvValidation
     "HACHIMI_MAX_DURATION_SEC",
     "HACHIMI_MIN_DURATION_SEC",
     "BILIBILI_SEARCH_TIMEOUT",
+    "BILIBILI_PREEXTRACT_CONCURRENCY",
+    "BILIBILI_PREEXTRACT_MAX_PER_CARD_SET",
   ];
   for (const key of intVars) {
     if (!isPositiveInt(env[key])) {

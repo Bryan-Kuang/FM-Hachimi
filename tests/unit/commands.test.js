@@ -740,7 +740,8 @@ describe("Bot Commands Coverage", () => {
       if (expected.playBilibiliCalled) {
         expect(mockPlaybackService.playBilibiliVideo).toHaveBeenCalledWith(
           interaction,
-          "https://bili/1"
+          "https://bili/1",
+          expect.objectContaining({ onStage: expect.any(Function) }),
         );
         expect(mockPlaybackService.setUIContext).toHaveBeenCalledWith(
           "guild-1",

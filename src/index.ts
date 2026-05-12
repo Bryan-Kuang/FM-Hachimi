@@ -15,6 +15,7 @@ import ProgressTracker = require('./ui/progress_tracker');
 import HistoryStore = require('./utils/history_store');
 import PlayerService = require('./services/player_service');
 import DailyHachimiService = require('./services/daily_hachimi_service');
+import PreExtractionService = require('./playback/pre_extraction_service');
 import * as logger from './services/logger_service';
 import TokenPrecheck = require('./utils/token_precheck');
 import Debug = require('./utils/debug');
@@ -73,6 +74,9 @@ class BilibiliDiscordBot {
       const progressTracker = new ProgressTracker(sessionManager);
       const historyStore    = new HistoryStore(sessionManager);
       const interfaceUpdater = new InterfaceUpdater(sessionManager, progressTracker, audioManager);
+      const preExtractionService = new PreExtractionService({
+        bilibiliExtractor: extractor,
+      });
 
       // Inject historyStore into bilibiliApi singleton
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -86,11 +90,12 @@ class BilibiliDiscordBot {
         extractor,
         youtubeExtractor,
         historyStore,
+        preExtractionService,
       });
 
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const config = require('./config/config') as any;
-      const dailyHachimiService = new DailyHachimiService(config);
+      const dailyHachimiService = new DailyHachimiService(config, preExtractionService);
       Debug.trace('inject.dependencies');
 
       // Bot client

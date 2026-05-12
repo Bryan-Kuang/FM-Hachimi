@@ -24,6 +24,13 @@ import type {
   ButtonResult,
 } from './types';
 
+interface PreExtractionServiceLike {
+  prewarmBilibiliUrls(
+    urls: string[],
+    context: { source: 'play_search' | 'search_command' | 'daily_recommendation'; guildId?: string; keyword?: string },
+  ): unknown;
+}
+
 interface PlayerServiceDeps {
   audioManager: AudioManagerLike;
   interfaceUpdater: InterfaceUpdaterLike;
@@ -31,6 +38,7 @@ interface PlayerServiceDeps {
   extractor: ExtractorLike;
   youtubeExtractor?: ExtractorLike;
   historyStore?: unknown;
+  preExtractionService?: PreExtractionServiceLike | null;
 }
 
 class PlayerService extends EventEmitter {
@@ -38,6 +46,7 @@ class PlayerService extends EventEmitter {
   private interfaceUpdater: InterfaceUpdaterLike;
   private extractor: ExtractorLike;
   private youtubeExtractor: ExtractorLike | null;
+  private preExtractionService: PreExtractionServiceLike | null;
   /** Per-guild AbortControllers for running hachimi ops */
   private _hachimiControllers: Map<GuildId, AbortController>;
 
@@ -48,12 +57,14 @@ class PlayerService extends EventEmitter {
     extractor,
     youtubeExtractor,
     historyStore: _historyStore,
+    preExtractionService,
   }: PlayerServiceDeps) {
     super();
     this.audioManager        = audioManager;
     this.interfaceUpdater    = interfaceUpdater;
     this.extractor           = extractor;
     this.youtubeExtractor    = youtubeExtractor || null;
+    this.preExtractionService = preExtractionService || null;
     this._hachimiControllers = new Map();
   }
 
@@ -312,9 +323,16 @@ class PlayerService extends EventEmitter {
   // High-level playback entry point
   // ---------------------------------------------------------------------------
 
-  async playBilibiliVideo(interaction: unknown, url: string): Promise<PlayResult> {
+  async playBilibiliVideo(interaction: unknown, url: string, options?: unknown): Promise<PlayResult> {
     metrics.counter('bilibili_play_requested_total', 'Bilibili video play requests').inc();
-    return this.audioManager.playBilibiliVideo(interaction, url);
+    return this.audioManager.playBilibiliVideo(interaction, url, options);
+  }
+
+  prewarmBilibiliUrls(
+    urls: string[],
+    context: { source: 'play_search' | 'search_command' | 'daily_recommendation'; guildId?: string; keyword?: string },
+  ): unknown {
+    return this.preExtractionService?.prewarmBilibiliUrls(urls, context);
   }
 
   // ---------------------------------------------------------------------------

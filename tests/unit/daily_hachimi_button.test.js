@@ -143,7 +143,8 @@ describe("daily_play_ button handler", () => {
 
     expect(playback.playBilibiliVideo).toHaveBeenCalledWith(
       interaction,
-      "https://www.bilibili.com/video/BV1abc"
+      "https://www.bilibili.com/video/BV1abc",
+      expect.objectContaining({ onStage: expect.any(Function) }),
     );
   });
 
@@ -210,7 +211,8 @@ describe("daily_play_ button handler", () => {
 
     expect(playback.playBilibiliVideo).toHaveBeenCalledWith(
       interaction,
-      "https://www.bilibili.com/video/BV1tt4y1C7Lm"
+      "https://www.bilibili.com/video/BV1tt4y1C7Lm",
+      expect.objectContaining({ onStage: expect.any(Function) }),
     );
   });
 });

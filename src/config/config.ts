@@ -59,6 +59,11 @@ interface BilibiliConfig {
   hachimiMaxPages: number;
   searchTimeout: number;
   cookiesFile: string;
+  nativeExtractorEnabled: boolean;
+  nativeFallbackToYtdlp: boolean;
+  preextractEnabled: boolean;
+  preextractConcurrency: number;
+  preextractMaxPerCardSet: number;
   hachimiAllowedTids: number[];
   hachimiMaxDurationSec: number;
   hachimiMinDurationSec: number;
@@ -184,6 +189,11 @@ const config: BotConfig = {
     hachimiMaxPages: parseInt(process.env.HACHIMI_MAX_PAGES!) || 3,
     searchTimeout: parseInt(process.env.BILIBILI_SEARCH_TIMEOUT!) || 8000,
     cookiesFile: process.env.BILIBILI_COOKIES_FILE || "",
+    nativeExtractorEnabled: process.env.BILIBILI_NATIVE_EXTRACTOR_ENABLED !== "false",
+    nativeFallbackToYtdlp: process.env.BILIBILI_NATIVE_FALLBACK_TO_YTDLP !== "false",
+    preextractEnabled: process.env.BILIBILI_PREEXTRACT_ENABLED !== "false",
+    preextractConcurrency: parseInt(process.env.BILIBILI_PREEXTRACT_CONCURRENCY!) || 2,
+    preextractMaxPerCardSet: parseInt(process.env.BILIBILI_PREEXTRACT_MAX_PER_CARD_SET!) || 5,
     // Hachimi partition filter: only 鬼畜区 (119) and 音乐区 (3) sub-partitions allowed
     hachimiAllowedTids: [3, 22, 26, 28, 29, 30, 31, 59, 119, 126, 130, 193, 216, 243],
     // Hachimi duration filter (seconds). Videos with duration=0 (API didn't return it) are

@@ -1,5 +1,6 @@
 import type { ExtractedTrackData, PlayResult } from '../services/types';
 import * as logger from '../services/logger_service';
+import type { PlaybackStageReporter } from './stage_feedback';
 
 interface GuildLike {
   id: string;
@@ -39,7 +40,7 @@ interface YouTubeExtractorLike {
 interface PlayerServiceLike {
   setUIContext(guildId: string, channelId: string): void;
   notifyState(guildId: string): void;
-  playBilibiliVideo(interaction: InteractionLike, url: string): Promise<PlayResult>;
+  playBilibiliVideo(interaction: InteractionLike, url: string, options?: { onStage?: PlaybackStageReporter }): Promise<PlayResult>;
   getYouTubeExtractor(): YouTubeExtractorLike | null;
   getPlayer(guildId: string): PlayerLike;
   addTrack(guildId: string, videoData: ExtractedTrackData, requestedBy: string): Promise<unknown>;
@@ -59,6 +60,7 @@ interface PlayUrlOptions {
   playerService: PlayerServiceLike;
   url: string;
   requestedBy?: string;
+  onStage?: PlaybackStageReporter;
 }
 
 interface PlayExtractedOptions {
@@ -85,6 +87,7 @@ async function playBilibiliUrl({
   interaction,
   playerService,
   url,
+  onStage,
 }: PlayUrlOptions): Promise<CoordinatorResult> {
   const guildId = getGuildId(interaction);
   const channelId = getChannelId(interaction);
@@ -93,7 +96,9 @@ async function playBilibiliUrl({
   }
 
   playerService.setUIContext(guildId, channelId);
-  const result = await playerService.playBilibiliVideo(interaction, url);
+  const result = onStage
+    ? await playerService.playBilibiliVideo(interaction, url, { onStage })
+    : await playerService.playBilibiliVideo(interaction, url);
 
   if (result.success) {
     playerService.notifyState(guildId);

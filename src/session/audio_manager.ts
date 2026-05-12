@@ -8,6 +8,7 @@
 
 import SessionManager = require('./session_manager');
 import * as logger from '../services/logger_service';
+import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage_feedback';
 
 // Discord interaction shapes used by this manager.
 // Full discord.js types are applied at the command layer (Task 13); keeping
@@ -32,6 +33,10 @@ interface PlayResult {
   track?: unknown;
   player?: unknown;
   isNewTrack?: boolean;
+}
+
+interface PlayBilibiliOptions {
+  onStage?: PlaybackStageReporter;
 }
 
 interface ActionResult {
@@ -158,7 +163,7 @@ class AudioManager {
   /**
    * Play Bilibili video in a voice channel.
    */
-  async playBilibiliVideo(interaction: PlayInteraction, url: string): Promise<PlayResult> {
+  async playBilibiliVideo(interaction: PlayInteraction, url: string, options: PlayBilibiliOptions = {}): Promise<PlayResult> {
     try {
       const guild = interaction.guild;
       if (!guild) {
@@ -183,6 +188,14 @@ class AudioManager {
           suggestion: 'Please wait for the bot to fully initialize.',
         };
       }
+
+      const reportStage = (
+        stage: Parameters<typeof emitPlaybackStage>[1],
+        details?: Parameters<typeof emitPlaybackStage>[2],
+      ) => {
+        emitPlaybackStage(options.onStage, stage, details);
+      };
+      reportStage('preparing');
 
       // Get or create player for this guild
       const player = this.getPlayer(guildId);
@@ -234,7 +247,13 @@ class AudioManager {
         !player.voiceConnection ||
         player.voiceConnection.joinConfig.channelId !== targetChannelId;
 
-      const extractionPromise = timed('extractionMs', (this.extractor as any).extractAudio(url));
+      reportStage('extracting');
+      const extractionPromise = timed('extractionMs', (this.extractor as any).extractAudio(url, 0, 2, {
+        onStage: options.onStage,
+      }));
+      if (needsVoiceJoin) {
+        reportStage('joining_voice');
+      }
       const joinPromise = needsVoiceJoin
         ? timed('voiceJoinMs', player.joinVoiceChannel(voiceChannel))
         : Promise.resolve(true);
@@ -254,6 +273,7 @@ class AudioManager {
         ) {
           player.leaveVoiceChannel();
         }
+        reportStage('failed', { stage: 'extraction' });
         logTiming(false, { failedStage: 'extraction' });
         return {
           success: false,
@@ -263,6 +283,7 @@ class AudioManager {
       }
 
       if (!joinResult.ok || !joinResult.value) {
+        reportStage('failed', { stage: 'voiceJoin' });
         logTiming(false, { failedStage: 'voiceJoin' });
         return {
           success: false,
@@ -276,12 +297,14 @@ class AudioManager {
       const videoData = extractionResult.value;
       const track = player.addToQueue(videoData, `<@${user.id}>`);
       timings.queueAddMs = Date.now() - queueStartedAt;
+      reportStage('queued');
 
       // Start playing if nothing is currently playing
       if (!player.isPlaying && !player.isPaused) {
         try {
           const playbackStartedAt = Date.now();
           let playSuccess: boolean;
+          reportStage('starting_playback');
           // Fix: if queue ended and a new song is added, start from the newest song
           if (player.currentTrack === null && player.queue.length > 0) {
             player.currentIndex = player.queue.length - 1;
@@ -293,6 +316,7 @@ class AudioManager {
           timings.playbackStartMs = Date.now() - playbackStartedAt;
 
           if (!playSuccess) {
+            reportStage('failed', { stage: 'playbackStart' });
             logTiming(false, { failedStage: 'playbackStart' });
             return {
               success: false,
@@ -301,6 +325,7 @@ class AudioManager {
               keepConnection: true,
             };
           }
+          reportStage('playing');
         } catch (playError: unknown) {
           const msg = (playError as Error).message;
           logger.error('Playback error occurred', {
@@ -309,6 +334,7 @@ class AudioManager {
             guild: guildId,
           });
 
+          reportStage('failed', { stage: 'playbackStart' });
           logTiming(false, { failedStage: 'playbackStart' });
           return {
             success: false,
@@ -321,6 +347,9 @@ class AudioManager {
         }
       }
 
+      if (player.isPlaying || player.isPaused) {
+        reportStage('playing');
+      }
       logTiming(true);
       return {
         success: true,

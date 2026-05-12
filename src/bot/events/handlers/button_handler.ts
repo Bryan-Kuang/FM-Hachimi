@@ -12,6 +12,7 @@ import {
 } from 'discord.js';
 import EmbedBuilders = require('../../../ui/embeds');
 import ButtonBuilders = require('../../../ui/buttons');
+import { createInteractionStageReporter } from '../../../playback/stage_feedback';
 import * as logger from '../../../services/logger_service';
 
 /**
@@ -117,7 +118,11 @@ async function handleDailyPlay(interaction: any, customId: string, playerService
   const videoUrl = `https://www.bilibili.com/video/${bvid}`;
 
   playerService.setUIContext(interaction.guild.id, interaction.channelId);
-  const result = await playerService.playBilibiliVideo(interaction, videoUrl);
+  const stageReporter = createInteractionStageReporter(interaction, 'Bilibili');
+  const result = await playerService.playBilibiliVideo(interaction, videoUrl, {
+    onStage: stageReporter,
+  });
+  await stageReporter.finish();
 
   if (!result || !result.success) {
     return await interaction.editReply({

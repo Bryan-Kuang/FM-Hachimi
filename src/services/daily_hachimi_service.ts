@@ -73,6 +73,13 @@ interface BilibiliApi {
 
 type MonthlyRecommendationHistory = Record<string, Record<string, string[]>>;
 
+interface PreExtractionServiceLike {
+  prewarmBilibiliUrls(
+    urls: string[],
+    context: { source: 'daily_recommendation'; guildId?: string },
+  ): unknown;
+}
+
 class DailyHachimiService {
   private config: AppConfig;
   private cronJobs: Map<string, ScheduledTask>;
@@ -82,14 +89,16 @@ class DailyHachimiService {
   private _dataFile: string;
   private _historyFile: string;
   private _recommendationHistory: MonthlyRecommendationHistory;
+  private preExtractionService: PreExtractionServiceLike | null;
 
-  constructor(config: AppConfig) {
+  constructor(config: AppConfig, preExtractionService: PreExtractionServiceLike | null = null) {
     this.config = config;
     this.cronJobs   = new Map();
     this.schedules  = {};
     this.client     = null;
     this.bilibiliApi = null;
     this._recommendationHistory = {};
+    this.preExtractionService = preExtractionService;
 
     this._dataFile =
       config.dailyHachimi?.dataFile ??
@@ -268,6 +277,7 @@ class DailyHachimiService {
     }
 
     // Send one card per video
+    const prewarmUrls: string[] = [];
     for (const video of videos) {
       try {
         const embed = this._buildVideoEmbed(video);
@@ -276,6 +286,7 @@ class DailyHachimiService {
         const bvid = this._extractBvid(video);
         if (bvid) {
           this._recordMonthlyHistory(guildId, monthKey, bvid);
+          prewarmUrls.push(video.url || `https://www.bilibili.com/video/${bvid}`);
         }
       } catch (err: unknown) {
         logger.error('DailyHachimi: failed to send video card', {
@@ -285,6 +296,13 @@ class DailyHachimiService {
         });
         // Continue sending remaining cards
       }
+    }
+
+    if (prewarmUrls.length > 0) {
+      this.preExtractionService?.prewarmBilibiliUrls(prewarmUrls, {
+        source: 'daily_recommendation',
+        guildId,
+      });
     }
 
     logger.info('DailyHachimi: cards sent', { guildId, count: videos.length });

@@ -95,6 +95,7 @@ describe("/search result relevance ranking", () => {
     };
     const playbackService = {
       getExtractor: jest.fn().mockReturnValue(extractor),
+      prewarmBilibiliUrls: jest.fn(),
     };
     const command = createSearchCommand(playbackService);
 
@@ -107,6 +108,13 @@ describe("/search result relevance ranking", () => {
     expect(displayedResults.map(result => result.title)).toContain("完全无关 0");
     expect(ButtonBuilders.createSearchResultsMenu.mock.calls[0][0][0]).toEqual(
       expect.objectContaining({ id: "BV1JuhNz6Eg6" }),
+    );
+    expect(playbackService.prewarmBilibiliUrls).toHaveBeenCalledWith(
+      expect.arrayContaining(["https://www.bilibili.com/video/BV1JuhNz6Eg6"]),
+      expect.objectContaining({
+        source: "search_command",
+        keyword: "哈基米无止境电台",
+      }),
     );
   });
 
@@ -130,6 +138,7 @@ describe("/search result relevance ranking", () => {
     };
     const playbackService = {
       getYouTubeExtractor: jest.fn().mockReturnValue(ytExtractor),
+      prewarmBilibiliUrls: jest.fn(),
     };
     const command = createSearchCommand(playbackService);
 
@@ -143,5 +152,6 @@ describe("/search result relevance ranking", () => {
     expect(ButtonBuilders.createSearchResultsMenu.mock.calls[0][0][0]).toEqual(
       expect.objectContaining({ id: "ytidtarget1" }),
     );
+    expect(playbackService.prewarmBilibiliUrls).not.toHaveBeenCalled();
   });
 });

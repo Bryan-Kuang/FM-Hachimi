@@ -87,6 +87,7 @@ describe("/play dual-platform keyword search limits", () => {
     };
     const playbackService = {
       getYouTubeExtractor: jest.fn().mockReturnValue(ytExtractor),
+      prewarmBilibiliUrls: jest.fn(),
     };
     const command = createPlayCommand(playbackService, {});
 
@@ -104,6 +105,17 @@ describe("/play dual-platform keyword search limits", () => {
     expect(ytDisplayed).toHaveLength(5);
     expect(ButtonBuilders.createDualSearchMenu.mock.calls[0][0]).toHaveLength(5);
     expect(ButtonBuilders.createDualSearchMenu.mock.calls[0][1]).toHaveLength(5);
+    expect(playbackService.prewarmBilibiliUrls).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        "https://www.bilibili.com/video/BV0",
+        "https://www.bilibili.com/video/BV1",
+      ]),
+      expect.objectContaining({
+        source: "play_search",
+        guildId: "guild-1",
+        keyword: "hachimi",
+      }),
+    );
   });
 
   test("promotes exact title matches within the returned five results", async () => {
@@ -142,6 +154,7 @@ describe("/play dual-platform keyword search limits", () => {
     };
     const playbackService = {
       getYouTubeExtractor: jest.fn().mockReturnValue(ytExtractor),
+      prewarmBilibiliUrls: jest.fn(),
     };
     const command = createPlayCommand(playbackService, {});
 
