@@ -8,6 +8,7 @@ import { SlashCommandBuilder, ChatInputCommandInteraction, MessageFlags } from '
 import EmbedBuilders = require('../../ui/embeds');
 import ButtonBuilders = require('../../ui/buttons');
 import SearchService = require('../../search/search_service');
+import BilibiliUrls = require('../../search/bilibili_urls');
 import * as logger from '../../services/logger_service';
 
 const createSearchCommand = (playbackService: any) => ({
@@ -137,6 +138,14 @@ const createSearchCommand = (playbackService: any) => ({
       if (components.length > 0) payload.components = components;
 
       await interaction.editReply(payload);
+      playbackService.prewarmBilibiliUrls?.(
+        BilibiliUrls.collectBilibiliUrls(results, maxResults),
+        {
+          source: 'search_command',
+          guildId: interaction.guildId || interaction.guild?.id,
+          keyword,
+        },
+      );
 
       logger.info('Search command executed', {
         user: user.username,

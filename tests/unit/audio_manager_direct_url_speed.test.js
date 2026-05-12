@@ -90,6 +90,36 @@ describe("AudioManager direct URL speed path", () => {
     await expect(resultPromise).resolves.toMatchObject({ success: true });
   });
 
+  test("emits Bilibili playback stages while preparing, queueing, and starting playback", async () => {
+    const extractor = {
+      extractAudio: jest.fn().mockResolvedValue({
+        title: "Staged Track",
+        audioUrl: "https://cdn/audio.m4a",
+        duration: 10,
+        extractionMethod: "native",
+      }),
+    };
+    const player = makePlayer();
+    const manager = makeManager(player, extractor);
+    const stages = [];
+
+    const result = await manager.playBilibiliVideo(
+      makeInteraction(),
+      "https://www.bilibili.com/video/BV1xx411c7BF",
+      { onStage: (stage) => stages.push(stage) },
+    );
+
+    expect(result).toMatchObject({ success: true });
+    expect(stages).toEqual(expect.arrayContaining([
+      "preparing",
+      "extracting",
+      "joining_voice",
+      "queued",
+      "starting_playback",
+      "playing",
+    ]));
+  });
+
   test("leaves voice when early join succeeds but extraction fails from idle", async () => {
     const extraction = deferred();
     const join = deferred();

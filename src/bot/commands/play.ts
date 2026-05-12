@@ -9,7 +9,9 @@ import { routeQuery } from '../../utils/url_router';
 import EmbedBuilders = require('../../ui/embeds');
 import ButtonBuilders = require('../../ui/buttons');
 import SearchService = require('../../search/search_service');
+import BilibiliUrls = require('../../search/bilibili_urls');
 import PlaybackCoordinator = require('../../playback/playback_coordinator');
+import { createInteractionStageReporter } from '../../playback/stage_feedback';
 import * as logger from '../../services/logger_service';
 
 const createPlayCommand = (playbackService: any, _queueService: any) => ({
@@ -99,11 +101,14 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
       // ─── Bilibili URL ───────────────────────────────────────────────────────
       if (route.platform === 'bilibili' && route.isUrl) {
         const url = route.normalizedUrl || route.raw;
+        const stageReporter = createInteractionStageReporter(interaction, 'Bilibili');
         const result = await PlaybackCoordinator.playBilibiliUrl({
           interaction,
           playerService: playbackService,
           url,
+          onStage: stageReporter,
         });
+        await stageReporter.finish();
         if (!result.success) {
           await interaction.editReply({ content: result.error || 'Add failed' });
           return;
@@ -161,6 +166,15 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
       const payload: Record<string, unknown> = { embeds: [searchEmbed] };
       if (components.length > 0) payload.components = components;
       await interaction.editReply(payload);
+
+      playbackService.prewarmBilibiliUrls?.(
+        BilibiliUrls.collectBilibiliUrls(biliResults, perPlatformLimit),
+        {
+          source: 'play_search',
+          guildId: interaction.guild.id,
+          keyword: query as string,
+        },
+      );
 
       logger.info('Play keyword search: showing dual results', {
         query,

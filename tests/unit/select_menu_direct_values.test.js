@@ -97,6 +97,7 @@ describe("select menu direct video values", () => {
     expect(playerService.playBilibiliVideo).toHaveBeenCalledWith(
       interaction,
       "https://www.bilibili.com/video/BV1abc",
+      expect.objectContaining({ onStage: expect.any(Function) }),
     );
     expect(bilibiliApi.searchVideos).not.toHaveBeenCalled();
     expect(playerService.getExtractor).not.toHaveBeenCalled();
@@ -185,6 +186,7 @@ describe("select menu direct video values", () => {
     expect(playerService.playBilibiliVideo).toHaveBeenCalledWith(
       interaction,
       "https://www.bilibili.com/video/av12345",
+      expect.objectContaining({ onStage: expect.any(Function) }),
     );
     expect(playerService._extractor.searchVideos).not.toHaveBeenCalled();
   });
@@ -216,6 +218,7 @@ describe("select menu direct video values", () => {
     expect(playerService.playBilibiliVideo).toHaveBeenCalledWith(
       interaction,
       "https://www.bilibili.com/video/BVlegacy",
+      expect.objectContaining({ onStage: expect.any(Function) }),
     );
   });
 
@@ -251,6 +254,7 @@ describe("select menu direct video values", () => {
     expect(playerService.playBilibiliVideo).toHaveBeenCalledWith(
       interaction,
       "https://www.bilibili.com/video/av12345",
+      expect.objectContaining({ onStage: expect.any(Function) }),
     );
   });
 });

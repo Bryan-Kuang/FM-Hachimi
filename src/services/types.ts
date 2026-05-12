@@ -79,7 +79,7 @@ export interface QueueInfo {
 
 export interface AudioManagerLike {
   getPlayer(guildId: GuildId): AudioPlayerLike;
-  playBilibiliVideo(interaction: unknown, url: string): Promise<PlayResult>;
+  playBilibiliVideo(interaction: unknown, url: string, options?: unknown): Promise<PlayResult>;
   pausePlayback(guildId: GuildId): ActionResult;
   resumePlayback(guildId: GuildId): ActionResult;
   skipTrack(guildId: GuildId): Promise<ActionResult>;
@@ -121,6 +121,8 @@ export interface ExtractedTrackData {
   originalUrl?: string;
   normalizedUrl?: string;
   extractedAt?: string;
+  extractionMethod?: 'native' | 'ytdlp' | 'ytdlp_fallback' | 'cache';
+  extractionTiming?: Record<string, number | string | boolean | undefined>;
   formatId?: string;
   protocol?: string;
   audioCodec?: string;

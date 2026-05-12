@@ -10,6 +10,7 @@ import EmbedBuilders = require('../../../ui/embeds');
 import ButtonBuilders = require('../../../ui/buttons');
 import SearchService = require('../../../search/search_service');
 import PlaybackCoordinator = require('../../../playback/playback_coordinator');
+import { createInteractionStageReporter } from '../../../playback/stage_feedback';
 import * as logger from '../../../services/logger_service';
 import * as Lock from '../../../utils/lock';
 
@@ -286,11 +287,14 @@ async function playBilibiliSelection(
   videoUrl: string,
   titleHint?: string,
 ): Promise<boolean> {
+  const stageReporter = createInteractionStageReporter(interaction, 'Bilibili');
   const addResult = await PlaybackCoordinator.playBilibiliUrl({
     interaction,
     playerService,
     url: videoUrl,
+    onStage: stageReporter,
   });
+  await stageReporter.finish();
 
   if (!addResult || !addResult.success) {
     const errorEmbed = EmbedBuilders.createErrorEmbed(
@@ -298,7 +302,7 @@ async function playBilibiliSelection(
       addResult?.error || 'Failed to add the selected video to queue.',
       { suggestion: addResult?.suggestion || 'Please try again.' },
     );
-    await interaction.editReply({ embeds: [errorEmbed] });
+    await interaction.editReply({ content: '', embeds: [errorEmbed] });
     return false;
   }
 
@@ -307,7 +311,7 @@ async function playBilibiliSelection(
     'Added to Queue',
     `📺 **${title}** has been added to the queue`,
   );
-  await interaction.editReply({ embeds: [successEmbed] });
+  await interaction.editReply({ content: '', embeds: [successEmbed] });
   return true;
 }
 

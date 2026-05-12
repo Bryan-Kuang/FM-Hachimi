@@ -40,8 +40,8 @@ const mockConfig = {
   },
 };
 
-function makeService() {
-  return new DailyHachimiService(mockConfig);
+function makeService(preExtractionService = null) {
+  return new DailyHachimiService(mockConfig, preExtractionService);
 }
 
 beforeEach(() => {
@@ -493,6 +493,48 @@ describe("_fire", () => {
     expect(historyWrite).toBeTruthy();
     const saved = JSON.parse(historyWrite[1]);
     expect(saved.guild1["2026-05"]).toEqual(["BVsaved"]);
+    jest.useRealTimers();
+  });
+
+  test("prewarms only successfully sent daily Bilibili cards", async () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-05-15T12:00:00Z"));
+    fs.existsSync.mockReturnValue(false);
+    const channel = {
+      isTextBased: () => true,
+      send: jest
+        .fn()
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({})
+        .mockRejectedValueOnce(new Error("send failed")),
+    };
+    const client = makeMockClient(channel);
+    const mockApi = {
+      searchHachimiVideos: jest.fn().mockResolvedValue({
+        results: [
+          { bvid: "BVsent", title: "Video 1", duration: 60, pic: "", url: "https://bilibili.com/video/BVsent" },
+          { bvid: "BVfailed", title: "Video 2", duration: 60, pic: "", url: "https://bilibili.com/video/BVfailed" },
+        ],
+      }),
+    };
+    const preExtractionService = {
+      prewarmBilibiliUrls: jest.fn(),
+    };
+
+    const service = makeService(preExtractionService);
+    service.initialize(client, mockApi);
+    service.schedules["guild1"] = {
+      channelId: "ch1", hour: 12, minute: 0, count: 2, timezone: "America/Toronto",
+    };
+
+    await service._fire("guild1");
+
+    expect(preExtractionService.prewarmBilibiliUrls).toHaveBeenCalledWith(
+      ["https://bilibili.com/video/BVsent"],
+      expect.objectContaining({
+        source: "daily_recommendation",
+        guildId: "guild1",
+      }),
+    );
     jest.useRealTimers();
   });
 

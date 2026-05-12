@@ -6,6 +6,8 @@
 import { spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as logger from '../services/logger_service';
+import NativeBilibiliExtractor = require('./native_extractor');
+import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage_feedback';
 import config = require('../config/config');
 import UrlValidator = require('./validator');
 
@@ -38,6 +40,8 @@ interface ExtractedAudio extends VideoMetadata {
   originalUrl: string;
   normalizedUrl: string;
   extractedAt: string;
+  extractionMethod?: 'native' | 'ytdlp' | 'ytdlp_fallback' | 'cache';
+  extractionTiming?: Record<string, number | string | boolean | undefined>;
   formatId?: string;
   protocol?: string;
   audioCodec?: string;
@@ -98,6 +102,21 @@ interface ExtractionPayload {
   parseMs: number;
 }
 
+interface ExtractionOptions {
+  onStage?: PlaybackStageReporter;
+}
+
+interface NativeExtractionPayload {
+  metadata: VideoMetadata;
+  audioUrl: string;
+  selectedFormat: SelectedFormatMetadata;
+  timing: {
+    metadataApiMs: number;
+    playurlApiMs: number;
+    totalMs: number;
+  };
+}
+
 interface ThumbnailEntry {
   url: string;
   width?: number;
@@ -108,6 +127,7 @@ class BilibiliExtractor {
   private userAgent: string;
   private _ytdlpChecked: boolean;
   private _cookiesFile: string | null;
+  private nativeExtractor: NativeBilibiliExtractor;
   private videoInfoCache: Map<string, CacheEntry>;
   private extractionCache: Map<string, ExtractedAudioCacheEntry>;
   private inFlightExtractions: Map<string, Promise<ExtractedAudio>>;
@@ -121,6 +141,10 @@ class BilibiliExtractor {
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     this._ytdlpChecked = false; // Lazy check flag
     this._cookiesFile = this._resolveCookiesFile();
+    this.nativeExtractor = new NativeBilibiliExtractor({
+      userAgent: this.userAgent,
+      cookiesFile: this._cookiesFile,
+    });
 
     // Video info cache to avoid repeated yt-dlp calls
     this.videoInfoCache = new Map();
@@ -253,7 +277,12 @@ class BilibiliExtractor {
    * @param {number} maxRetries - Maximum retry attempts
    * @returns {Promise<Object>} - Video metadata and audio stream info
    */
-  async extractAudio(url: string, retryCount = 0, maxRetries = 2): Promise<ExtractedAudio> {
+  async extractAudio(
+    url: string,
+    retryCount = 0,
+    maxRetries = 2,
+    options: ExtractionOptions = {},
+  ): Promise<ExtractedAudio> {
     const totalStartedAt = Date.now();
     logger.info("Starting audio extraction", { url, attempt: retryCount + 1 });
 
@@ -277,6 +306,7 @@ class BilibiliExtractor {
           cacheAgeMs: Date.now() - cached.timestamp,
         });
         this.logExtractionTiming({
+          method: 'cache',
           cacheHit: true,
           ytdlpMs: 0,
           parseMs: 0,
@@ -293,7 +323,7 @@ class BilibiliExtractor {
           return inFlight;
         }
 
-        const extraction = this.extractAudioUncached(url, normalizedUrl, retryCount, maxRetries, totalStartedAt)
+        const extraction = this.extractAudioUncached(url, normalizedUrl, retryCount, maxRetries, totalStartedAt, options)
           .finally(() => {
             this.inFlightExtractions.delete(normalizedUrl);
           });
@@ -301,7 +331,7 @@ class BilibiliExtractor {
         return extraction;
       }
 
-      return await this.extractAudioUncached(url, normalizedUrl, retryCount, maxRetries, totalStartedAt);
+      return await this.extractAudioUncached(url, normalizedUrl, retryCount, maxRetries, totalStartedAt, options);
     } catch (error) {
       logger.error("Audio extraction failed", {
         url,
@@ -323,9 +353,54 @@ class BilibiliExtractor {
     retryCount: number,
     maxRetries: number,
     totalStartedAt: number,
+    options: ExtractionOptions = {},
   ): Promise<ExtractedAudio> {
+    let fallbackReason: string | undefined;
+
     try {
-      // Check yt-dlp availability on first use (lazy check)
+      if (config.bilibili.nativeExtractorEnabled) {
+        try {
+          const nativePayload = await this.nativeExtractor.extract(normalizedUrl);
+          const result = this.createExtractedAudioFromNativePayload(url, normalizedUrl, nativePayload);
+
+          this.extractionCache.set(normalizedUrl, {
+            data: result,
+            timestamp: Date.now(),
+          });
+
+          logger.info("Bilibili native extraction completed successfully", {
+            url,
+            title: result.title,
+            duration: result.duration,
+          });
+
+          this.logExtractionTiming({
+            method: 'native',
+            cacheHit: false,
+            ytdlpMs: 0,
+            parseMs: 0,
+            totalMs: Date.now() - totalStartedAt,
+            metadataApiMs: nativePayload.timing.metadataApiMs,
+            playurlApiMs: nativePayload.timing.playurlApiMs,
+            ...nativePayload.selectedFormat,
+          });
+
+          return result;
+        } catch (nativeError: unknown) {
+          fallbackReason = (nativeError as Error).message;
+          logger.warn("Bilibili native extraction failed; falling back to yt-dlp", {
+            url: normalizedUrl,
+            reason: fallbackReason,
+          });
+          emitPlaybackStage(options.onStage, 'fallback_to_ytdlp', { reason: fallbackReason });
+
+          if (!config.bilibili.nativeFallbackToYtdlp) {
+            throw nativeError;
+          }
+        }
+      }
+
+      // Check yt-dlp availability on first fallback use (lazy check)
       if (!this._ytdlpChecked) {
         const ytdlpAvailable = await this.checkYtDlpAvailability();
         if (!ytdlpAvailable) {
@@ -350,6 +425,13 @@ class BilibiliExtractor {
         originalUrl: url,
         normalizedUrl: normalizedUrl,
         extractedAt: new Date().toISOString(),
+        extractionMethod: fallbackReason ? 'ytdlp_fallback' : 'ytdlp',
+        extractionTiming: {
+          method: fallbackReason ? 'ytdlp_fallback' : 'ytdlp',
+          ytdlpMs,
+          parseMs,
+          totalMs: Date.now() - totalStartedAt,
+        },
         streamHeaders: {
           referer: 'https://www.bilibili.com/',
           userAgent: this.userAgent,
@@ -368,10 +450,12 @@ class BilibiliExtractor {
       });
 
       this.logExtractionTiming({
+        method: fallbackReason ? 'ytdlp_fallback' : 'ytdlp',
         cacheHit: false,
         ytdlpMs,
         parseMs,
         totalMs: Date.now() - totalStartedAt,
+        fallbackReason,
         ...selectedFormat,
       });
 
@@ -394,7 +478,7 @@ class BilibiliExtractor {
 
         // 等待递增延迟后重试
         await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 3000));
-        return await this.extractAudioUncached(url, normalizedUrl, retryCount + 1, maxRetries, totalStartedAt);
+        return await this.extractAudioUncached(url, normalizedUrl, retryCount + 1, maxRetries, totalStartedAt, options);
       }
 
       throw new Error(`Audio extraction failed: ${(error as Error).message}`);
@@ -526,6 +610,35 @@ class BilibiliExtractor {
       ytdlp.on('close', clearKillTimeout);
       ytdlp.on('error', clearKillTimeout);
     });
+  }
+
+  private createExtractedAudioFromNativePayload(
+    originalUrl: string,
+    normalizedUrl: string,
+    payload: NativeExtractionPayload,
+  ): ExtractedAudio {
+    const extractionTiming = {
+      method: 'native',
+      metadataApiMs: payload.timing.metadataApiMs,
+      playurlApiMs: payload.timing.playurlApiMs,
+      totalMs: payload.timing.totalMs,
+    };
+
+    return {
+      ...payload.metadata,
+      audioUrl: payload.audioUrl,
+      ...payload.selectedFormat,
+      platform: 'bilibili',
+      originalUrl,
+      normalizedUrl,
+      extractedAt: new Date().toISOString(),
+      extractionMethod: 'native',
+      extractionTiming,
+      streamHeaders: {
+        referer: 'https://www.bilibili.com/',
+        userAgent: this.userAgent,
+      },
+    };
   }
 
   /**
@@ -688,6 +801,28 @@ class BilibiliExtractor {
    * @returns {Promise<string>} - Audio stream URL
    */
   async getAudioStreamUrl(url: string): Promise<string> {
+    const normalizedUrl = UrlValidator.normalizeUrl(url) || url;
+    if (config.bilibili.nativeExtractorEnabled) {
+      try {
+        const nativePayload = await this.nativeExtractor.extract(normalizedUrl);
+        logger.info("Bilibili native stream URL refresh completed", {
+          url: normalizedUrl,
+          method: 'native',
+          formatId: nativePayload.selectedFormat.formatId,
+          protocol: nativePayload.selectedFormat.protocol,
+        });
+        return nativePayload.audioUrl;
+      } catch (nativeError: unknown) {
+        logger.warn("Bilibili native stream URL refresh failed; falling back to yt-dlp", {
+          url: normalizedUrl,
+          reason: (nativeError as Error).message,
+        });
+        if (!config.bilibili.nativeFallbackToYtdlp) {
+          throw nativeError;
+        }
+      }
+    }
+
     return new Promise((resolve, reject) => {
       const args = [
         "--get-url",
@@ -821,10 +956,14 @@ class BilibiliExtractor {
   }
 
   private logExtractionTiming(timing: {
+    method: 'native' | 'ytdlp' | 'ytdlp_fallback' | 'cache';
     cacheHit: boolean;
     ytdlpMs: number;
     parseMs: number;
     totalMs: number;
+    metadataApiMs?: number;
+    playurlApiMs?: number;
+    fallbackReason?: string;
   } & SelectedFormatMetadata): void {
     logger.info("Bilibili extraction timing", { ...timing });
   }
