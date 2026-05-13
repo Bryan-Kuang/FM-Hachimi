@@ -307,7 +307,7 @@ class NativeBilibiliExtractor {
     const subUrl = body.data?.wbi_img?.sub_url;
     const imgKey = this.extractWbiKey(imgUrl);
     const subKey = this.extractWbiKey(subUrl);
-    if (body.code !== 0 || !imgKey || !subKey) {
+    if (!imgKey || !subKey) {
       throw new Error(`Bilibili WBI key fetch failed: ${body.message || body.code || 'missing key'}`);
     }
 
