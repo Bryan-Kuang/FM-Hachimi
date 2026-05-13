@@ -25,7 +25,7 @@ const NativeBilibiliExtractor = require("../../src/bilibili/native_extractor");
 
 const VIDEO_URL = "https://www.bilibili.com/video/BV1xx411c7BF";
 
-function mockNativeResponses({ audio = undefined } = {}) {
+function mockNativeResponses({ audio = undefined, navCode = 0, navMessage = undefined } = {}) {
   axios.get.mockImplementation((url) => {
     if (url.includes("/x/web-interface/view")) {
       return Promise.resolve({
@@ -50,7 +50,8 @@ function mockNativeResponses({ audio = undefined } = {}) {
     if (url.includes("/x/web-interface/nav")) {
       return Promise.resolve({
         data: {
-          code: 0,
+          code: navCode,
+          message: navMessage,
           data: {
             wbi_img: {
               img_url: "https://i0.hdslb.com/bfs/wbi/nativeimg.png",
@@ -189,6 +190,40 @@ describe("Bilibili native extractor", () => {
     );
     const serializedLogs = JSON.stringify(logger.info.mock.calls);
     expect(serializedLogs).not.toContain("https://upos.example.com/audio-high.m4a");
+  });
+
+  test("uses WBI keys from unauthenticated nav responses when keys are present", async () => {
+    mockNativeResponses({
+      navCode: -101,
+      navMessage: "账号未登录",
+    });
+    const nativeExtractor = new NativeBilibiliExtractor({
+      userAgent: "Test UA",
+      cookiesFile: null,
+    });
+
+    const result = await nativeExtractor.extract(VIDEO_URL);
+
+    expect(result).toMatchObject({
+      metadata: expect.objectContaining({
+        title: "Native Bilibili Track",
+      }),
+      audioUrl: "https://upos.example.com/audio-high.m4a",
+      selectedFormat: expect.objectContaining({
+        formatId: "30280",
+        protocol: "https",
+        audioCodec: "mp4a.40.2",
+      }),
+    });
+    expect(axios.get).toHaveBeenCalledWith(
+      expect.stringContaining("/x/player/wbi/playurl"),
+      expect.objectContaining({
+        params: expect.objectContaining({
+          w_rid: expect.any(String),
+          wts: expect.any(Number),
+        }),
+      }),
+    );
   });
 
   test("passes configured cookies to native Bilibili API requests without logging cookie values", async () => {
