@@ -84,4 +84,65 @@ describe("command registry", () => {
     expect(source).not.toContain("../src/bot/commands/play");
     expect(source).not.toContain("../src/bot/commands/daily_hachimi");
   });
+
+  test("filters stable and testing command lists without changing stable names", () => {
+    const registry = require("../../src/bot/commands");
+    const stableCommand = {
+      stage: "stable",
+      data: { name: "stable", toJSON: () => ({ name: "stable", description: "Stable command" }) },
+      execute: jest.fn(),
+    };
+    const testingCommand = {
+      stage: "testing",
+      featureName: "Experiment",
+      data: { name: "experiment", toJSON: () => ({ name: "experiment", description: "Try experiment" }) },
+      execute: jest.fn(),
+    };
+
+    expect(registry.getStableCommandsFrom([stableCommand, testingCommand]).map((command) => command.data.name))
+      .toEqual(["stable"]);
+    expect(registry.getTestingCommandsFrom([stableCommand, testingCommand]).map((command) => command.data.name))
+      .toEqual(["experiment"]);
+
+    const names = registry.createCommands(null, null).map((command) => command.data.name);
+    expect(names).toEqual([
+      "play",
+      "pause",
+      "resume",
+      "skip",
+      "prev",
+      "stop",
+      "queue",
+      "nowplaying",
+      "help",
+      "search",
+      "hachimi",
+      "daily-hachimi",
+    ]);
+    expect(registry.getGlobalCommands(null, null).map((command) => command.data.name)).toEqual(names);
+    expect(registry.getTestingCommands(null, null)).toEqual([]);
+  });
+
+  test("prefixes testing command descriptions and keeps them within Discord limits", () => {
+    const registry = require("../../src/bot/commands");
+    const testingCommand = {
+      stage: "testing",
+      featureName: "Long experiment",
+      data: {
+        name: "experiment",
+        toJSON: () => ({
+          name: "experiment",
+          description: "x".repeat(120),
+        }),
+      },
+      execute: jest.fn(),
+    };
+
+    const [command] = registry.getTestingCommandsFrom([testingCommand]);
+    const json = command.data.toJSON();
+
+    expect(json.name).toBe("experiment");
+    expect(json.description.startsWith("[Testing] ")).toBe(true);
+    expect(json.description.length).toBeLessThanOrEqual(100);
+  });
 });

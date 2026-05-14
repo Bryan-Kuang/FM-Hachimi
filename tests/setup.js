@@ -65,6 +65,9 @@ jest.mock("discord.js", () => ({
     Danger: 4,
     Link: 5,
   },
+  MessageFlags: {
+    Ephemeral: 64,
+  },
   ApplicationCommandOptionType: {
     String: 3,
     Integer: 4,

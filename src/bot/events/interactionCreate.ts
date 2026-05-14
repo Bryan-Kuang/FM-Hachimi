@@ -6,6 +6,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import createButtonHandler = require('./handlers/button_handler');
 import createSelectMenuHandler = require('./handlers/select_menu_handler');
+import * as TestingAccess from '../testing_access';
 
 const createInteractionHandler = (
   playerService: any,
@@ -18,6 +19,14 @@ const createInteractionHandler = (
     name: 'interactionCreate',
 
     async execute(interaction: any): Promise<void> {
+      if (TestingAccess.isTestingCustomId(interaction.customId)) {
+        const allowed = await TestingAccess.assertTestingGuild(
+          interaction,
+          TestingAccess.featureNameFromCustomId(interaction.customId),
+        );
+        if (!allowed) return;
+      }
+
       if (interaction.isButton()) {
         await handleButton(interaction);
       }

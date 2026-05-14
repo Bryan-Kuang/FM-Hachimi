@@ -1,0 +1,97 @@
+function makeCommand(name, description) {
+  return {
+    data: {
+      name,
+      toJSON: () => ({ name, description }),
+    },
+  };
+}
+
+function loadDeployCommands() {
+  jest.resetModules();
+
+  const stableCommand = makeCommand("play", "Play music");
+  const testingCommand = makeCommand("experiment", "[Testing] Try experiment");
+
+  jest.doMock("discord.js", () => ({
+    REST: jest.fn().mockImplementation(() => ({
+      setToken: jest.fn().mockReturnThis(),
+      put: jest.fn().mockResolvedValue({}),
+    })),
+    Routes: {
+      applicationCommands: jest.fn((clientId) => `global:${clientId}`),
+      applicationGuildCommands: jest.fn((clientId, guildId) => `guild:${clientId}:${guildId}`),
+    },
+  }));
+
+  jest.doMock("../../src/config/config", () => ({
+    discord: {
+      token: "token",
+      clientId: "client-id",
+      guildId: "legacy-guild",
+    },
+    test: {
+      guildId: "1376318047794761838",
+    },
+  }));
+
+  jest.doMock("../../src/bot/commands", () => ({
+    createCommands: jest.fn(() => [stableCommand, testingCommand]),
+    getGlobalCommands: jest.fn(() => [stableCommand]),
+    getGuildCommandsForTestServer: jest.fn(() => [testingCommand]),
+  }));
+
+  return require("../../scripts/deploy-commands");
+}
+
+describe("deploy command payload selection", () => {
+  afterEach(() => {
+    jest.dontMock("discord.js");
+    jest.dontMock("../../src/config/config");
+    jest.dontMock("../../src/bot/commands");
+  });
+
+  test("default deploy targets global stable commands only", () => {
+    const { createDeploymentPlan } = loadDeployCommands();
+
+    const plan = createDeploymentPlan({});
+
+    expect(plan.scope).toBe("global");
+    expect(plan.guildId).toBeNull();
+    expect(plan.commandData.map((command) => command.name)).toEqual(["play"]);
+  });
+
+  test("test deploy targets testing commands in the test guild only", () => {
+    const { createDeploymentPlan } = loadDeployCommands();
+
+    const plan = createDeploymentPlan({ DEPLOY_TEST_COMMANDS: "true" });
+
+    expect(plan.scope).toBe("test_guild");
+    expect(plan.guildId).toBe("1376318047794761838");
+    expect(plan.commandData.map((command) => command.name)).toEqual(["experiment"]);
+  });
+
+  test("clear mode for test deploy targets the test guild", () => {
+    const { createDeploymentPlan } = loadDeployCommands();
+
+    const plan = createDeploymentPlan({
+      DEPLOY_TEST_COMMANDS: "true",
+      CLEAR_GUILD_COMMANDS: "true",
+    });
+
+    expect(plan.clear).toBe(true);
+    expect(plan.scope).toBe("test_guild");
+    expect(plan.guildId).toBe("1376318047794761838");
+    expect(plan.commandData).toEqual([]);
+  });
+
+  test("legacy guild deploy uses GUILD_ID and includes all commands only when explicit", () => {
+    const { createDeploymentPlan } = loadDeployCommands();
+
+    const plan = createDeploymentPlan({ DEPLOY_LEGACY_GUILD_COMMANDS: "true" });
+
+    expect(plan.scope).toBe("legacy_guild");
+    expect(plan.guildId).toBe("legacy-guild");
+    expect(plan.commandData.map((command) => command.name)).toEqual(["play", "experiment"]);
+  });
+});

@@ -11,6 +11,55 @@ const { REST, Routes } = require("discord.js");
 const config = require("../src/config/config");
 const logger = require("../src/services/logger_service");
 const CommandRegistry = require("../src/bot/commands");
+const TestingAccess = require("../src/bot/testing_access");
+
+function toCommandData(commands) {
+  return commands.map((command) => command.data.toJSON());
+}
+
+function createDeploymentPlan(env = process.env) {
+  const deployTesting = env.DEPLOY_TEST_COMMANDS === "true";
+  const deployLegacyGuild = env.DEPLOY_LEGACY_GUILD_COMMANDS === "true";
+  const clear = env.CLEAR_GUILD_COMMANDS === "true";
+
+  if (deployTesting && deployLegacyGuild) {
+    throw new Error("DEPLOY_TEST_COMMANDS and DEPLOY_LEGACY_GUILD_COMMANDS cannot both be true");
+  }
+
+  if (deployTesting) {
+    const commands = clear ? [] : CommandRegistry.getGuildCommandsForTestServer(null, null);
+    return {
+      scope: "test_guild",
+      guildId: TestingAccess.TEST_GUILD_ID,
+      clear,
+      commandData: toCommandData(commands),
+    };
+  }
+
+  if (deployLegacyGuild) {
+    if (!config.discord.guildId) {
+      throw new Error("GUILD_ID is required when DEPLOY_LEGACY_GUILD_COMMANDS=true");
+    }
+    const commands = clear ? [] : CommandRegistry.createCommands(null, null);
+    return {
+      scope: "legacy_guild",
+      guildId: config.discord.guildId,
+      clear,
+      commandData: toCommandData(commands),
+    };
+  }
+
+  if (clear) {
+    throw new Error("CLEAR_GUILD_COMMANDS requires DEPLOY_TEST_COMMANDS=true or DEPLOY_LEGACY_GUILD_COMMANDS=true");
+  }
+
+  return {
+    scope: "global",
+    guildId: null,
+    clear: false,
+    commandData: toCommandData(CommandRegistry.getGlobalCommands(null, null)),
+  };
+}
 
 async function deployCommands() {
   try {
@@ -19,13 +68,13 @@ async function deployCommands() {
       throw new Error("Discord token or client ID is not configured");
     }
 
-    // Command factories receive services at runtime; deploy only needs the data builders.
-    const commands = CommandRegistry.createCommands(null, null);
-
-    // Extract command data
-    const commandData = commands.map((command) => command.data.toJSON());
+    const plan = createDeploymentPlan(process.env);
+    const { commandData } = plan;
 
     logger.info("Starting command deployment", {
+      scope: plan.scope,
+      guildId: plan.guildId,
+      clear: plan.clear,
       commandCount: commandData.length,
       commands: commandData.map((cmd) => cmd.name),
     });
@@ -33,52 +82,51 @@ async function deployCommands() {
     // Create REST client
     const rest = new REST({ version: "10" }).setToken(config.discord.token);
 
-    // clear_guild mode: wipe all guild-scoped commands from a specific server.
-    // Use this to fix duplicate commands when switching from guild to global deploy.
-    if (process.env.CLEAR_GUILD_COMMANDS === "true") {
-      if (!config.discord.guildId) {
-        throw new Error("GUILD_ID is required for clear_guild mode");
-      }
+    if (plan.clear) {
       logger.info("Clearing guild-scoped commands", {
-        guildId: config.discord.guildId,
+        scope: plan.scope,
+        guildId: plan.guildId,
       });
       await rest.put(
         Routes.applicationGuildCommands(
           config.discord.clientId,
-          config.discord.guildId
+          plan.guildId
         ),
         { body: [] }
       );
       logger.info("Guild commands cleared — duplicates should be gone within seconds", {
-        guildId: config.discord.guildId,
+        scope: plan.scope,
+        guildId: plan.guildId,
       });
       return;
     }
 
-    if (config.discord.guildId) {
-      // Deploy to specific guild (faster for development)
-      logger.info("Deploying commands to guild", {
-        guildId: config.discord.guildId,
+    if (plan.guildId) {
+      logger.info("Deploying guild-scoped commands", {
+        scope: plan.scope,
+        guildId: plan.guildId,
       });
 
       await rest.put(
         Routes.applicationGuildCommands(
           config.discord.clientId,
-          config.discord.guildId
+          plan.guildId
         ),
         { body: commandData }
       );
 
-      logger.info("Successfully deployed guild commands");
+      logger.info("Successfully deployed guild commands", {
+        scope: plan.scope,
+        guildId: plan.guildId,
+      });
     } else {
-      // Deploy globally (takes up to 1 hour to update)
-      logger.info("Deploying commands globally");
+      logger.info("Deploying stable commands globally");
 
       await rest.put(Routes.applicationCommands(config.discord.clientId), {
         body: commandData,
       });
 
-      logger.info("Successfully deployed global commands");
+      logger.info("Successfully deployed global stable commands");
     }
 
     // Log deployed commands
@@ -119,3 +167,4 @@ if (require.main === module) {
 }
 
 module.exports = { deployCommands };
+module.exports.createDeploymentPlan = createDeploymentPlan;

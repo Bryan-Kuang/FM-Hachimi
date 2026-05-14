@@ -37,11 +37,28 @@ npm run docker:up
 
 ## Register Discord Commands
 
+Stable public commands are deployed globally:
+
 ```bash
 npm run deploy:commands
 ```
 
-Set `GUILD_ID` in `.env` for fast guild command registration while developing. Leave `GUILD_ID` empty for global commands.
+Testing commands are deployed only to the configured test server, which defaults
+to `1376318047794761838`:
+
+```bash
+npm run deploy:commands:test
+```
+
+Commands or components marked as testing are also runtime-blocked outside the
+test server. See `docs/testing-features.md` before adding experimental features.
+
+Legacy all-commands guild deploy is still available for local/dev recovery, but
+it must be explicit:
+
+```bash
+DEPLOY_LEGACY_GUILD_COMMANDS=true npm run deploy:commands
+```
 
 ## Refresh Cookies
 
