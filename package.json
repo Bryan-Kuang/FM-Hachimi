@@ -17,6 +17,7 @@
     "bench:extractors": "node scripts/bench-extractors.js",
     "deploy": "bash scripts/deploy/deploy.sh",
     "deploy:commands": "node scripts/deploy-commands.js",
+    "deploy:commands:test": "DEPLOY_TEST_COMMANDS=true node scripts/deploy-commands.js",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "typecheck": "tsc --noEmit",

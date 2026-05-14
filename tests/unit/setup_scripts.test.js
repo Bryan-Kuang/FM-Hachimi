@@ -17,6 +17,7 @@ describe("beginner setup scripts", () => {
     expect(scripts["docker:logs"]).toBe("docker compose logs -f bilibili-bot");
     expect(scripts["docker:down"]).toBe("docker compose down");
     expect(scripts["bench:extractors"]).toBe("node scripts/bench-extractors.js");
+    expect(scripts["deploy:commands:test"]).toBe("DEPLOY_TEST_COMMANDS=true node scripts/deploy-commands.js");
   });
 
   test("scripts that execute local files point at files that exist", () => {
