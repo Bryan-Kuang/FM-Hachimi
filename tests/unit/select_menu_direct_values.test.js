@@ -139,6 +139,7 @@ describe("select menu direct video values", () => {
 
     expect(playerService._ytExtractor.extractAudio).toHaveBeenCalledWith(
       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      expect.objectContaining({ priority: "foreground", source: "playback" }),
     );
     expect(playerService._ytExtractor.searchVideos).not.toHaveBeenCalled();
     expect(playerService.addTrack).toHaveBeenCalled();
@@ -200,6 +201,7 @@ describe("select menu direct video values", () => {
 
     expect(playerService._ytExtractor.extractAudio).toHaveBeenCalledWith(
       "https://www.youtube.com/watch?v=abcdefghijk",
+      expect.objectContaining({ priority: "foreground", source: "playback" }),
     );
     expect(playerService._ytExtractor.searchVideos).not.toHaveBeenCalled();
   });
@@ -236,6 +238,7 @@ describe("select menu direct video values", () => {
     expect(playerService._ytExtractor.searchVideos).toHaveBeenCalledWith("hachimi", 10);
     expect(playerService._ytExtractor.extractAudio).toHaveBeenCalledWith(
       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      expect.objectContaining({ priority: "foreground", source: "playback" }),
     );
   });
 

@@ -59,7 +59,8 @@ function makeInteraction(platform = "bilibili") {
       getInteger: jest.fn((name) => (name === "results" ? 5 : null)),
     },
     user: { username: "Tester" },
-    guild: { name: "Guild" },
+    guild: { id: "guild-1", name: "Guild" },
+    guildId: "guild-1",
     deferReply: jest.fn().mockResolvedValue(undefined),
     editReply: jest.fn().mockResolvedValue(undefined),
     reply: jest.fn().mockResolvedValue(undefined),
@@ -131,6 +132,7 @@ describe("/search result relevance ranking", () => {
           {
             title: "哈基米无止境电台",
             id: "ytidtarget1",
+            url: "https://www.youtube.com/watch?v=ytidtarget1",
             duration: 185,
           },
         ],
@@ -139,6 +141,7 @@ describe("/search result relevance ranking", () => {
     const playbackService = {
       getYouTubeExtractor: jest.fn().mockReturnValue(ytExtractor),
       prewarmBilibiliUrls: jest.fn(),
+      prewarmYouTubeUrls: jest.fn(),
     };
     const command = createSearchCommand(playbackService);
 
@@ -153,5 +156,13 @@ describe("/search result relevance ranking", () => {
       expect.objectContaining({ id: "ytidtarget1" }),
     );
     expect(playbackService.prewarmBilibiliUrls).not.toHaveBeenCalled();
+    expect(playbackService.prewarmYouTubeUrls).toHaveBeenCalledWith(
+      expect.arrayContaining(["https://www.youtube.com/watch?v=ytidtarget1"]),
+      expect.objectContaining({
+        source: "search_command",
+        guildId: "guild-1",
+        keyword: "哈基米无止境电台",
+      }),
+    );
   });
 });

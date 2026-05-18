@@ -29,6 +29,10 @@ interface PreExtractionServiceLike {
     urls: string[],
     context: { source: 'play_search' | 'search_command' | 'daily_recommendation'; guildId?: string; keyword?: string },
   ): unknown;
+  prewarmYouTubeUrls?(
+    urls: string[],
+    context: { source: 'play_search' | 'search_command' | 'daily_recommendation'; guildId?: string; keyword?: string },
+  ): unknown;
 }
 
 interface PlayerServiceDeps {
@@ -333,6 +337,13 @@ class PlayerService extends EventEmitter {
     context: { source: 'play_search' | 'search_command' | 'daily_recommendation'; guildId?: string; keyword?: string },
   ): unknown {
     return this.preExtractionService?.prewarmBilibiliUrls(urls, context);
+  }
+
+  prewarmYouTubeUrls(
+    urls: string[],
+    context: { source: 'play_search' | 'search_command' | 'daily_recommendation'; guildId?: string; keyword?: string },
+  ): unknown {
+    return this.preExtractionService?.prewarmYouTubeUrls?.(urls, context);
   }
 
   // ---------------------------------------------------------------------------

@@ -321,11 +321,14 @@ async function playYouTubeSelection(
   videoUrl: string,
   titleHint?: string,
 ): Promise<boolean> {
+  const stageReporter = createInteractionStageReporter(interaction, 'YouTube');
   const addResult = await PlaybackCoordinator.playYouTubeUrl({
     interaction,
     playerService,
     url: videoUrl,
+    onStage: stageReporter,
   });
+  await stageReporter.finish();
 
   if (!addResult.success) {
     const errorEmbed = EmbedBuilders.createErrorEmbed(

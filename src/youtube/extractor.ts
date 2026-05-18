@@ -11,6 +11,7 @@ import * as path from 'path';
 import * as logger from '../services/logger_service';
 import config = require('../config/config');
 import YouTubeValidator = require('./validator');
+import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage_feedback';
 
 interface VideoMetadata {
   success: boolean;
@@ -92,6 +93,18 @@ interface ExtractionPayload {
   parseMs: number;
 }
 
+interface ExtractionOptions {
+  priority?: 'foreground' | 'background';
+  source?: string;
+  onStage?: PlaybackStageReporter;
+}
+
+interface ResolvedExtractionOptions {
+  priority: 'foreground' | 'background';
+  source: string;
+  onStage?: PlaybackStageReporter;
+}
+
 const AUDIO_FORMAT_SELECTOR =
   'bestaudio[vcodec=none][protocol^=http][acodec!=none]/bestaudio[vcodec=none][acodec!=none]/best[height<=360][protocol^=http][acodec!=none]/best[height<=360][protocol=m3u8_native][acodec!=none]/best[height<=360][acodec!=none]/worst[acodec!=none]';
 
@@ -168,6 +181,10 @@ class YouTubeExtractor {
   /** Wait for the rate limiter cooldown before the next yt-dlp call. */
   private async _waitForRateLimit(): Promise<number> {
     const minInterval = config.youtube.minExtractionIntervalMs;
+    if (minInterval <= 0) {
+      return 0;
+    }
+
     const elapsed = Date.now() - this._lastExtractionTime;
     if (elapsed < minInterval) {
       const wait = minInterval - elapsed;
@@ -245,9 +262,22 @@ class YouTubeExtractor {
    * Single yt-dlp invocation with an audio-first format selector.
    * Results are cached for 25 minutes to reduce yt-dlp calls.
    */
-  async extractAudio(url: string, retryCount = 0, maxRetries = 2): Promise<ExtractedAudio> {
+  async extractAudio(
+    url: string,
+    retryOrOptions: number | ExtractionOptions = 0,
+    maxRetries = 2,
+  ): Promise<ExtractedAudio> {
+    const retryCount = typeof retryOrOptions === 'number' ? retryOrOptions : 0;
+    const options = this.resolveExtractionOptions(
+      typeof retryOrOptions === 'number' ? undefined : retryOrOptions,
+    );
     const totalStartedAt = Date.now();
-    logger.info('Starting YouTube audio extraction', { url, attempt: retryCount + 1 });
+    logger.info('Starting YouTube audio extraction', {
+      url,
+      attempt: retryCount + 1,
+      priority: options.priority,
+      source: options.source,
+    });
 
     try {
       if (!this._ytdlpChecked) {
@@ -274,13 +304,19 @@ class YouTubeExtractor {
           url: normalizedUrl,
           title: cached.data.title,
           cacheAgeMin: Math.round((Date.now() - cached.cachedAt) / 60000),
+          source: options.source,
+          priority: options.priority,
         });
+        emitPlaybackStage(options.onStage, 'using_cached');
         this.logExtractionTiming({
           cacheHit: true,
+          joinedInFlight: false,
           rateLimitWaitMs: 0,
           ytdlpMs: 0,
           parseMs: 0,
           totalMs: Date.now() - totalStartedAt,
+          priority: options.priority,
+          source: options.source,
           ...this.selectedFormatFromExtractedAudio(cached.data),
         });
         return cached.data;
@@ -289,11 +325,29 @@ class YouTubeExtractor {
       if (retryCount === 0) {
         const inFlight = this._inFlightExtractions.get(normalizedUrl);
         if (inFlight) {
-          logger.info('YouTube extraction joined in-flight request', { url: normalizedUrl });
-          return inFlight;
+          logger.info('YouTube extraction joined in-flight request', {
+            url: normalizedUrl,
+            source: options.source,
+            priority: options.priority,
+          });
+          emitPlaybackStage(options.onStage, 'using_cached');
+          const joinedStartedAt = Date.now();
+          const result = await inFlight;
+          this.logExtractionTiming({
+            cacheHit: false,
+            joinedInFlight: true,
+            rateLimitWaitMs: 0,
+            ytdlpMs: 0,
+            parseMs: 0,
+            totalMs: Date.now() - joinedStartedAt,
+            priority: options.priority,
+            source: options.source,
+            ...this.selectedFormatFromExtractedAudio(result),
+          });
+          return result;
         }
 
-        const extraction = this._extractAudioUncached(url, normalizedUrl, retryCount, maxRetries, totalStartedAt)
+        const extraction = this._extractAudioUncached(url, normalizedUrl, retryCount, maxRetries, totalStartedAt, options)
           .finally(() => {
             this._inFlightExtractions.delete(normalizedUrl);
           });
@@ -301,7 +355,7 @@ class YouTubeExtractor {
         return extraction;
       }
 
-      return await this._extractAudioUncached(url, normalizedUrl, retryCount, maxRetries, totalStartedAt);
+      return await this._extractAudioUncached(url, normalizedUrl, retryCount, maxRetries, totalStartedAt, options);
     } catch (error) {
       logger.error('YouTube audio extraction failed', {
         url,
@@ -319,6 +373,7 @@ class YouTubeExtractor {
     retryCount: number,
     maxRetries: number,
     totalStartedAt: number,
+    options: ResolvedExtractionOptions,
   ): Promise<ExtractedAudio> {
     try {
       // Rate limit — wait if too soon after last extraction
@@ -352,10 +407,13 @@ class YouTubeExtractor {
 
       this.logExtractionTiming({
         cacheHit: false,
+        joinedInFlight: false,
         rateLimitWaitMs,
         ytdlpMs,
         parseMs,
         totalMs: Date.now() - totalStartedAt,
+        priority: options.priority,
+        source: options.source,
         ...selectedFormat,
       });
 
@@ -365,7 +423,7 @@ class YouTubeExtractor {
         const delay = (retryCount + 1) * 2000;
         logger.info('Retrying YouTube extraction', { url, nextAttempt: retryCount + 2, delay });
         await new Promise(resolve => setTimeout(resolve, delay));
-        return this._extractAudioUncached(url, normalizedUrl, retryCount + 1, maxRetries, totalStartedAt);
+        return this._extractAudioUncached(url, normalizedUrl, retryCount + 1, maxRetries, totalStartedAt, options);
       }
 
       throw error;
@@ -632,12 +690,23 @@ class YouTubeExtractor {
 
   private logExtractionTiming(timing: {
     cacheHit: boolean;
+    joinedInFlight?: boolean;
     rateLimitWaitMs: number;
     ytdlpMs: number;
     parseMs: number;
     totalMs: number;
+    priority?: string;
+    source?: string;
   } & SelectedFormatMetadata): void {
     logger.info('YouTube extraction timing', { ...timing });
+  }
+
+  private resolveExtractionOptions(options?: ExtractionOptions): ResolvedExtractionOptions {
+    return {
+      priority: options?.priority ?? 'foreground',
+      source: options?.source ?? 'playback',
+      onStage: options?.onStage,
+    };
   }
 
   private parseVideoMetadata(videoData: Record<string, unknown>): VideoMetadata {

@@ -3,6 +3,7 @@ import * as logger from '../services/logger_service';
 type PlaybackStage =
   | 'preparing'
   | 'extracting'
+  | 'using_cached'
   | 'joining_voice'
   | 'queued'
   | 'starting_playback'
@@ -56,6 +57,8 @@ function messageForStage(stage: PlaybackStage, platformLabel: string, details?: 
       return `Preparing ${platformLabel} audio...`;
     case 'extracting':
       return `Extracting ${platformLabel} audio...`;
+    case 'using_cached':
+      return `Using cached ${platformLabel} audio info...`;
     case 'joining_voice':
       return 'Joining voice channel...';
     case 'queued':
