@@ -1,4 +1,5 @@
 const { createMockProcess } = require("../utils/mock_spawn");
+const { EventEmitter } = require("events");
 
 jest.mock("child_process", () => ({
   spawn: jest.fn(),
@@ -16,6 +17,13 @@ const { spawn } = require("child_process");
 const logger = require("../../src/services/logger_service");
 const YouTubeExtractor = require("../../src/youtube/extractor");
 
+function resolveWithin(promise, timeoutMs = 25) {
+  return Promise.race([
+    promise.then(() => "done"),
+    new Promise(resolve => setTimeout(() => resolve("timeout"), timeoutMs)),
+  ]);
+}
+
 function youtubeJson(id, title = "YouTube Audio") {
   return JSON.stringify({
     id,
@@ -30,6 +38,21 @@ function youtubeJson(id, title = "YouTube Audio") {
       vcodec: "none",
     }],
   });
+}
+
+function createDeferredProcess({ stdout = "", stderr = "", exitCode = 0 } = {}) {
+  const proc = new EventEmitter();
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  proc.stdin = { end: jest.fn(), destroyed: false };
+  proc.killed = false;
+  proc.kill = jest.fn(() => { proc.killed = true; });
+  const close = () => {
+    if (stdout) proc.stdout.emit("data", Buffer.from(stdout));
+    if (stderr) proc.stderr.emit("data", Buffer.from(stderr));
+    proc.emit("close", exitCode);
+  };
+  return { proc, close };
 }
 
 describe("YouTubeExtractor extraction cache behavior", () => {
@@ -79,6 +102,65 @@ describe("YouTubeExtractor extraction cache behavior", () => {
 
     expect(spawn).toHaveBeenCalledTimes(2);
     expect(extractor._waitForRateLimit).toHaveBeenCalledTimes(2);
+  });
+
+  test("uncached YouTube extraction does not wait on the disabled limiter", async () => {
+    extractor._waitForRateLimit = YouTubeExtractor.prototype._waitForRateLimit.bind(extractor);
+    extractor._lastExtractionTime = Date.now();
+    spawn.mockImplementation(() => createMockProcess({
+      stdout: youtubeJson("dQw4w9WgXcQ", "No Wait YouTube"),
+      exitCode: 0,
+    }));
+
+    const extraction = extractor.extractAudio("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+
+    await expect(resolveWithin(extraction)).resolves.toBe("done");
+    expect(logger.info).toHaveBeenCalledWith("YouTube extraction timing", expect.objectContaining({
+      cacheHit: false,
+      rateLimitWaitMs: 0,
+    }));
+  });
+
+  test("YouTube stream URL refresh does not wait on the disabled limiter", async () => {
+    extractor._waitForRateLimit = YouTubeExtractor.prototype._waitForRateLimit.bind(extractor);
+    extractor._lastExtractionTime = Date.now();
+    spawn.mockImplementation(() => createMockProcess({
+      stdout: "https://youtube.cdn/fresh.m4a\n",
+      exitCode: 0,
+    }));
+
+    const refresh = extractor.getAudioStreamUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+
+    await expect(resolveWithin(refresh)).resolves.toBe("done");
+  });
+
+  test("same-URL foreground extraction joins an in-flight background extraction", async () => {
+    const deferredProcess = createDeferredProcess({
+      stdout: youtubeJson("dQw4w9WgXcQ", "Prewarmed YouTube"),
+      exitCode: 0,
+    });
+    spawn.mockReturnValue(deferredProcess.proc);
+
+    const background = extractor.extractAudio(
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      { priority: "background", source: "search_command" },
+    );
+    await Promise.resolve();
+    const foreground = extractor.extractAudio(
+      "https://youtu.be/dQw4w9WgXcQ",
+      { priority: "foreground", source: "playback" },
+    );
+
+    deferredProcess.close();
+    const [first, second] = await Promise.all([background, foreground]);
+
+    expect(first.title).toBe("Prewarmed YouTube");
+    expect(second.title).toBe("Prewarmed YouTube");
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(logger.info).toHaveBeenCalledWith("YouTube extraction timing", expect.objectContaining({
+      joinedInFlight: true,
+      source: "playback",
+    }));
   });
 
   test("uses audio-first low-bandwidth fallback format for extraction", async () => {

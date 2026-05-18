@@ -76,6 +76,7 @@ class BilibiliDiscordBot {
       const interfaceUpdater = new InterfaceUpdater(sessionManager, progressTracker, audioManager);
       const preExtractionService = new PreExtractionService({
         bilibiliExtractor: extractor,
+        youtubeExtractor,
       });
 
       // Inject historyStore into bilibiliApi singleton

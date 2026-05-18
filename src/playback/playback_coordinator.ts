@@ -1,6 +1,6 @@
 import type { ExtractedTrackData, PlayResult } from '../services/types';
 import * as logger from '../services/logger_service';
-import type { PlaybackStageReporter } from './stage_feedback';
+import { emitPlaybackStage, type PlaybackStageReporter } from './stage_feedback';
 
 interface GuildLike {
   id: string;
@@ -34,7 +34,10 @@ interface PlayerLike {
 }
 
 interface YouTubeExtractorLike {
-  extractAudio(url: string): Promise<ExtractedTrackData>;
+  extractAudio(
+    url: string,
+    options?: { priority?: 'foreground' | 'background'; source?: string; onStage?: PlaybackStageReporter },
+  ): Promise<ExtractedTrackData>;
 }
 
 interface PlayerServiceLike {
@@ -150,6 +153,7 @@ async function playYouTubeUrl({
   playerService,
   url,
   requestedBy,
+  onStage,
 }: PlayUrlOptions): Promise<CoordinatorResult> {
   const guildId = getGuildId(interaction);
   const channelId = getChannelId(interaction);
@@ -172,6 +176,14 @@ async function playYouTubeUrl({
   }
 
   try {
+    const reportStage = (
+      stage: Parameters<typeof emitPlaybackStage>[1],
+      details?: Parameters<typeof emitPlaybackStage>[2],
+    ) => {
+      emitPlaybackStage(onStage, stage, details);
+    };
+    reportStage('preparing');
+
     const player = playerService.getPlayer(guildId);
     const totalStartedAt = Date.now();
     const timings: Record<string, number> = {};
@@ -214,7 +226,15 @@ async function playYouTubeUrl({
       !player.voiceConnection ||
       player.voiceConnection.joinConfig?.channelId !== targetChannelId;
 
-    const extractionPromise = timed('extractionMs', ytExtractor.extractAudio(url));
+    reportStage('extracting');
+    const extractionPromise = timed('extractionMs', ytExtractor.extractAudio(url, {
+      priority: 'foreground',
+      source: 'playback',
+      onStage,
+    }));
+    if (needsVoiceJoin) {
+      reportStage('joining_voice');
+    }
     const joinPromise = needsVoiceJoin
       ? timed('voiceJoinMs', player.joinVoiceChannel(voiceChannel))
       : Promise.resolve(true);
@@ -234,11 +254,13 @@ async function playYouTubeUrl({
       ) {
         player.leaveVoiceChannel?.();
       }
+      reportStage('failed', { stage: 'extraction' });
       logTiming(false, { failedStage: 'extraction' });
       return { success: false, error: extractionResult.error.message };
     }
 
     if (!joinResult.ok || !joinResult.value) {
+      reportStage('failed', { stage: 'voiceJoin' });
       logTiming(false, { failedStage: 'voiceJoin' });
       return { success: false, error: 'Failed to join voice channel' };
     }
@@ -248,21 +270,27 @@ async function playYouTubeUrl({
     const track = await playerService.addTrack(guildId, videoData, getRequestedBy(interaction, requestedBy));
     timings.queueAddMs = Date.now() - queueStartedAt;
     if (!track) {
+      reportStage('failed', { stage: 'queueAdd' });
       logTiming(false, { failedStage: 'queueAdd' });
       return { success: false, error: 'Failed to add track to queue' };
     }
+    reportStage('queued');
 
     playerService.setUIContext(guildId, channelId);
     if (!player.isPlaying && !player.isPaused) {
       const playbackStartedAt = Date.now();
+      reportStage('starting_playback');
       const playSuccess = await playerService.play(guildId);
       timings.playbackStartMs = Date.now() - playbackStartedAt;
       if (!playSuccess) {
+        reportStage('failed', { stage: 'playbackStart' });
         logTiming(false, { failedStage: 'playbackStart' });
         return { success: false, error: 'Failed to start playback' };
       }
+      reportStage('playing');
     } else {
       playerService.notifyState(guildId);
+      reportStage('playing');
     }
 
     logTiming(true);

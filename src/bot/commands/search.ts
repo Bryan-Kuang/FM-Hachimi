@@ -9,6 +9,7 @@ import EmbedBuilders = require('../../ui/embeds');
 import ButtonBuilders = require('../../ui/buttons');
 import SearchService = require('../../search/search_service');
 import BilibiliUrls = require('../../search/bilibili_urls');
+import YouTubeUrls = require('../../search/youtube_urls');
 import * as logger from '../../services/logger_service';
 
 const createSearchCommand = (playbackService: any) => ({
@@ -89,6 +90,14 @@ const createSearchCommand = (playbackService: any) => ({
         const payload: Record<string, unknown> = { embeds: [searchEmbed] };
         if (components.length > 0) payload.components = components;
         await interaction.editReply(payload);
+        playbackService.prewarmYouTubeUrls?.(
+          YouTubeUrls.collectYouTubeUrls(results, maxResults),
+          {
+            source: 'search_command',
+            guildId: interaction.guildId || interaction.guild?.id,
+            keyword,
+          },
+        );
 
         logger.info('Search command executed (YouTube)', {
           user: user.username,

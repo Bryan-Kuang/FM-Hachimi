@@ -10,6 +10,7 @@ import EmbedBuilders = require('../../ui/embeds');
 import ButtonBuilders = require('../../ui/buttons');
 import SearchService = require('../../search/search_service');
 import BilibiliUrls = require('../../search/bilibili_urls');
+import YouTubeUrls = require('../../search/youtube_urls');
 import PlaybackCoordinator = require('../../playback/playback_coordinator');
 import { createInteractionStageReporter } from '../../playback/stage_feedback';
 import * as logger from '../../services/logger_service';
@@ -59,13 +60,14 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
           return;
         }
 
-        await interaction.editReply({ content: '🎬 Extracting YouTube audio...' });
-
+        const stageReporter = createInteractionStageReporter(interaction, 'YouTube');
         const result = await PlaybackCoordinator.playYouTubeUrl({
           interaction,
           playerService: playbackService,
           url:           route.normalizedUrl || route.raw,
+          onStage:       stageReporter,
         });
+        await stageReporter.finish();
         if (!result.success) {
           const msg = result.error || '';
           if (msg.includes('cookies expired')) {
@@ -169,6 +171,14 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
 
       playbackService.prewarmBilibiliUrls?.(
         BilibiliUrls.collectBilibiliUrls(biliResults, perPlatformLimit),
+        {
+          source: 'play_search',
+          guildId: interaction.guild.id,
+          keyword: query as string,
+        },
+      );
+      playbackService.prewarmYouTubeUrls?.(
+        YouTubeUrls.collectYouTubeUrls(ytResults, perPlatformLimit),
         {
           source: 'play_search',
           guildId: interaction.guild.id,

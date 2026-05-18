@@ -71,6 +71,9 @@ interface BilibiliConfig {
 
 interface YouTubeConfig {
   minExtractionIntervalMs: number;
+  preextractEnabled: boolean;
+  preextractConcurrency: number;
+  preextractMaxPerCardSet: number;
 }
 
 interface DailyHachimiConfig {
@@ -96,6 +99,12 @@ interface BotConfig {
   youtube: YouTubeConfig;
   dailyHachimi: DailyHachimiConfig;
   test: TestConfig;
+}
+
+function parseIntegerEnv(value: string | undefined, fallback: number): number {
+  if (value === undefined || value === "") return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 const config: BotConfig = {
@@ -202,9 +211,12 @@ const config: BotConfig = {
     hachimiMinDurationSec: parseInt(process.env.HACHIMI_MIN_DURATION_SEC!) || 60,   // 1 min
   },
   youtube: {
-    // Minimum delay between consecutive yt-dlp calls. Prevents burst requests
-    // when queuing multiple YouTube videos, which burns cookies faster.
-    minExtractionIntervalMs: parseInt(process.env.YOUTUBE_MIN_EXTRACTION_INTERVAL_MS!) || 2000,
+    // Extraction delay is intentionally disabled for now. Keep the field so
+    // logs can prove rateLimitWaitMs stays 0 while we watch production.
+    minExtractionIntervalMs: Math.max(0, parseIntegerEnv(process.env.YOUTUBE_MIN_EXTRACTION_INTERVAL_MS, 0)),
+    preextractEnabled: process.env.YOUTUBE_PREEXTRACT_ENABLED !== "false",
+    preextractConcurrency: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_PREEXTRACT_CONCURRENCY, 1)),
+    preextractMaxPerCardSet: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_PREEXTRACT_MAX_PER_CARD_SET, 3)),
   },
   dailyHachimi: {
     dataFile: process.env.DAILY_HACHIMI_DATA_FILE

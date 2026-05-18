@@ -87,4 +87,73 @@ describe("PreExtractionService", () => {
 
     expect(extractor.extractAudio).toHaveBeenCalledTimes(1);
   });
+
+  test("prewarms top three YouTube URLs only in the test guild", async () => {
+    const youtubeExtractor = {
+      extractAudio: jest.fn().mockResolvedValue({ title: "prewarmed youtube" }),
+    };
+    const service = new PreExtractionService({
+      bilibiliExtractor: { extractAudio: jest.fn() },
+      youtubeExtractor,
+      enabled: true,
+      youtubeEnabled: true,
+      youtubeConcurrency: 1,
+      youtubeMaxPerCardSet: 3,
+    });
+
+    const summary = service.prewarmYouTubeUrls([
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "https://youtu.be/abcdefghijk",
+      "https://www.youtube.com/shorts/ABCDEFGHIJK",
+      "https://www.youtube.com/watch?v=LMNOPQRSTUV",
+      "not a url",
+    ], { source: "play_search", guildId: "1376318047794761838", keyword: "hachimi" });
+
+    expect(summary).toMatchObject({ queued: 3, skipped: 2 });
+    await flushPromises();
+    await flushPromises();
+    await flushPromises();
+    await flushPromises();
+
+    expect(youtubeExtractor.extractAudio).toHaveBeenCalledTimes(3);
+    expect(youtubeExtractor.extractAudio).toHaveBeenNthCalledWith(
+      1,
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      expect.objectContaining({ priority: "background", source: "play_search" }),
+    );
+    expect(youtubeExtractor.extractAudio).toHaveBeenNthCalledWith(
+      2,
+      "https://www.youtube.com/watch?v=abcdefghijk",
+      expect.objectContaining({ priority: "background", source: "play_search" }),
+    );
+    expect(youtubeExtractor.extractAudio).toHaveBeenNthCalledWith(
+      3,
+      "https://www.youtube.com/watch?v=ABCDEFGHIJK",
+      expect.objectContaining({ priority: "background", source: "play_search" }),
+    );
+  });
+
+  test("does not prewarm YouTube URLs outside the test guild", async () => {
+    const youtubeExtractor = {
+      extractAudio: jest.fn().mockResolvedValue({}),
+    };
+    const service = new PreExtractionService({
+      bilibiliExtractor: { extractAudio: jest.fn() },
+      youtubeExtractor,
+      enabled: true,
+      youtubeEnabled: true,
+      youtubeConcurrency: 1,
+      youtubeMaxPerCardSet: 3,
+    });
+
+    const summary = service.prewarmYouTubeUrls([
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "https://youtu.be/abcdefghijk",
+    ], { source: "search_command", guildId: "guild-1", keyword: "hachimi" });
+
+    expect(summary).toMatchObject({ queued: 0, skipped: 2 });
+    await flushPromises();
+
+    expect(youtubeExtractor.extractAudio).not.toHaveBeenCalled();
+  });
 });

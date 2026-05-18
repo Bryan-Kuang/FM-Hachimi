@@ -77,7 +77,10 @@ describe("PlaybackCoordinator", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(playerService._youtubeExtractor.extractAudio).toHaveBeenCalledWith("https://youtube.com/watch?v=abc");
+    expect(playerService._youtubeExtractor.extractAudio).toHaveBeenCalledWith(
+      "https://youtube.com/watch?v=abc",
+      expect.objectContaining({ priority: "foreground", source: "playback" }),
+    );
     expect(playerService._player.joinVoiceChannel).toHaveBeenCalledWith({ id: "voice-1" });
     expect(playerService.addTrack).toHaveBeenCalledWith(
       "guild-1",
@@ -105,7 +108,10 @@ describe("PlaybackCoordinator", () => {
 
     await Promise.resolve();
 
-    expect(playerService._youtubeExtractor.extractAudio).toHaveBeenCalledWith("https://youtube.com/watch?v=abc");
+    expect(playerService._youtubeExtractor.extractAudio).toHaveBeenCalledWith(
+      "https://youtube.com/watch?v=abc",
+      expect.objectContaining({ priority: "foreground", source: "playback" }),
+    );
     expect(playerService._player.joinVoiceChannel).toHaveBeenCalledWith({ id: "voice-1" });
     expect(playerService.addTrack).not.toHaveBeenCalled();
 
@@ -163,5 +169,32 @@ describe("PlaybackCoordinator", () => {
     expect(result.success).toBe(true);
     expect(playerService.play).not.toHaveBeenCalled();
     expect(playerService.notifyState).toHaveBeenCalledWith("guild-1");
+  });
+
+  test("YouTube playback emits private progress stages", async () => {
+    const coordinator = PlaybackCoordinator();
+    const playerService = makePlayerService();
+    const stages = [];
+
+    const result = await coordinator.playYouTubeUrl({
+      interaction: makeInteraction(),
+      playerService,
+      url: "https://youtube.com/watch?v=abc",
+      onStage: (stage) => stages.push(stage),
+    });
+
+    expect(result.success).toBe(true);
+    expect(stages).toEqual(expect.arrayContaining([
+      "preparing",
+      "extracting",
+      "joining_voice",
+      "queued",
+      "starting_playback",
+      "playing",
+    ]));
+    expect(playerService._youtubeExtractor.extractAudio).toHaveBeenCalledWith(
+      "https://youtube.com/watch?v=abc",
+      expect.objectContaining({ onStage: expect.any(Function) }),
+    );
   });
 });
