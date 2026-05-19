@@ -76,8 +76,8 @@ describe("/play dual-platform keyword search limits", () => {
     }));
     const ytResults = Array.from({ length: 8 }, (_, index) => ({
       title: `YouTube ${index}`,
-      id: `ytid00000${index}`,
-      url: `https://www.youtube.com/watch?v=dQw4w9WgX${index}`,
+      id: `ytid000000${index}`,
+      url: `https://www.youtube.com/watch?v=ytid000000${index}`,
       uploader: "YouTube Uploader",
       duration: 120 + index,
     }));
@@ -120,8 +120,8 @@ describe("/play dual-platform keyword search limits", () => {
     );
     expect(playbackService.prewarmYouTubeUrls).toHaveBeenCalledWith(
       expect.arrayContaining([
-        "https://www.youtube.com/watch?v=dQw4w9WgX0",
-        "https://www.youtube.com/watch?v=dQw4w9WgX1",
+        "https://www.youtube.com/watch?v=ytid0000000",
+        "https://www.youtube.com/watch?v=ytid0000001",
       ]),
       expect.objectContaining({
         source: "play_search",
@@ -181,5 +181,40 @@ describe("/play dual-platform keyword search limits", () => {
     expect(ytDisplayed).toHaveLength(5);
     expect(biliDisplayed.map(result => result.title)).toContain("完全无关 0");
     expect(ytDisplayed.map(result => result.title)).toContain("Unrelated 0");
+  });
+
+  test("normalizes bare YouTube IDs before scheduling pre-extraction", async () => {
+    bilibiliApi.searchVideos.mockResolvedValue([]);
+    const ytExtractor = {
+      searchVideos: jest.fn().mockResolvedValue({
+        success: true,
+        results: [
+          {
+            title: "Bare ID result",
+            id: "U8suvHwuSkE",
+            url: "U8suvHwuSkE",
+            uploader: "YouTube Uploader",
+            duration: 24,
+          },
+        ],
+      }),
+    };
+    const playbackService = {
+      getYouTubeExtractor: jest.fn().mockReturnValue(ytExtractor),
+      prewarmBilibiliUrls: jest.fn(),
+      prewarmYouTubeUrls: jest.fn(),
+    };
+    const command = createPlayCommand(playbackService, {});
+
+    await command.execute(makeInteraction());
+
+    expect(playbackService.prewarmYouTubeUrls).toHaveBeenCalledWith(
+      ["https://www.youtube.com/watch?v=U8suvHwuSkE"],
+      expect.objectContaining({
+        source: "play_search",
+        guildId: "guild-1",
+        keyword: "hachimi",
+      }),
+    );
   });
 });
