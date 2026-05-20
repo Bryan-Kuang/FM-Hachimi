@@ -132,7 +132,7 @@ describe("/search result relevance ranking", () => {
           {
             title: "哈基米无止境电台",
             id: "ytidtarget1",
-            url: "https://www.youtube.com/watch?v=ytidtarget1",
+            url: "ytidtarget1",
             duration: 185,
           },
         ],
