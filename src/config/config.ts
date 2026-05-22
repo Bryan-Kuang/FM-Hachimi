@@ -70,7 +70,6 @@ interface BilibiliConfig {
 }
 
 interface YouTubeConfig {
-  minExtractionIntervalMs: number;
   preextractEnabled: boolean;
   preextractConcurrency: number;
   preextractMaxPerCardSet: number;
@@ -211,9 +210,6 @@ const config: BotConfig = {
     hachimiMinDurationSec: parseInt(process.env.HACHIMI_MIN_DURATION_SEC!) || 60,   // 1 min
   },
   youtube: {
-    // Extraction delay is intentionally disabled for now. Keep the field so
-    // logs can prove rateLimitWaitMs stays 0 while we watch production.
-    minExtractionIntervalMs: Math.max(0, parseIntegerEnv(process.env.YOUTUBE_MIN_EXTRACTION_INTERVAL_MS, 0)),
     preextractEnabled: process.env.YOUTUBE_PREEXTRACT_ENABLED !== "false",
     preextractConcurrency: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_PREEXTRACT_CONCURRENCY, 1)),
     preextractMaxPerCardSet: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_PREEXTRACT_MAX_PER_CARD_SET, 3)),
