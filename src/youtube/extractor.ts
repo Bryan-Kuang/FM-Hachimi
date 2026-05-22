@@ -9,7 +9,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as logger from '../services/logger_service';
-import config = require('../config/config');
 import YouTubeValidator = require('./validator');
 import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage_feedback';
 
@@ -120,9 +119,6 @@ class YouTubeExtractor {
   private _maxCacheSize: number;
   private _cacheCleanupInterval: NodeJS.Timeout | null;
 
-  // Rate limiter — prevents burst yt-dlp requests that burn cookies
-  private _lastExtractionTime: number;
-
   constructor() {
     this.userAgent =
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -137,9 +133,6 @@ class YouTubeExtractor {
     this._cacheCleanupInterval = setInterval(() => {
       this._cleanupExpiredCache();
     }, 10 * 60 * 1000).unref();
-
-    // Rate limiter
-    this._lastExtractionTime = 0;
   }
 
   /** Clean up expired cache entries and enforce size limit. */
@@ -176,25 +169,6 @@ class YouTubeExtractor {
       this._ytdlpChecked = true;
     }
     return { ytdlpAvailable };
-  }
-
-  /** Wait for the rate limiter cooldown before the next yt-dlp call. */
-  private async _waitForRateLimit(): Promise<number> {
-    const minInterval = config.youtube.minExtractionIntervalMs;
-    if (minInterval <= 0) {
-      return 0;
-    }
-
-    const elapsed = Date.now() - this._lastExtractionTime;
-    if (elapsed < minInterval) {
-      const wait = minInterval - elapsed;
-      logger.info('YouTube extraction rate limit applied', { waitMs: wait });
-      await new Promise(resolve => setTimeout(resolve, wait));
-      this._lastExtractionTime = Date.now();
-      return wait;
-    }
-    this._lastExtractionTime = Date.now();
-    return 0;
   }
 
   /**
@@ -311,7 +285,6 @@ class YouTubeExtractor {
         this.logExtractionTiming({
           cacheHit: true,
           joinedInFlight: false,
-          rateLimitWaitMs: 0,
           ytdlpMs: 0,
           parseMs: 0,
           totalMs: Date.now() - totalStartedAt,
@@ -336,7 +309,6 @@ class YouTubeExtractor {
           this.logExtractionTiming({
             cacheHit: false,
             joinedInFlight: true,
-            rateLimitWaitMs: 0,
             ytdlpMs: 0,
             parseMs: 0,
             totalMs: Date.now() - joinedStartedAt,
@@ -376,9 +348,6 @@ class YouTubeExtractor {
     options: ResolvedExtractionOptions,
   ): Promise<ExtractedAudio> {
     try {
-      // Rate limit — wait if too soon after last extraction
-      const rateLimitWaitMs = await this._waitForRateLimit() ?? 0;
-
       const { metadata, audioUrl, selectedFormat, ytdlpMs, parseMs } =
         await this.extractMetadataAndUrl(normalizedUrl);
 
@@ -408,7 +377,6 @@ class YouTubeExtractor {
       this.logExtractionTiming({
         cacheHit: false,
         joinedInFlight: false,
-        rateLimitWaitMs,
         ytdlpMs,
         parseMs,
         totalMs: Date.now() - totalStartedAt,
@@ -434,7 +402,6 @@ class YouTubeExtractor {
    * Get audio stream URL only (for CDN URL refresh on stale tracks).
    */
   async getAudioStreamUrl(url: string): Promise<string> {
-    await this._waitForRateLimit();
     return new Promise((resolve, reject) => {
       const args = [
         '--get-url',
@@ -691,7 +658,6 @@ class YouTubeExtractor {
   private logExtractionTiming(timing: {
     cacheHit: boolean;
     joinedInFlight?: boolean;
-    rateLimitWaitMs: number;
     ytdlpMs: number;
     parseMs: number;
     totalMs: number;

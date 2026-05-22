@@ -62,14 +62,13 @@ describe("YouTubeExtractor extraction cache behavior", () => {
     jest.clearAllMocks();
     extractor = new YouTubeExtractor();
     extractor._ytdlpChecked = true;
-    extractor._waitForRateLimit = jest.fn().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     extractor.destroy();
   });
 
-  test("duplicate in-flight extractions share one yt-dlp process and one rate-limit wait", async () => {
+  test("duplicate in-flight extractions share one yt-dlp process", async () => {
     spawn.mockImplementation(() => createMockProcess({
       stdout: youtubeJson("dQw4w9WgXcQ", "Shared YouTube"),
       exitCode: 0,
@@ -83,10 +82,9 @@ describe("YouTubeExtractor extraction cache behavior", () => {
     expect(first.title).toBe("Shared YouTube");
     expect(second.title).toBe("Shared YouTube");
     expect(spawn).toHaveBeenCalledTimes(1);
-    expect(extractor._waitForRateLimit).toHaveBeenCalledTimes(1);
   });
 
-  test("separate uncached YouTube URLs still pass through the rate limiter", async () => {
+  test("separate uncached YouTube URLs spawn independent yt-dlp processes without limiter state", async () => {
     spawn
       .mockImplementationOnce(() => createMockProcess({
         stdout: youtubeJson("dQw4w9WgXcQ", "First YouTube"),
@@ -101,37 +99,8 @@ describe("YouTubeExtractor extraction cache behavior", () => {
     await extractor.extractAudio("https://www.youtube.com/watch?v=abcdefghijk");
 
     expect(spawn).toHaveBeenCalledTimes(2);
-    expect(extractor._waitForRateLimit).toHaveBeenCalledTimes(2);
-  });
-
-  test("uncached YouTube extraction does not wait on the disabled limiter", async () => {
-    extractor._waitForRateLimit = YouTubeExtractor.prototype._waitForRateLimit.bind(extractor);
-    extractor._lastExtractionTime = Date.now();
-    spawn.mockImplementation(() => createMockProcess({
-      stdout: youtubeJson("dQw4w9WgXcQ", "No Wait YouTube"),
-      exitCode: 0,
-    }));
-
-    const extraction = extractor.extractAudio("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
-
-    await expect(resolveWithin(extraction)).resolves.toBe("done");
-    expect(logger.info).toHaveBeenCalledWith("YouTube extraction timing", expect.objectContaining({
-      cacheHit: false,
-      rateLimitWaitMs: 0,
-    }));
-  });
-
-  test("YouTube stream URL refresh does not wait on the disabled limiter", async () => {
-    extractor._waitForRateLimit = YouTubeExtractor.prototype._waitForRateLimit.bind(extractor);
-    extractor._lastExtractionTime = Date.now();
-    spawn.mockImplementation(() => createMockProcess({
-      stdout: "https://youtube.cdn/fresh.m4a\n",
-      exitCode: 0,
-    }));
-
-    const refresh = extractor.getAudioStreamUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
-
-    await expect(resolveWithin(refresh)).resolves.toBe("done");
+    expect(extractor).not.toHaveProperty("_waitForRateLimit");
+    expect(extractor).not.toHaveProperty("_lastExtractionTime");
   });
 
   test("same-URL foreground extraction joins an in-flight background extraction", async () => {
@@ -177,7 +146,6 @@ describe("YouTubeExtractor extraction cache behavior", () => {
   });
 
   test("preserves selected format metadata and logs uncached extraction timing", async () => {
-    extractor._waitForRateLimit = jest.fn().mockResolvedValue(250);
     spawn.mockImplementation(() => createMockProcess({
       stdout: youtubeJson("dQw4w9WgXcQ", "Timed YouTube"),
       exitCode: 0,
@@ -193,7 +161,6 @@ describe("YouTubeExtractor extraction cache behavior", () => {
     });
     expect(logger.info).toHaveBeenCalledWith("YouTube extraction timing", expect.objectContaining({
       cacheHit: false,
-      rateLimitWaitMs: 250,
       ytdlpMs: expect.any(Number),
       parseMs: expect.any(Number),
       totalMs: expect.any(Number),
@@ -202,6 +169,8 @@ describe("YouTubeExtractor extraction cache behavior", () => {
       audioCodec: "mp4a.40.2",
       videoCodec: "none",
     }));
+    const timingCall = logger.info.mock.calls.find(([message]) => message === "YouTube extraction timing");
+    expect(timingCall[1]).not.toHaveProperty("rateLimitWaitMs");
   });
 
   test("logs cache-hit extraction timing without spawning yt-dlp again", async () => {

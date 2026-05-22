@@ -80,7 +80,6 @@ function benchmark({ name, url, format, extraArgs = [] }) {
     success: true,
     elapsedMs,
     cacheHit: false,
-    rateLimitWaitMs: 0,
     ...selectedFormat(videoData),
   };
 }
@@ -94,7 +93,6 @@ function printResult(result) {
     return;
   }
   console.log(`  cacheHit: ${result.cacheHit}`);
-  console.log(`  rateLimitWaitMs: ${result.rateLimitWaitMs}`);
   console.log(`  formatId: ${result.formatId || "unknown"}`);
   console.log(`  protocol: ${result.protocol || "unknown"}`);
   console.log(`  audioCodec: ${result.audioCodec || "unknown"}`);
