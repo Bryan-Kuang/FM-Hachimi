@@ -1,7 +1,7 @@
 {
-  "name": "bilibili-discord-bot",
+  "name": "fm-hachimi",
   "version": "1.0.0",
-  "description": "Discord bot for streaming Bilibili video audio",
+  "description": "F.M. Hachimi — Discord music bot for Bilibili and YouTube audio playback",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -75,10 +75,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/bilibili-discord-bot.git"
+    "url": "https://github.com/Bryan-Kuang/FM-Hachimi.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/bilibili-discord-bot/issues"
+    "url": "https://github.com/Bryan-Kuang/FM-Hachimi/issues"
   },
-  "homepage": "https://github.com/yourusername/bilibili-discord-bot#readme"
+  "homepage": "https://github.com/Bryan-Kuang/FM-Hachimi#readme"
 }
