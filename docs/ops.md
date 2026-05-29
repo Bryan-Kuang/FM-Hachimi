@@ -58,7 +58,21 @@ Full authoring and graduation rules live in [`testing-features.md`](testing-feat
 
 ## Cookies
 
-YouTube usually needs cookies on cloud servers. Export cookies from a browser session on your own machine:
+YouTube usually needs cookies on cloud servers. Refresh and upload the YouTube cookie file from a browser session on your own machine:
+
+```bash
+bash scripts/refresh-youtube-cookies.sh
+```
+
+The script exports cookies through `yt-dlp` and uploads `youtube_cookies.txt` to the VPS. It deliberately uses `https://www.youtube.com/robots.txt` during export, so the refresh flow is not blocked by local playback extraction failures.
+
+If YouTube reports that the browser cookies were rotated or expired, use yt-dlp's recommended private-session flow: open a private/incognito browser window, sign in to YouTube, open `https://www.youtube.com/robots.txt`, export YouTube cookies in Netscape format to `youtube_cookies.txt`, close the private window, then upload the existing file:
+
+```bash
+UPLOAD_ONLY=true bash scripts/refresh-youtube-cookies.sh
+```
+
+If you only need a local export, run:
 
 ```bash
 yt-dlp --cookies-from-browser chrome \

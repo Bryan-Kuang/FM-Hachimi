@@ -115,7 +115,10 @@ function main() {
         name: "youtube",
         url: youtubeUrl,
         format: YOUTUBE_AUDIO_FORMAT_SELECTOR,
-        extraArgs: cookieCopy ? ["--cookies", cookieCopy] : [],
+        extraArgs: [
+          "--js-runtimes", "node",
+          ...(cookieCopy ? ["--cookies", cookieCopy] : []),
+        ],
       }),
     ];
 

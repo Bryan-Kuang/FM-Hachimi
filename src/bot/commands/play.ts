@@ -72,7 +72,7 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
           const msg = result.error || '';
           if (msg.includes('cookies expired')) {
             await interaction.editReply({
-              content: '🔒 YouTube cookies expired. Ask the bot admin to run `bash scripts/refresh-cookies.sh`',
+              content: '🔒 YouTube cookies expired. Ask the bot admin to run `bash scripts/refresh-youtube-cookies.sh`',
             });
           } else if (msg.includes('unavailable') || msg.includes('private')) {
             await interaction.editReply({ content: '⚠️ Video is unavailable or private' });

@@ -37,6 +37,34 @@ describe("beginner setup scripts", () => {
     expect(missing).toEqual([]);
   });
 
+  test("cookie refresh guidance points to existing scripts", () => {
+    const refreshScript = path.join(root, "scripts/refresh-youtube-cookies.sh");
+    const compatibilityScript = path.join(root, "scripts/refresh-cookies.sh");
+    const sourceFiles = [
+      path.join(root, "src/youtube/extractor.ts"),
+      path.join(root, "src/bot/commands/play.ts"),
+    ];
+
+    expect(fs.existsSync(refreshScript)).toBe(true);
+    expect(fs.existsSync(compatibilityScript)).toBe(true);
+
+    for (const sourceFile of sourceFiles) {
+      const content = fs.readFileSync(sourceFile, "utf8");
+      expect(content).toContain("bash scripts/refresh-youtube-cookies.sh");
+    }
+  });
+
+  test("YouTube cookie refresh avoids playback extraction during export", () => {
+    const refreshScript = fs.readFileSync(path.join(root, "scripts/refresh-youtube-cookies.sh"), "utf8");
+
+    expect(refreshScript).toContain("UPLOAD_ONLY");
+    expect(refreshScript).toContain("https://www.youtube.com/");
+    expect(refreshScript).toContain("youtubetab:skip=authcheck");
+    expect(refreshScript).toContain("--flat-playlist");
+    expect(refreshScript).toContain("--playlist-items 0");
+    expect(refreshScript).not.toContain("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  });
+
   test("docker compose files are rooted at the project and use the same Node major", () => {
     const prodCompose = fs.readFileSync(path.join(root, "docker-compose.yml"), "utf8");
     const devCompose = fs.readFileSync(path.join(root, "docker-compose.dev.yml"), "utf8");
