@@ -62,7 +62,21 @@ DEPLOY_LEGACY_GUILD_COMMANDS=true npm run deploy:commands
 
 ## Refresh Cookies
 
-YouTube playback often needs browser cookies on cloud servers. Export cookies locally:
+YouTube playback often needs browser cookies on cloud servers. The usual refresh path is:
+
+```bash
+bash scripts/refresh-youtube-cookies.sh
+```
+
+That script exports cookies through `yt-dlp` and uploads `youtube_cookies.txt` to the VPS. It uses YouTube's `robots.txt` page during export so a stale local `yt-dlp` playback extractor will not block the cookie upload.
+
+If YouTube says the browser cookies were rotated or expired, use the more reliable private-session flow recommended by yt-dlp: open a private/incognito browser window, sign in to YouTube, open `https://www.youtube.com/robots.txt` in that same private session, export the YouTube cookies in Netscape format to `youtube_cookies.txt`, close the private window, then upload the file:
+
+```bash
+UPLOAD_ONLY=true bash scripts/refresh-youtube-cookies.sh
+```
+
+If you only need to export cookies locally, run:
 
 ```bash
 yt-dlp --cookies-from-browser chrome \

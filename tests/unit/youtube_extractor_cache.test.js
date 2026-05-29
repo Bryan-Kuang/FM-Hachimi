@@ -143,6 +143,18 @@ describe("YouTubeExtractor extraction cache behavior", () => {
     const args = spawn.mock.calls[0][1];
     expect(args[args.indexOf("--format") + 1])
       .toBe("bestaudio[vcodec=none][protocol^=http][acodec!=none]/bestaudio[vcodec=none][acodec!=none]/best[height<=360][protocol^=http][acodec!=none]/best[height<=360][protocol=m3u8_native][acodec!=none]/best[height<=360][acodec!=none]/worst[acodec!=none]");
+    expect(args[args.indexOf("--js-runtimes") + 1]).toBe("node");
+  });
+
+  test("bot-detection errors point admins to the YouTube cookie refresh script", async () => {
+    spawn.mockImplementation(() => createMockProcess({
+      stderr: "Sign in to confirm you're not a bot",
+      exitCode: 1,
+    }));
+
+    await expect(
+      extractor.extractAudio("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+    ).rejects.toThrow("bash scripts/refresh-youtube-cookies.sh");
   });
 
   test("preserves selected format metadata and logs uncached extraction timing", async () => {

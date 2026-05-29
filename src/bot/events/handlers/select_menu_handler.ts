@@ -595,7 +595,7 @@ async function handlePlaySearch(interaction: any, customId: string, playerServic
     const msg = (innerError as Error).message || '';
     let content = 'An error occurred while adding the video.';
     if (msg.includes('cookies expired')) {
-      content = '🔒 YouTube cookies expired. Ask the bot admin to refresh cookies.';
+      content = '🔒 YouTube cookies expired. Ask the bot admin to run `bash scripts/refresh-youtube-cookies.sh`.';
     }
 
     const errorEmbed = EmbedBuilders.createErrorEmbed('Error Adding Video', content, { suggestion: 'Please try again.' });

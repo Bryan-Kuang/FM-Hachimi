@@ -226,6 +226,7 @@ class YouTubeExtractor {
     return [
       '--no-check-certificate',
       '--no-warnings',
+      '--js-runtimes', 'node',
       '--user-agent', this.userAgent,
       ...this._getCookieArgs(),
     ];
@@ -565,7 +566,7 @@ class YouTubeExtractor {
           }
           let errorMessage = `yt-dlp exited with code ${code}`;
           if (stderr.includes('Sign in to confirm') || stderr.includes('not a bot')) {
-            errorMessage = 'YouTube cookies expired. Run: bash scripts/refresh-cookies.sh';
+            errorMessage = 'YouTube cookies expired. Run: bash scripts/refresh-youtube-cookies.sh';
           } else if (stderr.includes('Video unavailable') || stderr.includes('Private video')) {
             errorMessage = 'Video is unavailable or private';
           } else if (stderr.includes('Sign in to confirm your age')) {
