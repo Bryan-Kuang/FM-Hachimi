@@ -75,6 +75,11 @@ interface YouTubeConfig {
   preextractMaxPerCardSet: number;
 }
 
+interface RadioConfig {
+  enabled: boolean;
+  replenishMaxAttempts: number;
+}
+
 interface DailyHachimiConfig {
   dataFile: string;
   historyFile: string;
@@ -96,6 +101,7 @@ interface BotConfig {
   ui: UiConfig;
   bilibili: BilibiliConfig;
   youtube: YouTubeConfig;
+  radio: RadioConfig;
   dailyHachimi: DailyHachimiConfig;
   test: TestConfig;
 }
@@ -213,6 +219,13 @@ const config: BotConfig = {
     preextractEnabled: process.env.YOUTUBE_PREEXTRACT_ENABLED !== "false",
     preextractConcurrency: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_PREEXTRACT_CONCURRENCY, 1)),
     preextractMaxPerCardSet: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_PREEXTRACT_MAX_PER_CARD_SET, 3)),
+  },
+  radio: {
+    // /radio endless Hachimi playback. When false the command refuses to start.
+    enabled: process.env.RADIO_ENABLED !== "false",
+    // How many random candidates radio will try to extract before giving up on
+    // fetching the next track (each attempt re-rolls a fresh random video).
+    replenishMaxAttempts: parseIntegerEnv(process.env.RADIO_REPLENISH_MAX_ATTEMPTS, 3),
   },
   dailyHachimi: {
     dataFile: process.env.DAILY_HACHIMI_DATA_FILE

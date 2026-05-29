@@ -111,6 +111,7 @@ class InterfaceUpdater {
           queuePosition: (state.currentIndex >= 0 ? state.currentIndex + 1 : 0),
           totalQueue: state.queueLength,
           loopMode: state.loopMode,
+          radioMode: state.radioMode,
         },
       );
       const components = ButtonBuilders.createPlaybackControls({
@@ -185,6 +186,7 @@ class InterfaceUpdater {
       currentIndex: player.currentIndex,
       queueLength: player.queue ? player.queue.length : 0,  // queue.length works on both Queue class and raw array
       loopMode: player.loopMode,
+      radioMode: player.radioMode,
       hasPrevious: player.canGoBack(),
       hasNext: player.canSkip(),
     };

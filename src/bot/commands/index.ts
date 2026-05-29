@@ -10,6 +10,7 @@ import nowplaying = require('./nowplaying');
 import help = require('./help');
 import search = require('./search');
 import hachimi = require('./hachimi');
+import radio = require('./radio');
 import dailyHachimi = require('./daily_hachimi');
 
 interface CommandDefinition {
@@ -38,6 +39,7 @@ const commandFactories: CommandFactory[] = [
   help,
   search,
   hachimi,
+  radio,
   dailyHachimi,
 ];
 

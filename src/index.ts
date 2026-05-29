@@ -14,6 +14,7 @@ import InterfaceUpdater = require('./ui/interface_updater');
 import ProgressTracker = require('./ui/progress_tracker');
 import HistoryStore = require('./utils/history_store');
 import PlayerService = require('./services/player_service');
+import RadioService = require('./services/radio_service');
 import DailyHachimiService = require('./services/daily_hachimi_service');
 import PreExtractionService = require('./playback/pre_extraction_service');
 import * as logger from './services/logger_service';
@@ -93,6 +94,12 @@ class BilibiliDiscordBot {
         historyStore,
         preExtractionService,
       });
+
+      // Endless radio mode. Reuses bilibiliApi (random Hachimi search + history)
+      // and plays through the same playerService; attached so commands can reach
+      // it via playerService.getRadioService().
+      const radioService = new RadioService(playerService as any, bilibiliApi);
+      playerService.setRadioService(radioService as any);
 
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const config = require('./config/config') as any;
