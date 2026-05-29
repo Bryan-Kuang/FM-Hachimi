@@ -87,6 +87,14 @@ describe("start", () => {
     expect(w.service.isEnabled("g1")).toBe(true);
   });
 
+  test("does not manually notify state after play emits the radio card update", async () => {
+    const w = makeWorld();
+    const result = await w.service.start("g1", w.voiceChannel, "chan-1");
+
+    expect(result.success).toBe(true);
+    expect(w.playerService.notifyState).not.toHaveBeenCalled();
+  });
+
   test("the on-deck track stays hidden from the visible queue", async () => {
     const w = makeWorld();
     await w.service.start("g1", w.voiceChannel, "chan-1");
@@ -148,6 +156,17 @@ describe("advance hook", () => {
     expect(handled).toBe(true);
     expect(w.playerService.play).toHaveBeenCalledWith("g1");
     expect(w.player.queue.items).toHaveLength(1);
+  });
+
+  test("does not manually notify state after advancing because play emits the update", async () => {
+    const w = makeWorld();
+    await w.service.start("g1", w.voiceChannel, "chan-1");
+    await flush();
+    w.playerService.notifyState.mockClear();
+
+    await w.player.advanceHook();
+
+    expect(w.playerService.notifyState).not.toHaveBeenCalled();
   });
 
   test("ends radio when the next track cannot be fetched", async () => {

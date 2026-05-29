@@ -134,7 +134,16 @@ class InterfaceUpdater {
           } else {
             this.progressTracker.stopTracking(guildId);
           }
-        } catch (_e: unknown) {
+        } catch (e: unknown) {
+          if (state.radioMode) {
+            logger.warn('Radio play card edit failed; keeping existing card context', {
+              guildId,
+              messageId: ctx.messageId,
+              error: (e as Error).message,
+            });
+            this.progressTracker.stopTracking(guildId);
+            return;
+          }
           // Disable buttons on stale message to prevent ghost interactions
           try {
             await channel.messages.edit(ctx.messageId, { components: [] });
