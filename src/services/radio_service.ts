@@ -30,7 +30,6 @@ interface PlayerServiceLike {
   addTrack(guildId: string, videoOrUrl: ExtractedTrackData | string, requestedBy: string): Promise<unknown>;
   play(guildId: string): Promise<boolean>;
   setUIContext(guildId: string, channelId: string): void;
-  notifyState(guildId: string): void;
 }
 
 interface HachimiCandidate {
@@ -152,7 +151,6 @@ class RadioService {
       return { success: false, error: 'Failed to start playback.' };
     }
 
-    this.playerService.notifyState(guildId);
     this.prefetch(guildId);
 
     logger.info('Radio mode started', { guildId, channelId });
@@ -212,7 +210,6 @@ class RadioService {
       return false;
     }
 
-    this.playerService.notifyState(guildId);
     this.prefetch(guildId);
     return true;
   }
