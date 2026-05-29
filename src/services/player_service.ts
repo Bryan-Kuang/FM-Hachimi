@@ -35,6 +35,11 @@ interface PreExtractionServiceLike {
   ): unknown;
 }
 
+interface RadioServiceLike {
+  isEnabled(guildId: GuildId): boolean;
+  stop(guildId: GuildId): Promise<void>;
+}
+
 interface PlayerServiceDeps {
   audioManager: AudioManagerLike;
   interfaceUpdater: InterfaceUpdaterLike;
@@ -53,6 +58,8 @@ class PlayerService extends EventEmitter {
   private preExtractionService: PreExtractionServiceLike | null;
   /** Per-guild AbortControllers for running hachimi ops */
   private _hachimiControllers: Map<GuildId, AbortController>;
+  /** Endless radio controller, attached post-construction by the composition root. */
+  private radioService: RadioServiceLike | null;
 
   constructor({
     audioManager,
@@ -70,6 +77,15 @@ class PlayerService extends EventEmitter {
     this.youtubeExtractor    = youtubeExtractor || null;
     this.preExtractionService = preExtractionService || null;
     this._hachimiControllers = new Map();
+    this.radioService = null;
+  }
+
+  setRadioService(radioService: RadioServiceLike): void {
+    this.radioService = radioService;
+  }
+
+  getRadioService(): RadioServiceLike | null {
+    return this.radioService;
   }
 
   _setHachimiController(guildId: GuildId, controller: AbortController): void {
@@ -205,6 +221,7 @@ class PlayerService extends EventEmitter {
       metrics.counter('player_stop_total', 'Stop actions').inc({ guildId });
       this._hachimiControllers.get(guildId)?.abort();
       this._hachimiControllers.delete(guildId);
+      await this.radioService?.stop(guildId);
       const result = await this.audioManager.stopPlayback(guildId);
       if (result && result.player) {
         const state = result.player as AudioPlayerState;

@@ -241,6 +241,7 @@ class ProgressTracker {
           queuePosition: playerState.currentIndex + 1,
           totalQueue: playerState.queueLength,
           loopMode: playerState.loopMode,
+          radioMode: playerState.radioMode,
         },
       );
 

@@ -76,6 +76,7 @@ export interface PlayerState {
   currentIndex: number;
   queueLength: number;
   loopMode: string;
+  radioMode?: boolean;
   hasPrevious: boolean;
   hasNext: boolean;
 }

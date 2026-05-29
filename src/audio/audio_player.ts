@@ -101,6 +101,12 @@ class AudioPlayer {
   _trackEndInProgress: boolean;
   _inactivityTimer: ReturnType<typeof setTimeout> | null;
 
+  // Radio mode: when set, this hook decides advancement on track end / skip.
+  // It returns true if it took over (loaded + played the next track), in which
+  // case AudioPlayer skips its normal queue-advance logic. RadioService owns it.
+  advanceHook: (() => Promise<boolean>) | null;
+  radioMode: boolean;
+
   constructor(extractor?: ExtractorLike | null, platformExtractors: PlatformExtractors = {}) {
     this.extractor = extractor ?? platformExtractors.bilibili ?? null;
     this.extractorsByPlatform = {
@@ -127,6 +133,9 @@ class AudioPlayer {
     this._manualNavigating = false;
     this._trackEndInProgress = false;
     this._inactivityTimer = null;
+
+    this.advanceHook = null;
+    this.radioMode = false;
 
     this.setupAudioPlayerEvents();
   }
@@ -753,6 +762,21 @@ class AudioPlayer {
     this._accumulatedPlayMs = 0;
     this._currentPlayStartedAt = null;
 
+    // Radio mode owns advancement: it loads + plays the next random track
+    // itself. playCurrentTrack() (reached via the hook) clears
+    // _manualNavigating once the new resource starts.
+    if (this.advanceHook) {
+      try {
+        const handled = await this.advanceHook();
+        if (handled) return true;
+      } catch (error: any) {
+        logger.error('Radio advance hook failed, falling back to queue', {
+          error: error?.message,
+          guild: this.currentGuild,
+        });
+      }
+    }
+
     const { track, ended } = this.queue.advance();
 
     if (track && !ended) {
@@ -1017,6 +1041,7 @@ class AudioPlayer {
       hasNext: this.canSkip(),
       hasPrevious: this.canGoBack(),
       loopMode: this.loopMode,
+      radioMode: this.radioMode,
       volume: this.volume,
       connected: !!this.voiceConnection,
     };

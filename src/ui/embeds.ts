@@ -21,6 +21,7 @@ interface NowPlayingOptions {
   queuePosition?: number;
   totalQueue?: number;
   loopMode?: string;
+  radioMode?: boolean;
 }
 
 // Options for createQueueEmbed
@@ -81,13 +82,15 @@ class EmbedBuilders {
       isPlaying = true,
       queuePosition = 0,
       totalQueue = 0,
+      radioMode = false,
     } = options;
 
     const colors = {
       playing: 0x1DB954, // Spotify green
       paused: 0xFF6B35,  // Orange
     };
-    const statusText = isPlaying ? 'Now Playing' : 'Paused';
+    const playingLabel = radioMode ? '📻 Radio · Now Playing' : 'Now Playing';
+    const statusText = isPlaying ? playingLabel : 'Paused';
 
     const embed = new EmbedBuilder()
       .setColor(isPlaying ? colors.playing : colors.paused);
@@ -137,7 +140,8 @@ class EmbedBuilders {
       const empty = Math.max(0, BAR_WIDTH - filled);
       const progressBar = '█'.repeat(filled) + '░'.repeat(empty);
       // Append queue position to the right of the bar when info is available.
-      const queueTag = (queuePosition > 0 && totalQueue > 0)
+      // Radio mode is a live stream — never expose a queue/preload count.
+      const queueTag = (!radioMode && queuePosition > 0 && totalQueue > 0)
         ? `  ${queuePosition}/${totalQueue}`
         : '';
       embed.addFields({ name: 'Progress', value: progressBar + queueTag, inline: false });
