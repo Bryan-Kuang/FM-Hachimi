@@ -121,8 +121,25 @@ describe("command registry", () => {
       "radio",
       "daily-hachimi",
     ]);
-    expect(registry.getGlobalCommands(null, null).map((command) => command.data.name)).toEqual(names);
-    expect(registry.getTestingCommands(null, null)).toEqual([]);
+    expect(registry.getGlobalCommands(null, null).map((command) => command.data.name)).toEqual([
+      "play",
+      "pause",
+      "resume",
+      "skip",
+      "prev",
+      "stop",
+      "queue",
+      "nowplaying",
+      "help",
+      "search",
+      "hachimi",
+      "daily-hachimi",
+    ]);
+
+    const testingCommands = registry.getTestingCommands(null, null);
+    expect(testingCommands.map((command) => command.data.name)).toEqual(["radio"]);
+    expect(testingCommands[0].featureName).toBe("Radio mode");
+    expect(testingCommands[0].data.toJSON().description.startsWith("[Testing] ")).toBe(true);
   });
 
   test("prefixes testing command descriptions and keeps them within Discord limits", () => {

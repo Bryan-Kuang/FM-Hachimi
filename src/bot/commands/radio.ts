@@ -17,6 +17,8 @@ const createRadioCommand = (playbackService: any) => {
       .setDescription('📻 循环播放随机哈基米电台（再次使用 /radio 或 /stop 可关闭）'),
 
     cooldown: 10,
+    stage: 'testing' as const,
+    featureName: 'Radio mode',
 
     async execute(interaction: ChatInputCommandInteraction<'cached'>): Promise<void> {
       const member = interaction.member;
