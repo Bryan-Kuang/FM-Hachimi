@@ -11,6 +11,10 @@ import ButtonBuilders = require('../../../ui/buttons');
 import SearchService = require('../../../search/search_service');
 import PlaybackCoordinator = require('../../../playback/playback_coordinator');
 import { createInteractionStageReporter } from '../../../playback/stage_feedback';
+import {
+  RADIO_ONLY_STOP_MESSAGE,
+  isRadioBlockedSelect,
+} from '../../../playback/radio_controls';
 import * as logger from '../../../services/logger_service';
 import * as Lock from '../../../utils/lock';
 
@@ -21,6 +25,14 @@ function createSelectMenuHandler(playerService: any) {
   return async function handleSelectMenuInteraction(interaction: any): Promise<void> {
     try {
       const customId = interaction.customId as string;
+
+      if (isRadioBlockedSelect(customId) && isRadioMode(interaction, playerService)) {
+        await interaction.reply({
+          content: RADIO_ONLY_STOP_MESSAGE,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
 
       if (customId === 'queue_remove_select') {
         return await handleQueueRemove(interaction, playerService);
@@ -41,6 +53,17 @@ function createSelectMenuHandler(playerService: any) {
       await handleSelectMenuError(interaction, error as Error);
     }
   };
+}
+
+function isRadioMode(interaction: any, playerService: any): boolean {
+  const guildId = interaction.guild?.id;
+  if (!guildId || typeof playerService.getPlayer !== 'function') return false;
+
+  try {
+    return Boolean(playerService.getPlayer(guildId)?.radioMode);
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------

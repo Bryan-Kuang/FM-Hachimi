@@ -8,6 +8,11 @@
 import { EventEmitter } from 'events';
 import * as logger from './logger_service';
 import * as metrics from '../observability/metrics';
+import {
+  RADIO_ONLY_STOP_MESSAGE,
+  RADIO_ONLY_STOP_SUGGESTION,
+  isRadioBlockedButton,
+} from '../playback/radio_controls';
 import type Track from '../models/track';
 import type { GuildId, ChannelId, MessageId } from '../types';
 import type {
@@ -370,6 +375,14 @@ class PlayerService extends EventEmitter {
   async handleButtonInteraction(interaction: { customId: string; guild: { id: string }; channelId: string }): Promise<ButtonResult> {
     const customId = interaction.customId;
     const guildId  = interaction.guild.id;
+
+    if (isRadioBlockedButton(customId) && this.getPlayer(guildId).radioMode) {
+      return {
+        success: false,
+        error: RADIO_ONLY_STOP_MESSAGE,
+        suggestion: RADIO_ONLY_STOP_SUGGESTION,
+      };
+    }
 
     if (['pause_resume', 'skip', 'prev', 'stop'].includes(customId)) {
       this.setUIContext(guildId, interaction.channelId);

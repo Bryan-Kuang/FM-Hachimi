@@ -21,6 +21,7 @@ export interface AudioPlayerState {
   hasNext: boolean;
   hasPrevious: boolean;
   loopMode: string;
+  radioMode?: boolean;
   volume: number;
   connected: boolean;
 }
@@ -33,6 +34,7 @@ export interface AudioPlayerLike {
   currentTrack: Track | null;
   currentIndex: number;
   loopMode: string;
+  radioMode?: boolean;
   readonly queue: { items: Track[]; length: number };
 
   getState(): AudioPlayerState;
@@ -153,4 +155,5 @@ export interface StateChangedEvent {
 export interface ButtonResult {
   success: boolean;
   error?: string;
+  suggestion?: string;
 }

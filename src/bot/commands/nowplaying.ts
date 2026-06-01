@@ -42,6 +42,7 @@ const createNowPlayingCommand = (playbackService: any) => ({
         queuePosition: state.currentIndex + 1,
         totalQueue: state.queueLength,
         loopMode: state.loopMode,
+        radioMode: state.radioMode,
       });
 
       const components = ButtonBuilders.createPlaybackControls({
@@ -50,6 +51,7 @@ const createNowPlayingCommand = (playbackService: any) => ({
         canGoBack: player.canGoBack ? player.canGoBack() : false,
         canSkip: player.canSkip ? player.canSkip() : state.queueLength > 0,
         loopMode: state.loopMode,
+        radioMode: state.radioMode,
       });
 
       await interaction.reply({ embeds: [embed], components });
