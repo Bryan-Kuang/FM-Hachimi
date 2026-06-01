@@ -9,6 +9,11 @@
 import SessionManager = require('./session_manager');
 import * as logger from '../services/logger_service';
 import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage_feedback';
+import {
+  RADIO_ONLY_STOP_MESSAGE,
+  RADIO_ONLY_STOP_SUGGESTION,
+  isRadioBlockedButton,
+} from '../playback/radio_controls';
 
 // Discord interaction shapes used by this manager.
 // Full discord.js types are applied at the command layer (Task 13); keeping
@@ -646,6 +651,14 @@ class AudioManager {
 
     if (!guildId) {
       return { success: false, error: 'Not in a guild' };
+    }
+
+    if (isRadioBlockedButton(customId) && this.getPlayer(guildId).radioMode) {
+      return {
+        success: false,
+        error: RADIO_ONLY_STOP_MESSAGE,
+        suggestion: RADIO_ONLY_STOP_SUGGESTION,
+      };
     }
 
     switch (customId) {

@@ -13,6 +13,10 @@ import {
 import EmbedBuilders = require('../../../ui/embeds');
 import ButtonBuilders = require('../../../ui/buttons');
 import { createInteractionStageReporter } from '../../../playback/stage_feedback';
+import {
+  RADIO_ONLY_STOP_MESSAGE,
+  isRadioBlockedButton,
+} from '../../../playback/radio_controls';
 import * as logger from '../../../services/logger_service';
 
 /**
@@ -40,6 +44,10 @@ function createButtonHandler(playerService: any) {
         await interaction.deferUpdate();
       } else {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      }
+
+      if (isRadioBlockedButton(customId) && isRadioMode(interaction, playerService)) {
+        return await denyRadioControl(interaction, isControlButton);
       }
 
       // Check if user is in a voice channel for control buttons.
@@ -132,6 +140,29 @@ async function handleDailyPlay(interaction: any, customId: string, playerService
 
   await interaction.editReply({ content: '✅ 已加入队列！' });
   playerService.notifyState(interaction.guild.id);
+}
+
+function isRadioMode(interaction: any, playerService: any): boolean {
+  const guildId = interaction.guild?.id;
+  if (!guildId || typeof playerService.getPlayer !== 'function') return false;
+
+  try {
+    return Boolean(playerService.getPlayer(guildId)?.radioMode);
+  } catch {
+    return false;
+  }
+}
+
+async function denyRadioControl(interaction: any, isControlButton: boolean): Promise<void> {
+  if (isControlButton) {
+    await interaction.followUp({
+      content: RADIO_ONLY_STOP_MESSAGE,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  await interaction.editReply({ content: RADIO_ONLY_STOP_MESSAGE });
 }
 
 async function handleControlButton(interaction: any, customId: string, playerService: any): Promise<void> {

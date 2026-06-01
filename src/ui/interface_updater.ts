@@ -120,6 +120,7 @@ class InterfaceUpdater {
         canGoBack: state.hasPrevious,
         canSkip: state.hasNext,
         loopMode: state.loopMode,
+        radioMode: state.radioMode,
       });
       const options = { embeds: [embed], components };
       const shouldTrackProgress = Boolean(state.currentTrack && !state.isPaused);

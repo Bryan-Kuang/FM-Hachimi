@@ -16,6 +16,7 @@ interface PlaybackControlsOptions {
   canGoBack?: boolean;
   hasQueue?: boolean;
   loopMode?: string;
+  radioMode?: boolean;
   _volume?: number;
   _isShuffled?: boolean;
 }
@@ -130,6 +131,7 @@ class ButtonBuilders {
       canGoBack = false,
       hasQueue = false,
       loopMode = 'none',
+      radioMode = false,
     } = options;
 
     const row1 = new ActionRowBuilder<ButtonBuilder>();
@@ -155,6 +157,11 @@ class ButtonBuilders {
       .setLabel('Stop')
       .setEmoji('⏹️')
       .setStyle(ButtonStyle.Secondary);
+
+    if (radioMode) {
+      row1.addComponents(stopButton);
+      return [row1];
+    }
 
     const skipButton = new ButtonBuilder()
       .setCustomId('skip')
