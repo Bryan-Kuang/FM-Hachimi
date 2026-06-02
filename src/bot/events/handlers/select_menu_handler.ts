@@ -593,9 +593,10 @@ async function handlePlaySearch(interaction: any, customId: string, playerServic
     });
 
     const msg = (innerError as Error).message || '';
+    const lowerMsg = msg.toLowerCase();
     let content = 'An error occurred while adding the video.';
-    if (msg.includes('cookies expired')) {
-      content = '🔒 YouTube cookies expired. Ask the bot admin to run `bash scripts/refresh-youtube-cookies.sh`.';
+    if (lowerMsg.includes('auth/bot check') || lowerMsg.includes('automatic cookie refresh') || lowerMsg.includes('cookies expired')) {
+      content = '🔒 YouTube auth check failed after automatic cookie refresh. The bot account may need a fresh VPS browser login.';
     }
 
     const errorEmbed = EmbedBuilders.createErrorEmbed('Error Adding Video', content, { suggestion: 'Please try again.' });

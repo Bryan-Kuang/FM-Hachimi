@@ -136,19 +136,19 @@ async function main() {
     errors.push("Docker Compose plugin is not available. Expected: docker compose version");
   }
 
-  for (const dir of ["data", "logs"]) {
+  for (const dir of ["data", "logs", "secrets"]) {
     const fullPath = path.join(root, dir);
     if (!fs.existsSync(fullPath)) {
       warnings.push(`${dir}/ does not exist yet. Docker will create it, or you can run: mkdir -p ${dir}`);
     }
   }
 
-  if (!fs.existsSync(path.join(root, "youtube_cookies.txt"))) {
-    warnings.push("youtube_cookies.txt is missing. YouTube playback may fail until cookies are exported.");
+  if (!fs.existsSync(path.join(root, "secrets", "youtube_cookies.txt"))) {
+    warnings.push("secrets/youtube_cookies.txt is missing. The bot will try automatic YouTube cookie export in Docker.");
   }
 
-  if (!fs.existsSync(path.join(root, "cookies.txt"))) {
-    notes.push("cookies.txt is missing. Bilibili usually works without it, but cloud IPs may need cookies.");
+  if (!fs.existsSync(path.join(root, "secrets", "cookies.txt"))) {
+    notes.push("secrets/cookies.txt is missing. Bilibili usually works without it, but cloud IPs may need cookies.");
   }
 
   const ytDlpEnvironment = evaluateYtDlpEnvironment(collectYtDlpEnvironment());

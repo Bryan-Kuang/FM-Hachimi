@@ -3,8 +3,29 @@
 set -euo pipefail
 
 echo "[deploy] preparing bind mounts..."
-mkdir -p data logs
-touch -a cookies.txt youtube_cookies.txt
+mkdir -p data logs secrets
+
+migrate_cookie_file() {
+  local source_file="$1"
+  local target_file="$2"
+
+  touch -a "$target_file"
+  chmod 600 "$target_file"
+
+  if [ -f "$source_file" ]; then
+    if [ ! -s "$target_file" ]; then
+      echo "[deploy] migrating $source_file -> $target_file"
+      cat "$source_file" > "$target_file"
+      chmod 600 "$target_file"
+    fi
+    rm -f "$source_file"
+  fi
+}
+
+migrate_cookie_file cookies.txt secrets/cookies.txt
+migrate_cookie_file youtube_cookies.txt secrets/youtube_cookies.txt
+rm -f cookies.txt
+rm -f youtube_cookies.txt
 
 echo "[deploy] rebuilding containers..."
 if ! timeout 600 docker compose up -d --build 2>&1; then

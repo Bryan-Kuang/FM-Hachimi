@@ -60,34 +60,21 @@ it must be explicit:
 DEPLOY_LEGACY_GUILD_COMMANDS=true npm run deploy:commands
 ```
 
-## Refresh Cookies
+## YouTube Cookies
 
-YouTube playback often needs browser cookies on cloud servers. The usual refresh path is:
+YouTube playback often needs browser cookies on cloud servers. In Docker, the bot refreshes its own YouTube cookie file from the dedicated VPS Chrome profile and keeps it in `secrets/youtube_cookies.txt`.
+
+The Docker compose file mounts `secrets/` as a directory, not `youtube_cookies.txt` as a single file, so refreshed cookie contents are visible to the running container without a restart.
+
+Production validation on June 2, 2026 confirmed the VPS Chrome-profile export path works again for both a short public video (`dQw4w9WgXcQ`) and the previously failing long video (`AUfXW1EdLew`).
+
+For emergency/manual recovery only:
 
 ```bash
 bash scripts/refresh-youtube-cookies.sh
 ```
 
-That script exports cookies through `yt-dlp` and uploads `youtube_cookies.txt` to the VPS. It uses YouTube's `robots.txt` page during export so a stale local `yt-dlp` playback extractor will not block the cookie upload.
-
-If YouTube says the browser cookies were rotated or expired, use the more reliable private-session flow recommended by yt-dlp: open a private/incognito browser window, sign in to YouTube, open `https://www.youtube.com/robots.txt` in that same private session, export the YouTube cookies in Netscape format to `youtube_cookies.txt`, close the private window, then upload the file:
-
-```bash
-UPLOAD_ONLY=true bash scripts/refresh-youtube-cookies.sh
-```
-
-If you only need to export cookies locally, run:
-
-```bash
-yt-dlp --cookies-from-browser chrome \
-  --cookies youtube_cookies.txt \
-  --skip-download \
-  "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-```
-
-Put `youtube_cookies.txt` in the project root. `cookies.txt` is optional for Bilibili cloud IP issues.
-
-Never commit cookie files.
+Never commit cookie files or the dedicated browser profile.
 
 ## Development Checks
 

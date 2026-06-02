@@ -58,39 +58,51 @@ Full authoring and graduation rules live in [`testing-features.md`](testing-feat
 
 ## Cookies
 
-YouTube usually needs cookies on cloud servers. Refresh and upload the YouTube cookie file from a browser session on your own machine:
+YouTube usually needs cookies on cloud servers. The normal Docker path is automatic:
+
+- The dedicated VPS Chrome profile is mounted read-only at `/app/youtube-browser-profile`.
+- The bot exports cookies through `yt-dlp --cookies-from-browser`.
+- Candidate cookies are validated before replacing the live file.
+- The live file is overwritten in place at `secrets/youtube_cookies.txt`.
+- Temporary candidate files are deleted after success or failure.
+
+If YouTube extraction hits an auth/bot-check failure, the bot tries one automatic refresh and retry before showing a user-facing failure.
+
+Production validation on June 2, 2026 refreshed the VPS cookie from the dedicated Chrome profile, copied the refreshed bytes into the running container in place, and confirmed yt-dlp could resolve both:
+
+- `https://www.youtube.com/watch?v=dQw4w9WgXcQ`
+- `https://www.youtube.com/watch?v=AUfXW1EdLew`
+
+To re-run a safe validation after deploy, print only the resolved video ID:
+
+```bash
+docker exec bilibili-discord-bot yt-dlp \
+  --js-runtimes node \
+  --cookies /app/secrets/youtube_cookies.txt \
+  --skip-download \
+  --no-playlist \
+  --no-warnings \
+  --format 'bestaudio[vcodec=none][acodec!=none]/best[height<=360][acodec!=none]/worst[acodec!=none]' \
+  --print id \
+  'https://www.youtube.com/watch?v=AUfXW1EdLew'
+```
+
+For emergency/manual recovery only:
 
 ```bash
 bash scripts/refresh-youtube-cookies.sh
-```
-
-The script exports cookies through `yt-dlp` and uploads `youtube_cookies.txt` to the VPS. It deliberately uses `https://www.youtube.com/robots.txt` during export, so the refresh flow is not blocked by local playback extraction failures.
-
-If YouTube reports that the browser cookies were rotated or expired, use yt-dlp's recommended private-session flow: open a private/incognito browser window, sign in to YouTube, open `https://www.youtube.com/robots.txt`, export YouTube cookies in Netscape format to `youtube_cookies.txt`, close the private window, then upload the existing file:
-
-```bash
-UPLOAD_ONLY=true bash scripts/refresh-youtube-cookies.sh
-```
-
-If you only need a local export, run:
-
-```bash
-yt-dlp --cookies-from-browser chrome \
-  --cookies youtube_cookies.txt \
-  --skip-download \
-  "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 ```
 
 Bilibili cookies are optional, but may help cloud IPs:
 
 ```bash
 yt-dlp --cookies-from-browser chrome \
-  --cookies cookies.txt \
+  --cookies secrets/cookies.txt \
   --skip-download \
   "https://www.bilibili.com/video/BV1GJ411x7h7"
 ```
 
-Never commit either cookie file.
+Never commit `secrets/`, cookie files, browser profiles, or bot-account credentials. If Google invalidates the dedicated browser login session, the VPS can try best-effort repair with `scripts/ops/youtube-cookie-login-repair.sh` after you place `YOUTUBE_BOT_EMAIL` and `YOUTUBE_BOT_PASSWORD` in `/home/ubuntu/.fm-hachimi-youtube/credentials.env` with mode `600`. The helper expects `xdotool` and `xclip` on the VPS so credentials are pasted without appearing as process arguments. If Google presents CAPTCHA, 2FA, or a security challenge, refresh automation fails closed and the browser profile must be repaired manually.
 
 ## VPS Deploy
 
@@ -102,7 +114,7 @@ npm run docker:up
 npm run docker:logs
 ```
 
-The compose file mounts `./data`, `./logs`, `./cookies.txt`, and `./youtube_cookies.txt`. `HOST_UID` and `HOST_GID` in `.env` must match the host user that owns those files.
+The compose file mounts `./data`, `./logs`, `./secrets`, and the dedicated YouTube browser profile. `HOST_UID` and `HOST_GID` in `.env` must match the host user that owns those files.
 
 ## GitHub Deploy
 

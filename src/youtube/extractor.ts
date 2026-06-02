@@ -64,6 +64,7 @@ interface SearchResponse {
   error?: string;
   keyword: string;
   timestamp: string;
+  authFailure?: boolean;
 }
 
 interface ThumbnailEntry {
@@ -104,6 +105,15 @@ interface ResolvedExtractionOptions {
   onStage?: PlaybackStageReporter;
 }
 
+interface CookieRefreshServiceLike {
+  refreshNow(context?: { reason?: string; source?: string; force?: boolean }): Promise<{
+    success: boolean;
+    refreshed: boolean;
+    skipped?: boolean;
+    error?: string;
+  }>;
+}
+
 const AUDIO_FORMAT_SELECTOR =
   'bestaudio[vcodec=none][protocol^=http][acodec!=none]/bestaudio[vcodec=none][acodec!=none]/best[height<=360][protocol^=http][acodec!=none]/best[height<=360][protocol=m3u8_native][acodec!=none]/best[height<=360][acodec!=none]/worst[acodec!=none]';
 
@@ -111,6 +121,7 @@ class YouTubeExtractor {
   private userAgent: string;
   private _ytdlpChecked: boolean;
   private _cookiesFile: string | null;
+  private _cookieRefreshService: CookieRefreshServiceLike | null;
 
   // Extraction result cache — avoids repeated yt-dlp calls for the same video
   private _cache: Map<string, CacheEntry>;
@@ -124,6 +135,7 @@ class YouTubeExtractor {
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
     this._ytdlpChecked = false;
     this._cookiesFile = this._resolveCookiesFile();
+    this._cookieRefreshService = null;
 
     // URL cache (mirrors BilibiliExtractor pattern)
     this._cache = new Map();
@@ -163,6 +175,21 @@ class YouTubeExtractor {
     this._inFlightExtractions.clear();
   }
 
+  setCookieRefreshService(service: CookieRefreshServiceLike | null): void {
+    this._cookieRefreshService = service;
+  }
+
+  clearCacheForUrl(url: string): void {
+    const normalizedUrl = YouTubeValidator.normalizeUrl(url) || url;
+    this._cache.delete(normalizedUrl);
+    this._inFlightExtractions.delete(normalizedUrl);
+  }
+
+  clearCache(): void {
+    this._cache.clear();
+    this._inFlightExtractions.clear();
+  }
+
   async prewarm(): Promise<{ ytdlpAvailable: boolean }> {
     const ytdlpAvailable = await this.checkYtDlpAvailability();
     if (ytdlpAvailable) {
@@ -178,6 +205,7 @@ class YouTubeExtractor {
   private _resolveCookiesFile(): string | null {
     const candidates = [
       process.env.YOUTUBE_COOKIES_FILE,
+      '/app/secrets/youtube_cookies.txt',
       'youtube_cookies.txt',
       'cookies.txt',
     ];
@@ -350,7 +378,7 @@ class YouTubeExtractor {
   ): Promise<ExtractedAudio> {
     try {
       const { metadata, audioUrl, selectedFormat, ytdlpMs, parseMs } =
-        await this.extractMetadataAndUrl(normalizedUrl);
+        await this.extractMetadataAndUrlWithCookieRefresh(normalizedUrl, options);
 
       const result: ExtractedAudio = {
         ...metadata,
@@ -403,6 +431,24 @@ class YouTubeExtractor {
    * Get audio stream URL only (for CDN URL refresh on stale tracks).
    */
   async getAudioStreamUrl(url: string): Promise<string> {
+    try {
+      return await this.getAudioStreamUrlOnce(url);
+    } catch (error: unknown) {
+      if (!this.isAuthFailureError(error as Error)) throw error;
+
+      await this.refreshCookiesForAuthFailure('stream_refresh');
+      try {
+        return await this.getAudioStreamUrlOnce(url);
+      } catch (retryError: unknown) {
+        if (this.isAuthFailureError(retryError as Error)) {
+          throw new Error(`YouTube auth/bot check failed after automatic cookie refresh: ${(retryError as Error).message}`);
+        }
+        throw retryError;
+      }
+    }
+  }
+
+  private async getAudioStreamUrlOnce(url: string): Promise<string> {
     return new Promise((resolve, reject) => {
       const args = [
         '--get-url',
@@ -420,7 +466,7 @@ class YouTubeExtractor {
 
       ytdlp.on('close', (code: number | null) => {
         if (code !== 0 && code !== null) {
-          reject(new Error(`yt-dlp exited with code ${code}: ${stderr}`));
+          reject(new Error(this.formatYtDlpError(code, stderr)));
           return;
         }
         const audioUrl = stdout.trim().split('\n')[0];
@@ -450,6 +496,24 @@ class YouTubeExtractor {
    * Search YouTube videos by keyword.
    */
   async searchVideos(keyword: string, limit = 5): Promise<SearchResponse> {
+    const first = await this.searchVideosOnce(keyword, limit);
+    if (!first.authFailure) return first;
+
+    try {
+      await this.refreshCookiesForAuthFailure('search');
+    } catch (error: unknown) {
+      return {
+        success: false,
+        error: `Search failed after automatic cookie refresh failed: ${(error as Error).message}`,
+        keyword,
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    return this.searchVideosOnce(keyword, limit);
+  }
+
+  private async searchVideosOnce(keyword: string, limit = 5): Promise<SearchResponse> {
     return new Promise((resolve) => {
       const args = [
         `ytsearch${limit}:${keyword}`,
@@ -470,12 +534,14 @@ class YouTubeExtractor {
 
       ytdlp.on('close', (code: number | null) => {
         if (code !== 0 && code !== null) {
+          const errorMessage = this.formatYtDlpError(code, stderr);
           logger.error('YouTube search failed', { code, stderr });
           resolve({
             success: false,
-            error: `Search failed: ${stderr || `exit code ${code}`}`,
+            error: `Search failed: ${errorMessage}`,
             keyword,
             timestamp: new Date().toISOString(),
+            authFailure: this.isAuthFailureMessage(errorMessage),
           });
           return;
         }
@@ -539,6 +605,88 @@ class YouTubeExtractor {
 
   // ─── Private helpers ───────��──────────────────────────────────────────
 
+  private async extractMetadataAndUrlWithCookieRefresh(
+    normalizedUrl: string,
+    options: ResolvedExtractionOptions,
+  ): Promise<ExtractionPayload> {
+    try {
+      return await this.extractMetadataAndUrl(normalizedUrl);
+    } catch (error: unknown) {
+      if (!this.isAuthFailureError(error as Error)) throw error;
+
+      await this.refreshCookiesForAuthFailure(options.source || 'playback');
+      this.clearCacheForUrl(normalizedUrl);
+      try {
+        return await this.extractMetadataAndUrl(normalizedUrl);
+      } catch (retryError: unknown) {
+        if (this.isAuthFailureError(retryError as Error)) {
+          throw new Error(`YouTube auth/bot check failed after automatic cookie refresh: ${(retryError as Error).message}`);
+        }
+        throw retryError;
+      }
+    }
+  }
+
+  private async refreshCookiesForAuthFailure(source: string): Promise<void> {
+    if (!this._cookieRefreshService) {
+      throw new Error('YouTube auth/bot check failed; automatic cookie refresh is not configured.');
+    }
+
+    const result = await this._cookieRefreshService.refreshNow({
+      reason: 'youtube_auth_failure',
+      source,
+    });
+
+    if (!result.success) {
+      throw new Error(`YouTube auth/bot check failed; automatic cookie refresh failed: ${result.error || 'unknown error'}`);
+    }
+
+    logger.info('Automatic YouTube cookie refresh completed after auth failure', {
+      source,
+      refreshed: result.refreshed,
+      skipped: result.skipped,
+    });
+  }
+
+  private isAuthFailureError(error: Error): boolean {
+    return this.isAuthFailureMessage(error.message);
+  }
+
+  private isAuthFailureMessage(message: string): boolean {
+    const msg = message.toLowerCase();
+    return (
+      msg.includes('youtube auth/bot check failed') ||
+      msg.includes('cookies are no longer valid') ||
+      msg.includes('cookies expired') ||
+      msg.includes('sign in to confirm') ||
+      msg.includes('not a bot')
+    );
+  }
+
+  private formatYtDlpError(code: number | null, stderr: string): string {
+    if (stderr.includes('Sign in to confirm your age')) {
+      return 'Age-restricted video (login required)';
+    }
+    if (
+      stderr.includes('Sign in to confirm') ||
+      stderr.includes('not a bot') ||
+      stderr.includes('cookies are no longer valid') ||
+      stderr.includes('cookies expired')
+    ) {
+      return 'YouTube auth/bot check failed';
+    }
+    if (stderr.includes('Video unavailable') || stderr.includes('Private video')) {
+      return 'Video is unavailable or private';
+    }
+    if (stderr.includes('network') || stderr.includes('timeout')) {
+      return 'Network connection error';
+    }
+    if (stderr) {
+      return `yt-dlp exited with code ${code}: ${stderr.substring(0, 200)}`;
+    }
+    return `yt-dlp exited with code ${code}`;
+  }
+
   private async extractMetadataAndUrl(normalizedUrl: string): Promise<ExtractionPayload> {
     return new Promise((resolve, reject) => {
       const ytdlpStartedAt = Date.now();
@@ -564,19 +712,7 @@ class YouTubeExtractor {
             reject(new Error('YouTube extraction timeout'));
             return;
           }
-          let errorMessage = `yt-dlp exited with code ${code}`;
-          if (stderr.includes('Sign in to confirm') || stderr.includes('not a bot')) {
-            errorMessage = 'YouTube cookies expired. Run: bash scripts/refresh-youtube-cookies.sh';
-          } else if (stderr.includes('Video unavailable') || stderr.includes('Private video')) {
-            errorMessage = 'Video is unavailable or private';
-          } else if (stderr.includes('Sign in to confirm your age')) {
-            errorMessage = 'Age-restricted video (login required)';
-          } else if (stderr.includes('network') || stderr.includes('timeout')) {
-            errorMessage = 'Network connection error';
-          } else if (stderr) {
-            errorMessage += `: ${stderr.substring(0, 200)}`;
-          }
-          reject(new Error(errorMessage));
+          reject(new Error(this.formatYtDlpError(code, stderr)));
           return;
         }
 

@@ -23,12 +23,14 @@ if [ ! -f "$COOKIES_FILE" ]; then
 fi
 
 echo "Uploading cookies to server..."
-scp -i "$SSH_KEY" "$COOKIES_FILE" "$SERVER:$REMOTE_DIR/cookies.txt"
+REMOTE_COOKIE_DIR="$REMOTE_DIR/secrets"
+REMOTE_COOKIE_FILE="$REMOTE_COOKIE_DIR/cookies.txt"
+REMOTE_TMP_FILE="$REMOTE_COOKIE_DIR/cookies.txt.upload"
 
-echo "Setting permissions..."
-ssh -i "$SSH_KEY" "$SERVER" "chmod 666 $REMOTE_DIR/cookies.txt"
+ssh -i "$SSH_KEY" "$SERVER" "mkdir -p '$REMOTE_COOKIE_DIR' && touch '$REMOTE_COOKIE_FILE' && chmod 600 '$REMOTE_COOKIE_FILE'"
+scp -i "$SSH_KEY" "$COOKIES_FILE" "$SERVER:$REMOTE_TMP_FILE"
 
-echo "Restarting bot..."
-ssh -i "$SSH_KEY" "$SERVER" "cd $REMOTE_DIR && docker-compose restart bilibili-bot"
+echo "Installing cookie contents in place..."
+ssh -i "$SSH_KEY" "$SERVER" "cat '$REMOTE_TMP_FILE' > '$REMOTE_COOKIE_FILE' && rm -f '$REMOTE_TMP_FILE' && chmod 600 '$REMOTE_COOKIE_FILE' && rm -f '$REMOTE_DIR/cookies.txt'"
 
-echo "Done! Cookies updated and bot restarted."
+echo "Done! Cookies updated. No restart needed."

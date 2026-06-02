@@ -66,13 +66,15 @@ services:
       retries: 3
       start_period: 40s
 
-    # Volumes for persistent data (logs), cookies, and daily schedule config.
+    # Volumes for persistent data (logs), private cookie secrets, and daily schedule config.
     # data/ must be a host-mounted volume so daily_hachimi.json survives
     # container rebuilds — without this the cron schedule is lost on every deploy.
+    # secrets/ is mounted as a directory so in-place cookie refreshes are visible
+    # to the running container without the stale-inode behavior of single-file mounts.
     volumes:
       - ./logs:/app/logs
-      - ./cookies.txt:/app/cookies.txt
-      - ./youtube_cookies.txt:/app/youtube_cookies.txt
+      - ./secrets:/app/secrets
+      - ${YOUTUBE_COOKIE_PROFILE_HOST:-/home/ubuntu/.fm-hachimi-youtube/profile}:/app/youtube-browser-profile:ro
       - ./data:/app/data
 
     # Network mode
