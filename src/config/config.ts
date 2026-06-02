@@ -73,6 +73,16 @@ interface YouTubeConfig {
   preextractEnabled: boolean;
   preextractConcurrency: number;
   preextractMaxPerCardSet: number;
+  cookieRefresh: YouTubeCookieRefreshConfig;
+}
+
+interface YouTubeCookieRefreshConfig {
+  enabled: boolean;
+  cookiesFile: string;
+  browserSpec: string;
+  refreshIntervalMs: number;
+  cooldownMs: number;
+  validateUrls: string[];
 }
 
 interface RadioConfig {
@@ -110,6 +120,15 @@ function parseIntegerEnv(value: string | undefined, fallback: number): number {
   if (value === undefined || value === "") return fallback;
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseListEnv(value: string | undefined, fallback: string[]): string[] {
+  if (value === undefined || value.trim() === "") return fallback;
+  const parsed = value
+    .split(",")
+    .map(item => item.trim())
+    .filter(Boolean);
+  return parsed.length > 0 ? parsed : fallback;
 }
 
 const config: BotConfig = {
@@ -219,6 +238,17 @@ const config: BotConfig = {
     preextractEnabled: process.env.YOUTUBE_PREEXTRACT_ENABLED !== "false",
     preextractConcurrency: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_PREEXTRACT_CONCURRENCY, 1)),
     preextractMaxPerCardSet: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_PREEXTRACT_MAX_PER_CARD_SET, 3)),
+    cookieRefresh: {
+      enabled: process.env.YOUTUBE_COOKIE_AUTO_REFRESH_ENABLED !== "false",
+      cookiesFile: process.env.YOUTUBE_COOKIES_FILE || "/app/secrets/youtube_cookies.txt",
+      browserSpec: process.env.YOUTUBE_COOKIE_BROWSER_SPEC || "chrome+basictext:/app/youtube-browser-profile",
+      refreshIntervalMs: Math.max(0, parseIntegerEnv(process.env.YOUTUBE_COOKIE_REFRESH_INTERVAL_MS, 6 * 60 * 60 * 1000)),
+      cooldownMs: Math.max(0, parseIntegerEnv(process.env.YOUTUBE_COOKIE_REFRESH_COOLDOWN_MS, 5 * 60 * 1000)),
+      validateUrls: parseListEnv(process.env.YOUTUBE_COOKIE_VALIDATE_URLS, [
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "https://www.youtube.com/watch?v=AUfXW1EdLew",
+      ]),
+    },
   },
   radio: {
     // /radio endless Hachimi playback. When false the command refuses to start.

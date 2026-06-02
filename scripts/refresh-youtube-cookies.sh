@@ -3,7 +3,8 @@
 # Usage: bash scripts/refresh-youtube-cookies.sh
 #
 # Requires yt-dlp and Chrome with a logged-in YouTube session.
-# The bot picks up the new cookies on next play — no restart needed.
+# The bot normally refreshes cookies automatically. This script is an
+# emergency/manual fallback and writes into secrets/youtube_cookies.txt.
 #
 # Options:
 #   UPLOAD_ONLY=true             Upload the existing youtube_cookies.txt without exporting.
@@ -22,8 +23,10 @@ if [ ! -f "$PROJECT_DIR/.server.env" ]; then
 fi
 source "$PROJECT_DIR/.server.env"
 
-COOKIE_FILE="$PROJECT_DIR/youtube_cookies.txt"
+COOKIE_FILE="$PROJECT_DIR/secrets/youtube_cookies.txt"
 TMP_COOKIE_FILE="$COOKIE_FILE.tmp"
+
+mkdir -p "$(dirname "$COOKIE_FILE")"
 
 is_truthy() {
     case "${1:-}" in
@@ -70,7 +73,9 @@ if ! is_truthy "${UPLOAD_ONLY:-false}"; then
         exit 1
     fi
 
-    mv "$TMP_COOKIE_FILE" "$COOKIE_FILE"
+    touch -a "$COOKIE_FILE"
+    cat "$TMP_COOKIE_FILE" > "$COOKIE_FILE"
+    rm -f "$TMP_COOKIE_FILE"
 else
     echo "UPLOAD_ONLY=true: using existing $COOKIE_FILE"
 fi
@@ -84,9 +89,14 @@ fi
 chmod 600 "$COOKIE_FILE"
 
 echo "Uploading to server..."
-scp -i "$SSH_KEY" "$COOKIE_FILE" "$SERVER:$REMOTE_DIR/youtube_cookies.txt"
+REMOTE_COOKIE_DIR="$REMOTE_DIR/secrets"
+REMOTE_COOKIE_FILE="$REMOTE_COOKIE_DIR/youtube_cookies.txt"
+REMOTE_TMP_FILE="$REMOTE_COOKIE_DIR/youtube_cookies.txt.upload"
 
-echo "Setting permissions..."
-ssh -i "$SSH_KEY" "$SERVER" "chmod 600 $REMOTE_DIR/youtube_cookies.txt"
+ssh -i "$SSH_KEY" "$SERVER" "mkdir -p '$REMOTE_COOKIE_DIR' && touch '$REMOTE_COOKIE_FILE' && chmod 600 '$REMOTE_COOKIE_FILE'"
+scp -i "$SSH_KEY" "$COOKIE_FILE" "$SERVER:$REMOTE_TMP_FILE"
+
+echo "Installing cookie contents in place..."
+ssh -i "$SSH_KEY" "$SERVER" "cat '$REMOTE_TMP_FILE' > '$REMOTE_COOKIE_FILE' && rm -f '$REMOTE_TMP_FILE' && chmod 600 '$REMOTE_COOKIE_FILE' && rm -f '$REMOTE_DIR/youtube_cookies.txt'"
 
 echo "Done! YouTube cookies updated. No restart needed."

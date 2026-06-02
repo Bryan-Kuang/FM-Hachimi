@@ -10,6 +10,8 @@
 # Cookies
 cookies.txt
 youtube_cookies.txt
+secrets/
+youtube-browser-profile/
 
 # Dependencies
 node_modules/

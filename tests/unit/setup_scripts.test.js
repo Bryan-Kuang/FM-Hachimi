@@ -37,7 +37,7 @@ describe("beginner setup scripts", () => {
     expect(missing).toEqual([]);
   });
 
-  test("cookie refresh guidance points to existing scripts", () => {
+  test("cookie refresh guidance points to automatic refresh behavior", () => {
     const refreshScript = path.join(root, "scripts/refresh-youtube-cookies.sh");
     const compatibilityScript = path.join(root, "scripts/refresh-cookies.sh");
     const sourceFiles = [
@@ -50,7 +50,7 @@ describe("beginner setup scripts", () => {
 
     for (const sourceFile of sourceFiles) {
       const content = fs.readFileSync(sourceFile, "utf8");
-      expect(content).toContain("bash scripts/refresh-youtube-cookies.sh");
+      expect(content).toContain("automatic cookie refresh");
     }
   });
 
@@ -63,6 +63,30 @@ describe("beginner setup scripts", () => {
     expect(refreshScript).toContain("--flat-playlist");
     expect(refreshScript).toContain("--playlist-items 0");
     expect(refreshScript).not.toContain("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  });
+
+  test("Docker mounts YouTube cookies through secrets directory and browser profile read-only", () => {
+    const prodCompose = fs.readFileSync(path.join(root, "docker-compose.yml"), "utf8");
+
+    expect(prodCompose).toContain("./secrets:/app/secrets");
+    expect(prodCompose).toContain("${YOUTUBE_COOKIE_PROFILE_HOST:-/home/ubuntu/.fm-hachimi-youtube/profile}:/app/youtube-browser-profile:ro");
+    expect(prodCompose).not.toContain("./youtube_cookies.txt:/app/youtube_cookies.txt");
+  });
+
+  test("deploy migrates old root cookie files into secrets and removes root duplicates", () => {
+    const deployScript = fs.readFileSync(path.join(root, "scripts/deploy/remote-deploy.sh"), "utf8");
+
+    expect(deployScript).toContain("mkdir -p data logs secrets");
+    expect(deployScript).toContain("secrets/youtube_cookies.txt");
+    expect(deployScript).toContain("rm -f youtube_cookies.txt");
+    expect(deployScript).toContain("rm -f cookies.txt");
+  });
+
+  test("private cookie and browser-profile runtime paths stay ignored", () => {
+    const gitignore = fs.readFileSync(path.join(root, ".gitignore"), "utf8");
+
+    expect(gitignore).toContain("secrets/");
+    expect(gitignore).toContain("youtube-browser-profile/");
   });
 
   test("docker compose files are rooted at the project and use the same Node major", () => {

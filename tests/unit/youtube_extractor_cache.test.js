@@ -146,7 +146,39 @@ describe("YouTubeExtractor extraction cache behavior", () => {
     expect(args[args.indexOf("--js-runtimes") + 1]).toBe("node");
   });
 
-  test("bot-detection errors point admins to the YouTube cookie refresh script", async () => {
+  test("bot-detection errors refresh cookies once and retry extraction", async () => {
+    const refreshService = {
+      refreshNow: jest.fn().mockResolvedValue({ success: true, refreshed: true }),
+    };
+    extractor.setCookieRefreshService(refreshService);
+
+    spawn
+      .mockImplementationOnce(() => createMockProcess({
+        stderr: "Sign in to confirm you're not a bot",
+        exitCode: 1,
+      }))
+      .mockImplementationOnce(() => createMockProcess({
+        stdout: youtubeJson("dQw4w9WgXcQ", "Retried YouTube"),
+        exitCode: 0,
+      }));
+
+    const result = await extractor.extractAudio("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+
+    expect(result.title).toBe("Retried YouTube");
+    expect(refreshService.refreshNow).toHaveBeenCalledTimes(1);
+    expect(refreshService.refreshNow).toHaveBeenCalledWith(expect.objectContaining({
+      reason: "youtube_auth_failure",
+      source: "playback",
+    }));
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
+
+  test("failed automatic refresh reports the attempted refresh without looping", async () => {
+    const refreshService = {
+      refreshNow: jest.fn().mockResolvedValue({ success: false, refreshed: false, error: "session dead" }),
+    };
+    extractor.setCookieRefreshService(refreshService);
+
     spawn.mockImplementation(() => createMockProcess({
       stderr: "Sign in to confirm you're not a bot",
       exitCode: 1,
@@ -154,7 +186,84 @@ describe("YouTubeExtractor extraction cache behavior", () => {
 
     await expect(
       extractor.extractAudio("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
-    ).rejects.toThrow("bash scripts/refresh-youtube-cookies.sh");
+    ).rejects.toThrow("automatic cookie refresh failed");
+    expect(refreshService.refreshNow).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  test("video unavailable errors do not trigger cookie refresh", async () => {
+    const refreshService = {
+      refreshNow: jest.fn(),
+    };
+    extractor.setCookieRefreshService(refreshService);
+
+    spawn.mockImplementation(() => createMockProcess({
+      stderr: "Video unavailable",
+      exitCode: 1,
+    }));
+
+    await expect(
+      extractor.extractAudio("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+    ).rejects.toThrow("Video is unavailable or private");
+    expect(refreshService.refreshNow).not.toHaveBeenCalled();
+  });
+
+  test("stream URL refresh uses automatic cookie refresh once on bot-detection", async () => {
+    const refreshService = {
+      refreshNow: jest.fn().mockResolvedValue({ success: true, refreshed: true }),
+    };
+    extractor.setCookieRefreshService(refreshService);
+
+    spawn
+      .mockImplementationOnce(() => createMockProcess({
+        stderr: "Sign in to confirm you're not a bot",
+        exitCode: 1,
+      }))
+      .mockImplementationOnce(() => createMockProcess({
+        stdout: "https://youtube.cdn/fresh.m4a\n",
+        exitCode: 0,
+      }));
+
+    const url = await extractor.getAudioStreamUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+
+    expect(url).toBe("https://youtube.cdn/fresh.m4a");
+    expect(refreshService.refreshNow).toHaveBeenCalledTimes(1);
+    expect(refreshService.refreshNow).toHaveBeenCalledWith(expect.objectContaining({
+      reason: "youtube_auth_failure",
+      source: "stream_refresh",
+    }));
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
+
+  test("YouTube search retries once after automatic cookie refresh", async () => {
+    const refreshService = {
+      refreshNow: jest.fn().mockResolvedValue({ success: true, refreshed: true }),
+    };
+    extractor.setCookieRefreshService(refreshService);
+
+    spawn
+      .mockImplementationOnce(() => createMockProcess({
+        stderr: "Sign in to confirm you're not a bot",
+        exitCode: 1,
+      }))
+      .mockImplementationOnce(() => createMockProcess({
+        stdout: JSON.stringify({
+          id: "dQw4w9WgXcQ",
+          title: "Search Retried",
+          webpage_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        }),
+        exitCode: 0,
+      }));
+
+    const response = await extractor.searchVideos("hachimi", 1);
+
+    expect(response.success).toBe(true);
+    expect(response.results[0].title).toBe("Search Retried");
+    expect(refreshService.refreshNow).toHaveBeenCalledTimes(1);
+    expect(refreshService.refreshNow).toHaveBeenCalledWith(expect.objectContaining({
+      reason: "youtube_auth_failure",
+      source: "search",
+    }));
   });
 
   test("preserves selected format metadata and logs uncached extraction timing", async () => {

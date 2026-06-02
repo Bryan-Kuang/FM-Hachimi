@@ -34,7 +34,7 @@ function runYtDlp(args) {
 }
 
 function copyCookieFileIfPresent() {
-  const source = path.join(process.cwd(), "youtube_cookies.txt");
+  const source = path.join(process.cwd(), "secrets", "youtube_cookies.txt");
   if (!fs.existsSync(source)) return null;
   const destination = path.join(
     os.tmpdir(),

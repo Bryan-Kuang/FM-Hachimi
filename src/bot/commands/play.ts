@@ -70,9 +70,10 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         await stageReporter.finish();
         if (!result.success) {
           const msg = result.error || '';
-          if (msg.includes('cookies expired')) {
+          const lowerMsg = msg.toLowerCase();
+          if (lowerMsg.includes('auth/bot check') || lowerMsg.includes('automatic cookie refresh') || lowerMsg.includes('cookies expired')) {
             await interaction.editReply({
-              content: '🔒 YouTube cookies expired. Ask the bot admin to run `bash scripts/refresh-youtube-cookies.sh`',
+              content: '🔒 YouTube auth check failed after automatic cookie refresh. The bot account may need a fresh VPS browser login.',
             });
           } else if (msg.includes('unavailable') || msg.includes('private')) {
             await interaction.editReply({ content: '⚠️ Video is unavailable or private' });

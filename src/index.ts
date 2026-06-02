@@ -8,6 +8,7 @@ import { validateEnv } from './config/env_validator';
 import BotClient = require('./bot/client');
 import BilibiliExtractor = require('./bilibili/extractor');
 import YouTubeExtractor = require('./youtube/extractor');
+import YouTubeCookieRefreshService = require('./youtube/cookie_refresh_service');
 import SessionManager = require('./session/session_manager');
 import AudioManager = require('./session/audio_manager');
 import InterfaceUpdater = require('./ui/interface_updater');
@@ -21,17 +22,20 @@ import * as logger from './services/logger_service';
 import TokenPrecheck = require('./utils/token_precheck');
 import Debug = require('./utils/debug');
 import { startMetricsServerFromEnv } from './observability/metrics_server';
+import config = require('./config/config');
 
 class BilibiliDiscordBot {
   private botClient:      BotClient | null;
   private sessionManager: any;
   private metricsServer:  any;
+  private youtubeCookieRefreshService: YouTubeCookieRefreshService | null;
   private isRunning:      boolean;
 
   constructor() {
     this.botClient      = null;
     this.sessionManager = null;
     this.metricsServer  = null;
+    this.youtubeCookieRefreshService = null;
     this.isRunning      = false;
   }
 
@@ -71,6 +75,12 @@ class BilibiliDiscordBot {
       const youtubeExtractor = new YouTubeExtractor();
       logger.info('YouTube extractor initialized (requires yt-dlp)');
 
+      const youtubeCookieRefreshService = new YouTubeCookieRefreshService(config.youtube.cookieRefresh);
+      youtubeCookieRefreshService.start();
+      youtubeCookieRefreshService.refreshInBackground({ reason: 'startup' });
+      youtubeExtractor.setCookieRefreshService(youtubeCookieRefreshService);
+      this.youtubeCookieRefreshService = youtubeCookieRefreshService;
+
       const audioManager    = new AudioManager(sessionManager, extractor, youtubeExtractor);
       const progressTracker = new ProgressTracker(sessionManager);
       const historyStore    = new HistoryStore(sessionManager);
@@ -101,9 +111,7 @@ class BilibiliDiscordBot {
       const radioService = new RadioService(playerService as any, bilibiliApi);
       playerService.setRadioService(radioService as any);
 
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const config = require('./config/config') as any;
-      const dailyHachimiService = new DailyHachimiService(config, preExtractionService);
+      const dailyHachimiService = new DailyHachimiService(config as any, preExtractionService);
       Debug.trace('inject.dependencies');
 
       // Bot client
@@ -160,6 +168,11 @@ class BilibiliDiscordBot {
       if (this.metricsServer) {
         await this.metricsServer.stop().catch(() => {});
         this.metricsServer = null;
+      }
+
+      if (this.youtubeCookieRefreshService) {
+        this.youtubeCookieRefreshService.stop();
+        this.youtubeCookieRefreshService = null;
       }
 
       this.isRunning = false;
