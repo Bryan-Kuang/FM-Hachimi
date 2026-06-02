@@ -176,6 +176,7 @@ class RadioService {
       if (player) {
         player.advanceHook = null;
         player.radioMode = false;
+        player.setLoopMode('queue');
       }
     } catch (e: unknown) {
       logger.warn('Radio stop: failed to detach hook', { guildId, error: (e as Error).message });

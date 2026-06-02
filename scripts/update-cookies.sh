@@ -24,8 +24,8 @@ fi
 
 echo "Uploading cookies to server..."
 REMOTE_COOKIE_DIR="$REMOTE_DIR/secrets"
-REMOTE_COOKIE_FILE="$REMOTE_COOKIE_DIR/cookies.txt"
-REMOTE_TMP_FILE="$REMOTE_COOKIE_DIR/cookies.txt.upload"
+REMOTE_COOKIE_FILE="$REMOTE_COOKIE_DIR/bilibili_cookies.txt"
+REMOTE_TMP_FILE="$REMOTE_COOKIE_DIR/bilibili_cookies.txt.upload"
 
 ssh -i "$SSH_KEY" "$SERVER" "mkdir -p '$REMOTE_COOKIE_DIR' && touch '$REMOTE_COOKIE_FILE' && chmod 600 '$REMOTE_COOKIE_FILE'"
 scp -i "$SSH_KEY" "$COOKIES_FILE" "$SERVER:$REMOTE_TMP_FILE"

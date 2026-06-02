@@ -207,7 +207,7 @@ class YouTubeExtractor {
       process.env.YOUTUBE_COOKIES_FILE,
       '/app/secrets/youtube_cookies.txt',
       'youtube_cookies.txt',
-      'cookies.txt',
+      'bilibili_cookies.txt',
     ];
 
     for (const candidate of candidates) {

@@ -221,7 +221,7 @@ const config: BotConfig = {
     hachimiPageSize: parseInt(process.env.HACHIMI_PAGE_SIZE!) || 50,
     hachimiMaxPages: parseInt(process.env.HACHIMI_MAX_PAGES!) || 3,
     searchTimeout: parseInt(process.env.BILIBILI_SEARCH_TIMEOUT!) || 8000,
-    cookiesFile: process.env.BILIBILI_COOKIES_FILE || "",
+    cookiesFile: process.env.BILIBILI_COOKIES_FILE || "/app/secrets/bilibili_cookies.txt",
     nativeExtractorEnabled: process.env.BILIBILI_NATIVE_EXTRACTOR_ENABLED !== "false",
     nativeFallbackToYtdlp: process.env.BILIBILI_NATIVE_FALLBACK_TO_YTDLP !== "false",
     preextractEnabled: process.env.BILIBILI_PREEXTRACT_ENABLED !== "false",

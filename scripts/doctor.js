@@ -147,8 +147,8 @@ async function main() {
     warnings.push("secrets/youtube_cookies.txt is missing. The bot will try automatic YouTube cookie export in Docker.");
   }
 
-  if (!fs.existsSync(path.join(root, "secrets", "cookies.txt"))) {
-    notes.push("secrets/cookies.txt is missing. Bilibili usually works without it, but cloud IPs may need cookies.");
+  if (!fs.existsSync(path.join(root, "secrets", "bilibili_cookies.txt"))) {
+    notes.push("secrets/bilibili_cookies.txt is missing. Bilibili usually works without it, but cloud IPs may need cookies.");
   }
 
   const ytDlpEnvironment = evaluateYtDlpEnvironment(collectYtDlpEnvironment());

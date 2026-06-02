@@ -97,7 +97,7 @@ Bilibili cookies are optional, but may help cloud IPs:
 
 ```bash
 yt-dlp --cookies-from-browser chrome \
-  --cookies secrets/cookies.txt \
+  --cookies secrets/bilibili_cookies.txt \
   --skip-download \
   "https://www.bilibili.com/video/BV1GJ411x7h7"
 ```

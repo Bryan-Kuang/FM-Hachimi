@@ -22,10 +22,11 @@ migrate_cookie_file() {
   fi
 }
 
-migrate_cookie_file cookies.txt secrets/cookies.txt
+migrate_cookie_file cookies.txt secrets/bilibili_cookies.txt
 migrate_cookie_file youtube_cookies.txt secrets/youtube_cookies.txt
 rm -f cookies.txt
 rm -f youtube_cookies.txt
+rm -f bilibili_cookies.txt
 
 echo "[deploy] rebuilding containers..."
 if ! timeout 600 docker compose up -d --build 2>&1; then
