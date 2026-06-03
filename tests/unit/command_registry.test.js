@@ -133,13 +133,12 @@ describe("command registry", () => {
       "help",
       "search",
       "hachimi",
+      "radio",
       "daily-hachimi",
     ]);
 
     const testingCommands = registry.getTestingCommands(null, null);
-    expect(testingCommands.map((command) => command.data.name)).toEqual(["radio"]);
-    expect(testingCommands[0].featureName).toBe("Radio mode");
-    expect(testingCommands[0].data.toJSON().description.startsWith("[Testing] ")).toBe(true);
+    expect(testingCommands.map((command) => command.data.name)).toEqual([]);
   });
 
   test("prefixes testing command descriptions and keeps them within Discord limits", () => {
