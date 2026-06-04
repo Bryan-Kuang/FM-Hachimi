@@ -22,10 +22,29 @@ Runbook for deploying and operating F.M. Hachimi on the VPS.
 SSHes to the VPS → `git pull --ff-only` → `scripts/deploy/remote-deploy.sh` →
 `docker compose up -d --build` → healthcheck poll. Failures ping Discord.
 
-Slash commands are **not** auto-registered — run the **Deploy Discord Commands** workflow
-(`workflow_dispatch`) separately. Use `global` for production. `clear_guild` removes
-duplicate guild-scoped copies from a server (duplicates appear when a command is
-registered both globally and guild-scoped — never deploy the same command both ways).
+### Slash commands & the testing system
+
+Commands are **not** auto-registered — run the **Deploy Discord Commands** workflow
+(`workflow_dispatch`) separately. A command's `stage` field decides where it can live:
+
+- `stage: 'stable'` (or unset) → **global** (every server, ~1h propagation).
+- `stage: 'testing'` → **test guild only**, plus a runtime guard (`assertTestingGuild`)
+  that rejects it elsewhere — so testing features are gated even if registration leaks.
+  Testing buttons use a `testing:` customId prefix.
+
+Workflow options:
+
+| Option | Scope | Use |
+|---|---|---|
+| `global` | stable cmds, everywhere | **production default** |
+| `test` | `stage:'testing'` cmds → `TEST_GUILD_ID` | try a feature in the test server (no dups) |
+| `guild` | **all** cmds → one guild (legacy) | instant testing; **duplicates global — avoid in prod** |
+| `clear_guild` | clear a guild's scoped cmds | remove duplicates left by `guild` |
+
+**Duplicates** = a command registered both globally and guild-scoped. Use `global` + `test`
+(non-overlapping → never duplicates); reserve `guild` for deliberate cases and clean up with
+`clear_guild`. Note: `stage:'testing'` is currently unused — tag a command with it to route it
+through the `test` flow.
 
 ## YouTube cookies — two tiers
 

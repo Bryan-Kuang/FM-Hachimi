@@ -4,16 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Deploy target: guild is instant, global can take up to 1h, clear_guild removes guild-scoped duplicates'
+        description: 'global=stable cmds everywhere (~1h); test=stage:testing cmds to the test guild only (instant, no dups); guild=ALL cmds to one guild (instant, can duplicate global); clear_guild=remove guild-scoped cmds'
         required: false
         default: 'global'
         type: choice
         options:
           - global
+          - test
           - guild
           - clear_guild
       guild_id:
-        description: 'Guild ID for guild / clear_guild. Leave empty to use the GUILD_ID secret.'
+        description: 'Guild ID for guild / clear_guild. Leave empty to use the GUILD_ID secret. (test uses TEST_GUILD_ID, ignores this.)'
         required: false
 
 jobs:
@@ -37,8 +38,12 @@ jobs:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           GUILD_ID: ${{ (inputs.environment == 'guild' || inputs.environment == 'clear_guild') && (inputs.guild_id || secrets.GUILD_ID) || '' }}
-          # The script only does a guild-scoped deploy/clear when this flag is set;
-          # without it, `guild` silently fell through to a global deploy and
-          # `clear_guild` threw on its own guard. Set it for both guild options.
+          # `test` deploys only stage:'testing' commands to TEST_GUILD_ID (clean,
+          # no overlap with global -> no duplicates).
+          DEPLOY_TEST_COMMANDS: ${{ inputs.environment == 'test' && 'true' || '' }}
+          # The script only does a legacy guild-scoped deploy/clear when this flag
+          # is set; without it, `guild` silently fell through to a global deploy and
+          # `clear_guild` threw on its own guard. (Mutually exclusive with the test
+          # flag, which createDeploymentPlan enforces.)
           DEPLOY_LEGACY_GUILD_COMMANDS: ${{ (inputs.environment == 'guild' || inputs.environment == 'clear_guild') && 'true' || '' }}
           CLEAR_GUILD_COMMANDS: ${{ inputs.environment == 'clear_guild' && 'true' || '' }}
