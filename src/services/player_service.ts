@@ -26,7 +26,6 @@ import type {
   PlayResult,
   QueueInfo,
   StateChangedEvent,
-  ButtonResult,
 } from './types';
 
 interface PreExtractionServiceLike {
@@ -372,7 +371,11 @@ class PlayerService extends EventEmitter {
   // Button interaction handler
   // ---------------------------------------------------------------------------
 
-  async handleButtonInteraction(interaction: { customId: string; guild: { id: string }; channelId: string }): Promise<ButtonResult> {
+  // Single source of truth for button -> action mapping. Control buttons emit
+  // state through this service's own pause/skip/etc.; queue/loop buttons act on
+  // the player directly. (Previously this delegated the queue cases to a second,
+  // near-identical switch in AudioManager — that duplicate is now gone.)
+  async handleButtonInteraction(interaction: { customId: string; guild: { id: string }; channelId: string }): Promise<ActionResult> {
     const customId = interaction.customId;
     const guildId  = interaction.guild.id;
 
@@ -398,7 +401,56 @@ class PlayerService extends EventEmitter {
       if (customId === 'stop') return { success: await this.stop(guildId) };
     }
 
-    return this.audioManager.handleButtonInteraction(interaction) as Promise<ButtonResult>;
+    // Queue / loop buttons.
+    const player = this.getPlayer(guildId);
+    switch (customId) {
+      case 'queue_clear':
+        player.clearQueue();
+        return { success: true, player: player.getState() };
+
+      case 'queue_shuffle':
+        if (player.queue.length <= 1) {
+          return {
+            success: false,
+            error: 'Not enough tracks to shuffle',
+            suggestion: 'Add more tracks to the queue.',
+          };
+        }
+        player.shuffleQueue();
+        return { success: true, player: player.getState() };
+
+      case 'loop':
+        return { success: true, showMenu: true };
+
+      case 'queue_loop': {
+        const nextMode =
+          player.loopMode === 'none' ? 'queue' :
+          player.loopMode === 'queue' ? 'track' : 'none';
+        player.setLoopMode(nextMode);
+        return { success: true, mode: nextMode, player: player.getState() };
+      }
+
+      case 'queue_remove':
+        return { success: true, showMenu: true };
+
+      case 'queue':
+        return { success: true, showQueue: true };
+
+      default:
+        if (customId.startsWith('queue_delete_')) {
+          const index = parseInt(customId.split('_')[2], 10);
+          if (!isNaN(index)) {
+            if (player.queue.length === 0) {
+              return { success: false, error: 'Queue is empty', suggestion: 'Add tracks to the queue first.' };
+            }
+            if (!player.removeFromQueue(index)) {
+              return { success: false, error: 'Failed to remove track', suggestion: 'Check the track index and try again.' };
+            }
+            return { success: true, player: player.getState() };
+          }
+        }
+        return { success: false, error: 'Unknown button interaction' };
+    }
   }
 }
 
