@@ -20,10 +20,16 @@ jobs:
     steps:
       - name: Deploy to Oracle Cloud
         uses: appleboy/ssh-action@v1
+        env:
+          # Pull the exact image CI built for this commit (not a moving :latest).
+          IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+          GHCR_USER: ${{ github.repository_owner }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN
           timeout: 30s
           command_timeout: 15m
           script: |

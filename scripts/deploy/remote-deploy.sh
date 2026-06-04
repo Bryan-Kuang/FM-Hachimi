@@ -28,12 +28,28 @@ rm -f cookies.txt
 rm -f youtube_cookies.txt
 rm -f bilibili_cookies.txt
 
-echo "[deploy] rebuilding containers..."
-if ! timeout 600 docker compose up -d --build 2>&1; then
-  echo "[deploy] recreate conflict or build failure; cleaning up and retrying..."
-  timeout 60 docker compose down --remove-orphans 2>/dev/null || true
-  timeout 600 docker compose up -d --build
+# Pull the prebuilt image from GHCR (built + pushed by CI) instead of rebuilding
+# on the VPS. IMAGE_TAG is the commit SHA passed by the deploy workflow; falls
+# back to latest for manual runs. GHCR_TOKEN is only needed for a private
+# package — a public package pulls without auth.
+export IMAGE_TAG="${IMAGE_TAG:-latest}"
+
+if [ -n "${GHCR_TOKEN:-}" ]; then
+  echo "[deploy] logging in to GHCR..."
+  echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-x}" --password-stdin
 fi
+
+echo "[deploy] pulling image (tag: $IMAGE_TAG)..."
+timeout 300 docker compose pull
+
+echo "[deploy] starting containers..."
+if ! timeout 120 docker compose up -d 2>&1; then
+  echo "[deploy] recreate conflict; cleaning up and retrying..."
+  timeout 60 docker compose down --remove-orphans 2>/dev/null || true
+  timeout 120 docker compose up -d
+fi
+
+docker logout ghcr.io >/dev/null 2>&1 || true
 
 echo "[deploy] pruning unused images..."
 timeout 60 docker image prune -f
