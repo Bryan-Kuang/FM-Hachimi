@@ -56,7 +56,7 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
       if (route.platform === 'youtube' && route.isUrl) {
         const ytExtractor = playbackService.getYouTubeExtractor();
         if (!ytExtractor) {
-          await interaction.editReply({ content: '⚠️ YouTube support is not available' });
+          await interaction.editReply({ content: '[!] YouTube support is not available' });
           return;
         }
 
@@ -76,11 +76,11 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
               content: '🔒 YouTube auth check failed after automatic cookie refresh. The bot account may need a fresh VPS browser login.',
             });
           } else if (msg.includes('unavailable') || msg.includes('private')) {
-            await interaction.editReply({ content: '⚠️ Video is unavailable or private' });
+            await interaction.editReply({ content: '[!] Video is unavailable or private' });
           } else if (msg.includes('Age-restricted')) {
-            await interaction.editReply({ content: '⚠️ Age-restricted video (login required)' });
+            await interaction.editReply({ content: '[!] Age-restricted video (login required)' });
           } else {
-            await interaction.editReply({ content: `⚠️ YouTube extraction failed: ${msg.substring(0, 100)}` });
+            await interaction.editReply({ content: `[!] YouTube extraction failed: ${msg.substring(0, 100)}` });
           }
           logger.error('YouTube extraction failed in play command', {
             url: route.normalizedUrl,
@@ -91,7 +91,7 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         }
 
         const trackTitle = (result.track as { title?: string } | undefined)?.title;
-        await interaction.editReply({ content: `🎵 Added: ${trackTitle || route.raw}` });
+        await interaction.editReply({ content: `>> Added: ${trackTitle || route.raw}` });
         logger.info('Play command completed (YouTube)', {
           query,
           url: route.normalizedUrl,
@@ -118,7 +118,7 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         }
 
         const trackTitle = (result.track as { title?: string } | undefined)?.title;
-        await interaction.editReply({ content: `🎵 已添加: ${trackTitle || url}` });
+        await interaction.editReply({ content: `>> 已添加: ${trackTitle || url}` });
         logger.info('Play command completed (Bilibili)', {
           query,
           url,
@@ -131,13 +131,13 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
       // ─── Unsupported URL ────────────────────────────────────────────────────
       if (route.isUrl && route.platform === 'unknown') {
         await interaction.editReply({
-          content: '⚠️ 不支持的链接格式。目前支持 Bilibili 和 YouTube 链接。',
+          content: '[!] 不支持的链接格式。目前支持 Bilibili 和 YouTube 链接。',
         });
         return;
       }
 
       // ─── Keyword search (Bilibili + YouTube) ─────────────────────────────────
-      await interaction.editReply({ content: `🔍 Searching "${query}" on Bilibili & YouTube...` });
+      await interaction.editReply({ content: `[?] Searching "${query}" on Bilibili & YouTube...` });
 
       const ytExtractorForSearch = playbackService.getYouTubeExtractor();
       const perPlatformLimit = 5;

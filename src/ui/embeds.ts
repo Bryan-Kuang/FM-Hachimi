@@ -89,7 +89,7 @@ class EmbedBuilders {
       playing: 0x1DB954, // Spotify green
       paused: 0xFF6B35,  // Orange
     };
-    const playingLabel = radioMode ? '📻 Radio · Now Playing' : 'Now Playing';
+    const playingLabel = radioMode ? 'Radio · Now Playing' : 'Now Playing';
     const statusText = isPlaying ? playingLabel : 'Paused';
 
     const embed = new EmbedBuilder()
@@ -157,12 +157,12 @@ class EmbedBuilders {
     const { page = 1, itemsPerPage = 10, totalPages = 1, currentTrack = null } = options;
 
     const embed = new EmbedBuilder()
-      .setTitle('📋 Music Queue')
+      .setTitle('[=] Music Queue')
       .setColor(0x5865F2)
       .setTimestamp();
 
     if (queue.length === 0 && !currentTrack) {
-      embed.setDescription('🎵 **Queue is empty**\nAdd some tracks to get started!');
+      embed.setDescription('**Queue is empty**\nAdd some tracks to get started!');
       embed.setColor(0x6C757D);
       return embed;
     }
@@ -172,7 +172,7 @@ class EmbedBuilders {
     if (currentTrack) {
       const title = Formatters.escapeMarkdown(currentTrack.title || 'Unknown');
       const bv = currentTrack.videoId || currentTrack.bvid || '';
-      description += '▶️ **Now Playing**\n';
+      description += '>> Now Playing\n';
       description += `${title}`;
       if (bv) description += ` • \`${bv}\``;
       description += '\n';
@@ -183,7 +183,7 @@ class EmbedBuilders {
     const displayQueue = queue.slice(startIndex, endIndex);
 
     if (displayQueue.length > 0) {
-      description += '\n🎶 **Up Next**\n';
+      description += '\n> Up Next\n';
       displayQueue.forEach((video, index) => {
         const pos = startIndex + index + 1;
         const title = Formatters.escapeMarkdown(video.title || 'Unknown');
@@ -195,12 +195,12 @@ class EmbedBuilders {
     }
 
     if (totalPages > 1) {
-      description += `\n📄 Page **${page}** / **${totalPages}**`;
+      description += `\nPage **${page}** / **${totalPages}**`;
     }
 
     embed.setDescription(description);
     embed.setFooter({
-      text: `🎵 Bilibili Player • ${queue.length} track${queue.length !== 1 ? 's' : ''} in queue`,
+      text: `Bilibili Player • ${queue.length} track${queue.length !== 1 ? 's' : ''} in queue`,
       iconURL: 'https://cdn.discordapp.com/emojis/741605543046807626.png',
     });
 
@@ -219,7 +219,7 @@ class EmbedBuilders {
     } = options;
 
     const embed = new EmbedBuilder()
-      .setTitle(`❌ ${title}`)
+      .setTitle(`[✗] ${title}`)
       .setDescription(`**${description}**`)
       .setColor(color);
 
@@ -228,11 +228,11 @@ class EmbedBuilders {
     const fields: { name: string; value: string; inline: boolean }[] = [];
 
     if (errorCode) {
-      fields.push({ name: '🔍 Error Code', value: `\`${errorCode}\``, inline: true });
+      fields.push({ name: 'Error Code', value: `\`${errorCode}\``, inline: true });
     }
 
     if (suggestion) {
-      fields.push({ name: '💡 Suggestion', value: suggestion, inline: false });
+      fields.push({ name: 'Suggestion', value: suggestion, inline: false });
     }
 
     const troubleshootingTips = [
@@ -242,12 +242,12 @@ class EmbedBuilders {
       '• Contact support if the problem persists',
     ];
 
-    fields.push({ name: '🛠️ Troubleshooting', value: troubleshootingTips.join('\n'), inline: false });
+    fields.push({ name: 'Troubleshooting', value: troubleshootingTips.join('\n'), inline: false });
 
     if (fields.length > 0) embed.addFields(...fields);
 
     embed.setFooter({
-      text: '🎵 Bilibili Player • Need help? Check our documentation',
+      text: 'Bilibili Player • Need help? Check our documentation',
       iconURL: 'https://cdn.discordapp.com/emojis/741605543046807626.png',
     });
 
@@ -259,7 +259,7 @@ class EmbedBuilders {
    */
   static createSuccessEmbed(title: string, description: string): EmbedBuilder {
     return new EmbedBuilder()
-      .setTitle(`✅ ${title}`)
+      .setTitle(`[✓] ${title}`)
       .setDescription(description)
       .setColor(0x00ff00)
       .setTimestamp();
@@ -270,7 +270,7 @@ class EmbedBuilders {
    */
   static createLoadingEmbed(description = 'Processing...'): EmbedBuilder {
     return new EmbedBuilder()
-      .setTitle('⏳ Loading')
+      .setTitle('[...] Loading')
       .setDescription(description)
       .setColor(0xffff00)
       .setTimestamp();
@@ -281,7 +281,7 @@ class EmbedBuilders {
    */
   static createHelpEmbed(commands: CommandDescriptor[]): EmbedBuilder {
     const embed = new EmbedBuilder()
-      .setTitle('🎵 Bilibili Discord Bot - Commands')
+      .setTitle('Bilibili Discord Bot - Commands')
       .setDescription('Play audio from Bilibili videos in Discord voice channels!')
       .setColor(0x00ae86)
       .setTimestamp();
@@ -292,12 +292,12 @@ class EmbedBuilders {
     });
 
     if (commandText) {
-      embed.addFields({ name: '📝 Available Commands', value: commandText, inline: false });
+      embed.addFields({ name: 'Commands', value: commandText, inline: false });
     }
 
     embed.addFields(
       {
-        name: '🔗 Supported URLs',
+        name: 'Supported URLs',
         value: [
           '• `bilibili.com/video/BV*`',
           '• `bilibili.com/video/av*`',
@@ -307,7 +307,7 @@ class EmbedBuilders {
         inline: true,
       },
       {
-        name: '⚙️ Features',
+        name: 'Features',
         value: [
           '• High-quality audio streaming',
           '• Interactive controls',
@@ -328,7 +328,7 @@ class EmbedBuilders {
    */
   static createBotInfoEmbed(stats: BotStats): EmbedBuilder {
     const embed = new EmbedBuilder()
-      .setTitle('🤖 Bot Information')
+      .setTitle('[@] Bot Information')
       .setColor(0x7289da)
       .setTimestamp();
 
@@ -336,7 +336,7 @@ class EmbedBuilders {
       const uptimeFormatted = Formatters.formatDuration(stats.uptime ?? 0);
       embed.addFields(
         {
-          name: '📊 Statistics',
+          name: 'Statistics',
           value: [
             `**Servers:** ${stats.guilds}`,
             `**Uptime:** ${uptimeFormatted}`,
@@ -345,11 +345,11 @@ class EmbedBuilders {
           inline: true,
         },
         {
-          name: '🔧 Status',
+          name: 'Status',
           value: [
             `**Name:** ${stats.username}`,
             `**ID:** ${stats.id}`,
-            '**Status:** 🟢 Online',
+            '**Status:** Online',
           ].join('\n'),
           inline: true,
         },
@@ -366,7 +366,7 @@ class EmbedBuilders {
    */
   static createSearchResultsEmbed(results: SearchResultItem[], keyword: string): EmbedBuilder {
     const embed = new EmbedBuilder()
-      .setTitle('🔍 Search Results')
+      .setTitle('[?] Search Results')
       .setDescription(`Found ${results.length} results for "**${Formatters.escapeMarkdown(keyword)}**"`)
       .setColor(0x00ae86)
       .setTimestamp();
@@ -381,7 +381,7 @@ class EmbedBuilders {
 
       embed.addFields({
         name: `${index + 1}. ${Formatters.escapeMarkdown(title)}`,
-        value: `👤 **${Formatters.escapeMarkdown(uploader)}** | ${duration} | 👁️ **${viewCount} views**`,
+        value: `by **${Formatters.escapeMarkdown(uploader)}** | ${duration} | **${viewCount} views**`,
         inline: false,
       });
     });
@@ -403,34 +403,34 @@ class EmbedBuilders {
   ): EmbedBuilder {
     const total = biliResults.length + ytResults.length;
     const embed = new EmbedBuilder()
-      .setTitle('🔍 Search Results')
+      .setTitle('[?] Search Results')
       .setDescription(`Found ${total} results for "**${Formatters.escapeMarkdown(keyword)}**"`)
       .setColor(0x00ae86)
       .setTimestamp();
 
     if (biliResults.length > 0) {
-      embed.addFields({ name: '📺 Bilibili', value: '​', inline: false });
+      embed.addFields({ name: 'Bilibili', value: '\u200B', inline: false });
       biliResults.forEach((result, index) => {
         const title = result.title.length > 70 ? result.title.substring(0, 70) + '...' : result.title;
         const uploader = result.uploader || 'Unknown';
         const duration = Formatters.formatInlineTimeHms(result.duration);
         embed.addFields({
           name: `B${index + 1}. ${Formatters.escapeMarkdown(title)}`,
-          value: `👤 ${Formatters.escapeMarkdown(uploader)} | ${duration}`,
+          value: `by ${Formatters.escapeMarkdown(uploader)} | ${duration}`,
           inline: false,
         });
       });
     }
 
     if (ytResults.length > 0) {
-      embed.addFields({ name: '▶️ YouTube', value: '​', inline: false });
+      embed.addFields({ name: 'YouTube', value: '\u200B', inline: false });
       ytResults.forEach((result, index) => {
         const title = result.title.length > 70 ? result.title.substring(0, 70) + '...' : result.title;
         const uploader = result.uploader || 'Unknown';
         const duration = Formatters.formatInlineTimeHms(result.duration);
         embed.addFields({
           name: `Y${index + 1}. ${Formatters.escapeMarkdown(title)}`,
-          value: `👤 ${Formatters.escapeMarkdown(uploader)} | ${duration}`,
+          value: `by ${Formatters.escapeMarkdown(uploader)} | ${duration}`,
           inline: false,
         });
       });

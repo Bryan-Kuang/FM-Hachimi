@@ -43,7 +43,7 @@ const createStopCommand = (playbackService: any) => ({
       const ok = await playbackService.stop(interaction.guild.id) as boolean;
 
       await interaction.reply({
-        content: ok ? '⏹️ Stopped' : 'Stop failed',
+        content: ok ? '[■] Stopped' : 'Stop failed',
         flags: MessageFlags.Ephemeral,
       });
 

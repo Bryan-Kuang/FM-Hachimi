@@ -332,7 +332,7 @@ async function playBilibiliSelection(
   const title = getTitle(addResult.track) || titleHint || 'selected video';
   const successEmbed = EmbedBuilders.createSuccessEmbed(
     'Added to Queue',
-    `📺 **${title}** has been added to the queue`,
+    `[TV] **${title}** has been added to the queue`,
   );
   await interaction.editReply({ content: '', embeds: [successEmbed] });
   return true;
@@ -366,7 +366,7 @@ async function playYouTubeSelection(
   const title = getTitle(addResult.track) || getTitle(addResult.videoData) || titleHint || 'selected video';
   const successEmbed = EmbedBuilders.createSuccessEmbed(
     'Added to Queue',
-    `▶️ **${title}** has been added to the queue`,
+    `>> **${title}** has been added to the queue`,
   );
   await interaction.editReply({ embeds: [successEmbed] });
   return true;

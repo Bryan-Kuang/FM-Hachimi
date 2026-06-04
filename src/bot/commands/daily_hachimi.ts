@@ -63,7 +63,7 @@ const createDailyHachimiCommand = (
     if (sub === 'setup' || sub === 'disable') {
       if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageGuild)) {
         await interaction.reply({
-          content: '❌ 你需要「管理服务器」权限才能使用此命令。',
+          content: '[✗] 你需要「管理服务器」权限才能使用此命令。',
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -89,7 +89,7 @@ const createDailyHachimiCommand = (
         error: e.message,
         stack: e.stack,
       });
-      await interaction.editReply({ content: `❌ 发生内部错误：${e.message}` });
+      await interaction.editReply({ content: `[✗] 发生内部错误：${e.message}` });
     }
   },
 });
@@ -108,7 +108,7 @@ async function handleSetup(
 
   const timeMatch = timeStr.match(/^(\d{1,2}):(\d{2})$/);
   if (!timeMatch) {
-    await interaction.editReply({ content: '❌ 时间格式不正确，请使用 `HH:MM`（例如 `12:00` 或 `08:30`）。' });
+    await interaction.editReply({ content: '[✗] 时间格式不正确，请使用 `HH:MM`（例如 `12:00` 或 `08:30`）。' });
     return;
   }
 
@@ -116,7 +116,7 @@ async function handleSetup(
   const minute = parseInt(timeMatch[2], 10);
 
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-    await interaction.editReply({ content: '❌ 时间超出范围，小时 0-23，分钟 0-59。' });
+    await interaction.editReply({ content: '[✗] 时间超出范围，小时 0-23，分钟 0-59。' });
     return;
   }
 
@@ -127,7 +127,7 @@ async function handleSetup(
     const perms = (channel as any).permissionsFor?.(botMember);
     if (perms && !perms.has(['SendMessages', 'EmbedLinks'])) {
       await interaction.editReply({
-        content: `❌ 机器人在 ${channel} 没有「发送消息」和「嵌入链接」权限，请先赋予权限再试。`,
+        content: `[✗] 机器人在 ${channel} 没有「发送消息」和「嵌入链接」权限，请先赋予权限再试。`,
       });
       return;
     }
@@ -149,7 +149,7 @@ async function handleSetup(
     });
     const errEmbed = new EmbedBuilder()
       .setColor(0xE74C3C)
-      .setTitle('❌ 配置保存失败')
+      .setTitle('[✗] 配置保存失败')
       .setDescription(e.message);
     await interaction.editReply({ embeds: [errEmbed] });
     return;
@@ -157,7 +157,7 @@ async function handleSetup(
 
   const embed = new EmbedBuilder()
     .setColor(0x00B5FF)
-    .setTitle('✅ 每日哈基米推荐已配置')
+    .setTitle('[✓] 每日哈基米推荐已配置')
     .addFields(
       { name: '📢 频道', value: `${channel}`, inline: true },
       {
@@ -165,7 +165,7 @@ async function handleSetup(
         value: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} Toronto 时区`,
         inline: true,
       },
-      { name: '🎵 每日数量', value: `${count} 首`, inline: true },
+      { name: '每日数量', value: `${count} 首`, inline: true },
     )
     .setFooter({ text: '使用 /daily-hachimi disable 可随时关闭' });
 
@@ -178,11 +178,11 @@ async function handleDisable(
 ): Promise<void> {
   const existing = service.getStatus(interaction.guild.id);
   if (!existing) {
-    await interaction.editReply({ content: '⚠️ 本服务器尚未开启每日推荐，无需关闭。' });
+    await interaction.editReply({ content: '[!] 本服务器尚未开启每日推荐，无需关闭。' });
     return;
   }
   service.removeSchedule(interaction.guild.id);
-  await interaction.editReply({ content: '✅ 已关闭本服务器的每日哈基米推荐。' });
+  await interaction.editReply({ content: '[✓] 已关闭本服务器的每日哈基米推荐。' });
 }
 
 async function handleStatus(
@@ -193,7 +193,7 @@ async function handleStatus(
 
   if (!cfg) {
     await interaction.editReply({
-      content: 'ℹ️ 本服务器尚未开启每日推荐。服务器管理员可使用 `/daily-hachimi setup` 开启。',
+      content: '[i] 本服务器尚未开启每日推荐。服务器管理员可使用 `/daily-hachimi setup` 开启。',
     });
     return;
   }
@@ -208,7 +208,7 @@ async function handleStatus(
         value: `${String(cfg.hour).padStart(2, '0')}:${String(cfg.minute).padStart(2, '0')} Toronto 时区`,
         inline: true,
       },
-      { name: '🎵 每日数量', value: `${cfg.count} 首`, inline: true },
+      { name: '每日数量', value: `${cfg.count} 首`, inline: true },
     );
 
   await interaction.editReply({ embeds: [embed] });
