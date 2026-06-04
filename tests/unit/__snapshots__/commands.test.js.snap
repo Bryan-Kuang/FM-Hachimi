@@ -3,7 +3,7 @@
 exports[`Bot Commands Coverage Help Command should display help info 1`] = `
 {
   "description": "以下是所有可用的命令：",
-  "title": "🎵 Bilibili音乐机器人 - 命令帮助",
+  "title": "Bilibili Music Bot - Commands",
 }
 `;
 
@@ -24,21 +24,21 @@ exports[`Bot Commands Coverage NowPlaying Command {
 
 exports[`Bot Commands Coverage Queue Command { description: '空队列', scene: [Object], queueResult: [Object] } 1`] = `
 {
-  "description": "🎵 **Queue is empty**
+  "description": "**Queue is empty**
 Add some tracks to get started!",
-  "title": "📋 Music Queue",
+  "title": "[=] Music Queue",
 }
 `;
 
 exports[`Bot Commands Coverage Queue Command { description: '非空队列', scene: [Object], queueResult: [Object] } 1`] = `
 {
-  "description": "▶️ **Now Playing**
+  "description": ">> Now Playing
 A
 
-🎶 **Up Next**
+> Up Next
 \`1.\` A
 \`2.\` B
 ",
-  "title": "📋 Music Queue",
+  "title": "[=] Music Queue",
 }
 `;

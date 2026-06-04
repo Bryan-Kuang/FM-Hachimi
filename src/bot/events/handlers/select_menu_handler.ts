@@ -332,7 +332,7 @@ async function playBilibiliSelection(
   const title = getTitle(addResult.track) || titleHint || 'selected video';
   const successEmbed = EmbedBuilders.createSuccessEmbed(
     'Added to Queue',
-    `📺 **${title}** has been added to the queue`,
+    `[TV] **${title}** has been added to the queue`,
   );
   await interaction.editReply({ content: '', embeds: [successEmbed] });
   return true;
@@ -366,7 +366,7 @@ async function playYouTubeSelection(
   const title = getTitle(addResult.track) || getTitle(addResult.videoData) || titleHint || 'selected video';
   const successEmbed = EmbedBuilders.createSuccessEmbed(
     'Added to Queue',
-    `▶️ **${title}** has been added to the queue`,
+    `>> **${title}** has been added to the queue`,
   );
   await interaction.editReply({ embeds: [successEmbed] });
   return true;
@@ -596,7 +596,7 @@ async function handlePlaySearch(interaction: any, customId: string, playerServic
     const lowerMsg = msg.toLowerCase();
     let content = 'An error occurred while adding the video.';
     if (lowerMsg.includes('auth/bot check') || lowerMsg.includes('automatic cookie refresh') || lowerMsg.includes('cookies expired')) {
-      content = '🔒 YouTube auth check failed after automatic cookie refresh. The bot account may need a fresh VPS browser login.';
+      content = '[✗] YouTube auth check failed after automatic cookie refresh. The bot account may need a fresh VPS browser login.';
     }
 
     const errorEmbed = EmbedBuilders.createErrorEmbed('Error Adding Video', content, { suggestion: 'Please try again.' });

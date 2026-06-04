@@ -28,7 +28,7 @@ const createSkipCommand = (playbackService: any) => ({
       playbackService.setUIContext(interaction.guild.id, interaction.channelId);
       const ok = await playbackService.skip(interaction.guild.id) as boolean;
 
-      await interaction.editReply(ok ? '⏭️ 已跳过' : '没有下一首');
+      await interaction.editReply(ok ? '>> 已跳过' : '没有下一首');
       logger.info('Skip command executed', { user: user.username, guild: interaction.guild.name });
     } catch (e: unknown) {
       logger.error('Skip command failed', { user: interaction.user.username, error: (e as Error).message });

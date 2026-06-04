@@ -28,7 +28,7 @@ const createResumeCommand = (playbackService: any) => ({
       playbackService.setUIContext(interaction.guild.id, interaction.channelId);
       const ok = playbackService.resume(interaction.guild.id) as boolean;
 
-      await interaction.editReply(ok ? '▶️ 已恢复' : '恢复失败');
+      await interaction.editReply(ok ? '> 已恢复' : '恢复失败');
       logger.info('Resume command executed', { user: user.username, guild: interaction.guild.name });
     } catch (e: unknown) {
       logger.error('Resume command failed', { user: interaction.user.username, error: (e as Error).message });

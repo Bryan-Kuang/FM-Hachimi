@@ -29,7 +29,7 @@ const createPauseCommand = (playbackService: any) => ({
       const ok = playbackService.pause(interaction.guild.id) as boolean;
 
       // editReply with plain string (test contract)
-      await interaction.editReply(ok ? '⏸️ 已暂停' : '暂停失败');
+      await interaction.editReply(ok ? '[||] 已暂停' : '暂停失败');
       logger.info('Pause command executed', { user: user.username, guild: interaction.guild.name });
     } catch (e: unknown) {
       logger.error('Pause command failed', { user: interaction.user.username, error: (e as Error).message });

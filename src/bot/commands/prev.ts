@@ -28,7 +28,7 @@ const createPrevCommand = (playbackService: any) => ({
       playbackService.setUIContext(interaction.guild.id, interaction.channelId);
       const ok = await playbackService.previous(interaction.guild.id) as boolean;
 
-      await interaction.editReply(ok ? '⏮️ 已返回上一首' : '没有上一首');
+      await interaction.editReply(ok ? '|< 已返回上一首' : '没有上一首');
       logger.info('Prev command executed', { user: user.username, guild: interaction.guild.name });
     } catch (e: unknown) {
       logger.error('Prev command failed', { user: interaction.user.username, error: (e as Error).message });

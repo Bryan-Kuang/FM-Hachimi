@@ -58,7 +58,7 @@ const createHachimiCommand = (playbackService: any, queueService: any) => {
         const queue = commandQueue.getQueue(interaction.guild.id, 'hachimi');
 
         if (queue.count > 0) {
-          await interaction.editReply({ content: '⚠️ 哈基米正在运行中，请等待完成后再试。' });
+          await interaction.editReply({ content: '[!] 哈基米正在运行中，请等待完成后再试。' });
           return;
         }
 
@@ -70,7 +70,7 @@ const createHachimiCommand = (playbackService: any, queueService: any) => {
           try {
             playbackService.setUIContext(interaction.guild.id, interaction.channelId);
             const loadingEmbed = EmbedBuilders.createLoadingEmbed(
-              '🔍 Searching for Hachimi videos that meet quality criteria...',
+              '[?] Searching for Hachimi videos that meet quality criteria...',
             );
             await interaction.editReply({ embeds: [loadingEmbed] });
             await command.searchAndAddHachimiVideos(interaction, user.username, signal);
@@ -224,7 +224,7 @@ const createHachimiCommand = (playbackService: any, queueService: any) => {
         }
 
         const successEmbed = EmbedBuilders.createSuccessEmbed(
-          '🎵 Hachimi Playlist Ready!',
+          'Hachimi Playlist Ready!',
           `Successfully added ${addedCount} qualified Hachimi videos to the queue.`,
         );
 
@@ -236,15 +236,15 @@ const createHachimiCommand = (playbackService: any, queueService: any) => {
           },
           {
             name: '🎯 Results',
-            value: `✅ Added: ${addedCount} videos\n${
-              failedVideos.length > 0 ? `❌ Failed: ${failedVideos.length} videos` : ''
+            value: `[✓] Added: ${addedCount} videos\n${
+              failedVideos.length > 0 ? `[✗] Failed: ${failedVideos.length} videos` : ''
             }`,
             inline: true,
           },
         );
 
         if (failedVideos.length > 0 && failedVideos.length <= 3) {
-          successEmbed.addFields({ name: '⚠️ Failed Videos', value: failedVideos.join('\n'), inline: false });
+          successEmbed.addFields({ name: '[!] Failed Videos', value: failedVideos.join('\n'), inline: false });
         }
 
         if (addedCount > 0 && qualifiedVideos.length < safeBatchSize) {

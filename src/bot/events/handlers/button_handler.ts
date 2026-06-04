@@ -129,7 +129,7 @@ async function handleDailyPlay(interaction: any, customId: string, playerService
 
   const bvid = customId.slice('daily_play_'.length);
   if (!bvid) {
-    return await interaction.editReply({ content: '❌ 无效的视频 ID。' });
+    return await interaction.editReply({ content: '[✗] 无效的视频 ID。' });
   }
 
   const videoUrl = `https://www.bilibili.com/video/${bvid}`;
@@ -143,11 +143,11 @@ async function handleDailyPlay(interaction: any, customId: string, playerService
 
   if (!result || !result.success) {
     return await interaction.editReply({
-      content: `❌ 无法播放视频：${result?.error || '未知错误'}`,
+      content: `[✗] 无法播放视频：${result?.error || '未知错误'}`,
     });
   }
 
-  await interaction.editReply({ content: '✅ 已加入队列！' });
+  await interaction.editReply({ content: '[✓] 已加入队列！' });
   playerService.notifyState(interaction.guild.id);
 }
 
@@ -278,7 +278,7 @@ function buildButtonResponse(
 
     case 'loop': {
       // Handled above in the showMenu logic — should not reach here
-      embed = EmbedBuilders.createSuccessEmbed('Action Completed', '✅ Action completed successfully');
+      embed = EmbedBuilders.createSuccessEmbed('Action Completed', 'Action completed successfully');
       break;
     }
 
@@ -304,7 +304,7 @@ function buildButtonResponse(
     }
 
     default: {
-      embed = EmbedBuilders.createSuccessEmbed('Action Completed', '✅ Action completed successfully');
+      embed = EmbedBuilders.createSuccessEmbed('Action Completed', 'Action completed successfully');
       break;
     }
   }

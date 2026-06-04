@@ -14,7 +14,7 @@ const createRadioCommand = (playbackService: any) => {
   const command = {
     data: new SlashCommandBuilder()
       .setName('radio')
-      .setDescription('📻 循环播放随机哈基米电台（再次使用 /radio 或 /stop 可关闭）'),
+      .setDescription('Radio · Endless random Hachimi playback (use /radio again or /stop to turn off)'),
 
     cooldown: 10,
 
@@ -63,13 +63,13 @@ const createRadioCommand = (playbackService: any) => {
             await radio.stop(interaction.guild.id);
             playbackService.notifyState(interaction.guild.id);
             await interaction.editReply({
-              content: '📻 Radio mode stopped. The current track will keep playing — use /stop to halt it.',
+              content: 'Radio mode stopped. The current track will keep playing — use /stop to halt it.',
             });
             return;
           }
 
           const loadingEmbed = EmbedBuilders.createLoadingEmbed(
-            '📻 Starting Hachimi radio…',
+            'Starting Hachimi radio…',
           );
           await interaction.editReply({ embeds: [loadingEmbed] });
 
@@ -90,7 +90,7 @@ const createRadioCommand = (playbackService: any) => {
           }
 
           const successEmbed = EmbedBuilders.createSuccessEmbed(
-            '📻 Radio Mode On',
+            'Radio Mode On',
             'Now streaming an endless mix of random Hachimi tracks. Run /radio again or /stop to end it.',
           );
           await interaction.editReply({ embeds: [successEmbed] });

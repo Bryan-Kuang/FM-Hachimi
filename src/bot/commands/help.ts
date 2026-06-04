@@ -21,28 +21,28 @@ const createHelpCommand = (_playbackService: any) => ({
 
       const helpEmbed = new EmbedBuilder()
         .setColor(0x00d4ff)
-        .setTitle('🎵 Bilibili音乐机器人 - 命令帮助')
+        .setTitle('Bilibili Music Bot - Commands')
         .setDescription('以下是所有可用的命令：')
         .addFields(
           {
-            name: '🎵 播放命令',
+            name: 'Playback',
             value:
               '`/play <URL>` - 播放Bilibili视频音频\n`/pause` - 暂停当前播放\n' +
               '`/resume` - 恢复播放\n`/stop` - 停止播放并清空队列',
             inline: false,
           },
           {
-            name: '⏭️ 导航命令',
+            name: 'Navigation',
             value: '`/skip` - 跳过当前歌曲\n`/prev` - 返回上一首\n`/queue` - 查看播放队列',
             inline: false,
           },
           {
-            name: '🔍 搜索',
+            name: 'Search',
             value: '`/search <关键词>` - 搜索Bilibili视频\n`/nowplaying` - 查看当前播放的歌曲',
             inline: false,
           },
           {
-            name: '🎵 特色功能',
+            name: 'Features',
             value: '`/hachimi` - 自动添加哈基米精选视频\n`/daily-hachimi` - 配置每日哈基米推荐',
             inline: false,
           },

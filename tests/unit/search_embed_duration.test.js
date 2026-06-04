@@ -70,7 +70,7 @@ describe("search embed duration display", () => {
 
     const values = fieldValues(embed);
     expect(values.join("\n")).not.toContain(CLOCK_ICON);
-    expect(values).toContain("👤 A | `00:02:03`");
-    expect(values).toContain("👤 B | `01:02:03`");
+    expect(values).toContain("by A | `00:02:03`");
+    expect(values).toContain("by B | `01:02:03`");
   });
 });
