@@ -65,6 +65,44 @@ class Counter {
   }
 }
 
+class Gauge {
+  name: string;
+  help: string;
+  values: Map<string, number>;
+
+  constructor(name: string, help?: string) {
+    this.name = name;
+    this.help = help || '';
+    this.values = new Map();
+  }
+
+  private _key(labels?: Labels): string {
+    if (!labels) return '';
+    const keys = Object.keys(labels).sort();
+    return keys.map((k) => `${k}=${labels[k]}`).join(',');
+  }
+
+  set(value: number, labels?: Labels): void {
+    this.values.set(this._key(labels), value);
+  }
+
+  get(labels?: Labels): number {
+    return this.values.get(this._key(labels)) || 0;
+  }
+
+  snapshot(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const [k, v] of this.values) {
+      out[k || '_'] = v;
+    }
+    return out;
+  }
+
+  reset(): void {
+    this.values.clear();
+  }
+}
+
 class Histogram {
   name: string;
   help: string;
@@ -132,10 +170,12 @@ class Histogram {
 
 class Registry {
   private counters: Map<string, Counter>;
+  private gauges: Map<string, Gauge>;
   private histograms: Map<string, Histogram>;
 
   constructor() {
     this.counters = new Map();
+    this.gauges = new Map();
     this.histograms = new Map();
   }
 
@@ -146,6 +186,15 @@ class Registry {
       this.counters.set(name, c);
     }
     return c;
+  }
+
+  gauge(name: string, help?: string): Gauge {
+    let g = this.gauges.get(name);
+    if (!g) {
+      g = new Gauge(name, help);
+      this.gauges.set(name, g);
+    }
+    return g;
   }
 
   histogram(name: string, help?: string, buckets?: number[]): Histogram {
@@ -159,11 +208,19 @@ class Registry {
 
   snapshot(): {
     counters: Record<string, { help: string; values: Record<string, number> }>;
+    gauges: Record<string, { help: string; values: Record<string, number> }>;
     histograms: Record<string, { help: string; values: Record<string, SeriesSnapshot> }>;
   } {
-    const out = { counters: {} as Record<string, { help: string; values: Record<string, number> }>, histograms: {} as Record<string, { help: string; values: Record<string, SeriesSnapshot> }> };
+    const out = {
+      counters: {} as Record<string, { help: string; values: Record<string, number> }>,
+      gauges: {} as Record<string, { help: string; values: Record<string, number> }>,
+      histograms: {} as Record<string, { help: string; values: Record<string, SeriesSnapshot> }>,
+    };
     for (const [name, c] of this.counters) {
       out.counters[name] = { help: c.help, values: c.snapshot() };
+    }
+    for (const [name, g] of this.gauges) {
+      out.gauges[name] = { help: g.help, values: g.snapshot() };
     }
     for (const [name, h] of this.histograms) {
       out.histograms[name] = { help: h.help, values: h.snapshot() };
@@ -173,13 +230,15 @@ class Registry {
 
   reset(): void {
     for (const c of this.counters.values()) c.reset();
+    for (const g of this.gauges.values()) g.reset();
     for (const h of this.histograms.values()) h.reset();
   }
 }
 
 export const registry = new Registry();
 export function counter(name: string, help?: string): Counter { return registry.counter(name, help); }
+export function gauge(name: string, help?: string): Gauge { return registry.gauge(name, help); }
 export function histogram(name: string, help?: string, buckets?: number[]): Histogram { return registry.histogram(name, help, buckets); }
 export function snapshot(): ReturnType<Registry['snapshot']> { return registry.snapshot(); }
 export function reset(): void { registry.reset(); }
-export { Counter, Histogram, Registry };
+export { Counter, Gauge, Histogram, Registry };

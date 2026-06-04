@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as logger from '../services/logger_service';
+import * as metrics from '../observability/metrics';
 
 interface CookieRefreshContext {
   reason?: string;
@@ -185,6 +186,14 @@ class YouTubeCookieRefreshService {
         validationCount: this.validateUrls.length,
       });
 
+      // Observability: scrapers/alerts derive cookie age from now - this gauge.
+      metrics.gauge(
+        'youtube_cookie_last_refresh_success_timestamp_seconds',
+        'Unix time (s) of the last successful YouTube cookie refresh',
+      ).set(Math.floor(Date.now() / 1000));
+      metrics.counter('youtube_cookie_refresh_total', 'YouTube cookie refresh attempts by result')
+        .inc({ result: 'success' });
+
       return { success: true, refreshed: true };
     } catch (error: unknown) {
       return this.failure('YouTube cookie refresh failed', (error as Error).message);
@@ -209,6 +218,8 @@ class YouTubeCookieRefreshService {
   private failure(message: string, rawDetails = ''): CookieRefreshResult {
     const error = rawDetails ? `${message}: ${this.redact(rawDetails)}` : message;
     logger.warn('YouTube cookie refresh failed', { error });
+    metrics.counter('youtube_cookie_refresh_total', 'YouTube cookie refresh attempts by result')
+      .inc({ result: 'failure' });
     return { success: false, refreshed: false, error };
   }
 
