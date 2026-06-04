@@ -73,7 +73,7 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
           const lowerMsg = msg.toLowerCase();
           if (lowerMsg.includes('auth/bot check') || lowerMsg.includes('automatic cookie refresh') || lowerMsg.includes('cookies expired')) {
             await interaction.editReply({
-              content: '🔒 YouTube auth check failed after automatic cookie refresh. The bot account may need a fresh VPS browser login.',
+              content: '[✗] YouTube auth check failed after automatic cookie refresh. The bot account may need a fresh VPS browser login.',
             });
           } else if (msg.includes('unavailable') || msg.includes('private')) {
             await interaction.editReply({ content: '[!] Video is unavailable or private' });
