@@ -36,6 +36,7 @@ jest.mock("../../src/utils/lock", () => ({
 
 const createButtonHandler = require("../../src/bot/events/handlers/button_handler");
 const createSelectMenuHandler = require("../../src/bot/events/handlers/select_menu_handler");
+const AudioManager = require("../../src/session/audio_manager");
 const PlayerService = require("../../src/services/player_service");
 const Lock = require("../../src/utils/lock");
 
@@ -236,6 +237,28 @@ describe("radio interaction guard", () => {
 
     expect(result).toEqual({ success: true });
     expect(audioManager.skipTrack).toHaveBeenCalledWith("guild-1");
+  });
+
+  test("audio manager lets radio skip advance even when the visible queue has no next track", async () => {
+    const player = {
+      currentTrack: { title: "current radio track" },
+      radioMode: true,
+      canSkip: jest.fn().mockReturnValue(false),
+      skip: jest.fn().mockResolvedValue(true),
+      getState: jest.fn().mockReturnValue({
+        currentTrack: { title: "next radio track" },
+        queueLength: 1,
+        radioMode: true,
+      }),
+    };
+    const audioManager = new AudioManager({
+      get: jest.fn().mockReturnValue({ player }),
+    });
+
+    const result = await audioManager.skipTrack("guild-1");
+
+    expect(result.success).toBe(true);
+    expect(player.skip).toHaveBeenCalled();
   });
 
   test("player service refuses radio option buttons before delegating to audio manager", async () => {

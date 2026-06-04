@@ -429,7 +429,7 @@ class AudioManager {
       };
     }
 
-    if (!player.canSkip()) {
+    if (!player.radioMode && !player.canSkip()) {
       return {
         success: false,
         error: 'No next track in queue',
