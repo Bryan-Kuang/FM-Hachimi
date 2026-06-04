@@ -18,9 +18,17 @@ Runbook for deploying and operating F.M. Hachimi on the VPS.
 
 ## Deploy flow
 
-`push → main` → **CI** (lint, typecheck, test, build, docker build) → on success **Deploy**
-SSHes to the VPS → `git pull --ff-only` → `scripts/deploy/remote-deploy.sh` →
-`docker compose up -d --build` → healthcheck poll. Failures ping Discord.
+`push → main` → **CI** `check` (lint, typecheck, test, build) → **CI `image`** builds and
+pushes the Docker image to **GHCR** (`ghcr.io/bryan-kuang/fm-hachimi`, tagged `latest` +
+commit SHA) → on success **Deploy** SSHes to the VPS → `git pull --ff-only` →
+`scripts/deploy/remote-deploy.sh` → `docker login ghcr.io` + `docker compose pull` +
+`up -d` (pulls the **exact image CI tested** via `IMAGE_TAG`=commit SHA) → healthcheck poll.
+Failures ping Discord. (PRs build the image for validation but do not push.)
+
+**Registry deploy prerequisites** (one-time): either make the `fm-hachimi` GHCR package
+**public** (then no auth needed to pull), or add a repo secret **`GHCR_TOKEN`** = a classic
+PAT with `read:packages` so the VPS can pull a private image. CI pushes using the built-in
+`GITHUB_TOKEN` (no PAT needed for push). Local dev still builds: `docker compose up --build`.
 
 ### Slash commands & the testing system
 

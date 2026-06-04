@@ -1,5 +1,10 @@
 services:
   bilibili-bot:
+    # Production pulls the prebuilt image from GHCR (IMAGE_TAG = commit SHA,
+    # injected by the deploy workflow; defaults to latest). The build section
+    # below is retained for local dev — `docker compose up --build` still builds
+    # from the Dockerfile and tags it as this image.
+    image: ghcr.io/bryan-kuang/fm-hachimi:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
