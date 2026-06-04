@@ -122,7 +122,7 @@ describe("Extractor", () => {
     // Skip yt-dlp availability check
     beforeEach(() => {
       extractor._ytdlpChecked = true;
-      extractor.videoInfoCache = new Map();
+      extractor.videoInfoCache.clear();
     });
 
     test("parses normal JSON output", async () => {
@@ -247,7 +247,7 @@ describe("Extractor", () => {
 
     beforeEach(() => {
       extractor._ytdlpChecked = true;
-      extractor.videoInfoCache = new Map();
+      extractor.videoInfoCache.clear();
     });
 
     function mockExtractionProcess(title = "Cached Audio") {

@@ -9,6 +9,7 @@ import * as logger from '../services/logger_service';
 import NativeBilibiliExtractor = require('./native_extractor');
 import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage_feedback';
 import config = require('../config/config');
+import ExpiringCache = require('../utils/expiring_cache');
 import UrlValidator = require('./validator');
 
 interface VideoMetadata {
@@ -77,16 +78,6 @@ interface TestExtractionResult {
   timestamp: string;
 }
 
-interface CacheEntry {
-  data: VideoMetadata;
-  timestamp: number;
-}
-
-interface ExtractedAudioCacheEntry {
-  data: ExtractedAudio;
-  timestamp: number;
-}
-
 interface SelectedFormatMetadata {
   formatId?: string;
   protocol?: string;
@@ -128,13 +119,10 @@ class BilibiliExtractor {
   private _ytdlpChecked: boolean;
   private _cookiesFile: string | null;
   private nativeExtractor: NativeBilibiliExtractor;
-  private videoInfoCache: Map<string, CacheEntry>;
-  private extractionCache: Map<string, ExtractedAudioCacheEntry>;
+  // Shared ExpiringCache owns TTL eviction + size cap + cleanup timer.
+  private videoInfoCache: ExpiringCache<VideoMetadata>;
+  private extractionCache: ExpiringCache<ExtractedAudio>;
   private inFlightExtractions: Map<string, Promise<ExtractedAudio>>;
-  private cacheExpiry: number;
-  private extractionCacheExpiry: number;
-  private maxCacheSize: number;
-  private cacheCleanupInterval: NodeJS.Timeout | null;
 
   constructor() {
     this.userAgent =
@@ -146,71 +134,10 @@ class BilibiliExtractor {
       cookiesFile: this._cookiesFile,
     });
 
-    // Video info cache to avoid repeated yt-dlp calls
-    this.videoInfoCache = new Map();
-    this.extractionCache = new Map();
+    // Video metadata: 30-min TTL. Extraction (signed audio URLs): 10-min TTL.
+    this.videoInfoCache = new ExpiringCache(30 * 60 * 1000, 100, { label: 'bilibili-videoinfo' });
+    this.extractionCache = new ExpiringCache(10 * 60 * 1000, 100, { label: 'bilibili-extraction' });
     this.inFlightExtractions = new Map();
-    this.cacheExpiry = 30 * 60 * 1000; // 30 minutes cache expiry
-    this.extractionCacheExpiry = 10 * 60 * 1000; // signed audio URLs are short-lived; keep this conservative
-    this.maxCacheSize = 100; // Maximum number of cached entries
-
-    // Start cache cleanup interval (.unref() so it doesn't block process exit)
-    this.cacheCleanupInterval = setInterval(() => {
-      this.cleanupExpiredCache();
-    }, 10 * 60 * 1000).unref(); // Cleanup every 10 minutes
-  }
-
-  /**
-   * Clean up expired cache entries and enforce size limit
-   */
-  cleanupExpiredCache(): void {
-    const now = Date.now();
-    let removedCount = 0;
-
-    // Remove expired entries
-    for (const [key, entry] of this.videoInfoCache) {
-      if (now - entry.timestamp > this.cacheExpiry) {
-        this.videoInfoCache.delete(key);
-        removedCount++;
-      }
-    }
-
-    for (const [key, entry] of this.extractionCache) {
-      if (now - entry.timestamp > this.extractionCacheExpiry) {
-        this.extractionCache.delete(key);
-        removedCount++;
-      }
-    }
-
-    // Enforce size limit by removing oldest entries
-    if (this.videoInfoCache.size > this.maxCacheSize) {
-      const entries = Array.from(this.videoInfoCache.entries());
-      entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
-
-      const toRemove = entries.slice(0, this.videoInfoCache.size - this.maxCacheSize);
-      toRemove.forEach(([key]) => {
-        this.videoInfoCache.delete(key);
-        removedCount++;
-      });
-    }
-
-    if (this.extractionCache.size > this.maxCacheSize) {
-      const entries = Array.from(this.extractionCache.entries());
-      entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
-
-      const toRemove = entries.slice(0, this.extractionCache.size - this.maxCacheSize);
-      toRemove.forEach(([key]) => {
-        this.extractionCache.delete(key);
-        removedCount++;
-      });
-    }
-
-    if (removedCount > 0) {
-      logger.debug("Cache cleanup completed", {
-        removedEntries: removedCount,
-        remainingEntries: this.videoInfoCache.size
-      });
-    }
   }
 
   /**
@@ -235,11 +162,9 @@ class BilibiliExtractor {
    * Cleanup resources when extractor is destroyed
    */
   destroy(): void {
-    if (this.cacheCleanupInterval) {
-      clearInterval(this.cacheCleanupInterval);
-      this.cacheCleanupInterval = null;
-    }
-    this.clearCache();
+    this.videoInfoCache.dispose();
+    this.extractionCache.dispose();
+    this.inFlightExtractions.clear();
   }
 
   /**
@@ -299,11 +224,11 @@ class BilibiliExtractor {
       }
 
       const cached = this.extractionCache.get(normalizedUrl);
-      if (cached && Date.now() - cached.timestamp < this.extractionCacheExpiry) {
+      if (cached) {
         logger.info("Bilibili extraction cache hit", {
           url: normalizedUrl,
-          title: cached.data.title,
-          cacheAgeMs: Date.now() - cached.timestamp,
+          title: cached.title,
+          cacheAgeMs: this.extractionCache.ageMs(normalizedUrl) ?? 0,
         });
         this.logExtractionTiming({
           method: 'cache',
@@ -311,9 +236,9 @@ class BilibiliExtractor {
           ytdlpMs: 0,
           parseMs: 0,
           totalMs: Date.now() - totalStartedAt,
-          ...this.selectedFormatFromExtractedAudio(cached.data),
+          ...this.selectedFormatFromExtractedAudio(cached),
         });
-        return cached.data;
+        return cached;
       }
 
       if (retryCount === 0) {
@@ -363,10 +288,7 @@ class BilibiliExtractor {
           const nativePayload = await this.nativeExtractor.extract(normalizedUrl);
           const result = this.createExtractedAudioFromNativePayload(url, normalizedUrl, nativePayload);
 
-          this.extractionCache.set(normalizedUrl, {
-            data: result,
-            timestamp: Date.now(),
-          });
+          this.extractionCache.set(normalizedUrl, result);
 
           logger.info("Bilibili native extraction completed successfully", {
             url,
@@ -438,10 +360,7 @@ class BilibiliExtractor {
         },
       };
 
-      this.extractionCache.set(normalizedUrl, {
-        data: result,
-        timestamp: Date.now(),
-      });
+      this.extractionCache.set(normalizedUrl, result);
 
       logger.info("Audio extraction completed successfully", {
         url,
@@ -568,10 +487,7 @@ class BilibiliExtractor {
           }
 
           // Cache metadata
-          this.videoInfoCache.set(normalizedUrl, {
-            data: metadata,
-            timestamp: Date.now(),
-          });
+          this.videoInfoCache.set(normalizedUrl, metadata);
 
           resolve({
             metadata,
@@ -658,9 +574,9 @@ class BilibiliExtractor {
 
     // Check cache first
     const cached = this.videoInfoCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < this.cacheExpiry) {
+    if (cached) {
       logger.debug("Video info retrieved from cache", { url: cacheKey });
-      return cached.data;
+      return cached;
     }
 
     // If not in cache or expired, fetch from yt-dlp
@@ -738,10 +654,7 @@ class BilibiliExtractor {
           const metadata = this.parseVideoMetadata(videoData);
 
           // Cache the result
-          this.videoInfoCache.set(cacheKey, {
-            data: metadata,
-            timestamp: Date.now()
-          });
+          this.videoInfoCache.set(cacheKey, metadata);
 
           logger.debug("Video info cached", {
             url: cacheKey,
