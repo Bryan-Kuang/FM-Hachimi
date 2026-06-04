@@ -17,6 +17,9 @@ on:
         description: 'Guild ID for guild / clear_guild. Leave empty to use the GUILD_ID secret. (test uses TEST_GUILD_ID, ignores this.)'
         required: false
 
+permissions:
+  contents: read
+
 jobs:
   deploy-commands:
     runs-on: ubuntu-latest
