@@ -72,6 +72,7 @@ describe("command registry", () => {
       "hachimi",
       "radio",
       "daily-hachimi",
+      "ytfast",
     ]);
     expect(new Set(names).size).toBe(names.length);
   });
@@ -120,6 +121,7 @@ describe("command registry", () => {
       "hachimi",
       "radio",
       "daily-hachimi",
+      "ytfast",
     ]);
     expect(registry.getGlobalCommands(null, null).map((command) => command.data.name)).toEqual([
       "play",
@@ -138,7 +140,7 @@ describe("command registry", () => {
     ]);
 
     const testingCommands = registry.getTestingCommands(null, null);
-    expect(testingCommands.map((command) => command.data.name)).toEqual([]);
+    expect(testingCommands.map((command) => command.data.name)).toEqual(["ytfast"]);
   });
 
   test("prefixes testing command descriptions and keeps them within Discord limits", () => {

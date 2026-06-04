@@ -74,6 +74,7 @@ interface YouTubeConfig {
   preextractConcurrency: number;
   preextractMaxPerCardSet: number;
   playerClient: string;
+  fastPlayerClient: string;
   cookieRefresh: YouTubeCookieRefreshConfig;
 }
 
@@ -244,6 +245,11 @@ const config: BotConfig = {
     // JS — the dominant extraction cost. Set to '' to fall back to yt-dlp's
     // default clients (web + JS decipher) if bot-detection ever requires it.
     playerClient: (process.env.YOUTUBE_PLAYER_CLIENT ?? "tv,ios").trim(),
+    // Cookie-less "fast pass" clients used by the experimental /ytfast command.
+    // android_vr/android return a playable audio URL in ~4-5s (vs ~24s for the
+    // cookie web client) but don't support cookies, so they only work for
+    // non-restricted videos — /ytfast falls back to the cookie path otherwise.
+    fastPlayerClient: (process.env.YOUTUBE_FAST_PLAYER_CLIENT ?? "android_vr,android").trim(),
     cookieRefresh: {
       enabled: process.env.YOUTUBE_COOKIE_AUTO_REFRESH_ENABLED !== "false",
       cookiesFile: process.env.YOUTUBE_COOKIES_FILE || "/app/secrets/youtube_cookies.txt",
