@@ -37,4 +37,8 @@ jobs:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           GUILD_ID: ${{ (inputs.environment == 'guild' || inputs.environment == 'clear_guild') && (inputs.guild_id || secrets.GUILD_ID) || '' }}
+          # The script only does a guild-scoped deploy/clear when this flag is set;
+          # without it, `guild` silently fell through to a global deploy and
+          # `clear_guild` threw on its own guard. Set it for both guild options.
+          DEPLOY_LEGACY_GUILD_COMMANDS: ${{ (inputs.environment == 'guild' || inputs.environment == 'clear_guild') && 'true' || '' }}
           CLEAR_GUILD_COMMANDS: ${{ inputs.environment == 'clear_guild' && 'true' || '' }}
