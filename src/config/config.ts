@@ -75,6 +75,7 @@ interface YouTubeConfig {
   preextractMaxPerCardSet: number;
   playerClient: string;
   fastPlayerClient: string;
+  potProviderUrl: string;
   cookieRefresh: YouTubeCookieRefreshConfig;
 }
 
@@ -250,6 +251,11 @@ const config: BotConfig = {
     // cookie web client) but don't support cookies, so they only work for
     // non-restricted videos — /ytfast falls back to the cookie path otherwise.
     fastPlayerClient: (process.env.YOUTUBE_FAST_PLAYER_CLIENT ?? "android_vr,android").trim(),
+    // bgutil PO-token provider URL (the pot-provider compose sidecar). When set,
+    // the fast extraction path asks yt-dlp to fetch Proof-of-Origin tokens from
+    // it, which is what lets cookie-less clients pass YouTube bot-detection.
+    // Empty disables it (degrades to the previous behaviour).
+    potProviderUrl: (process.env.YOUTUBE_POT_PROVIDER_URL ?? "http://pot-provider:4416").trim(),
     cookieRefresh: {
       enabled: process.env.YOUTUBE_COOKIE_AUTO_REFRESH_ENABLED !== "false",
       cookiesFile: process.env.YOUTUBE_COOKIES_FILE || "/app/secrets/youtube_cookies.txt",

@@ -97,6 +97,8 @@ describe("YouTubeExtractor extraction cache behavior", () => {
     const args = spawn.mock.calls[0][1];
     expect(args[args.indexOf("--extractor-args") + 1]).toBe("youtube:player_client=android_vr,android");
     expect(args).not.toContain("--cookies");
+    // PO-token provider wired in for bot-detection bypass.
+    expect(args).toContain("youtubepot-bgutilhttp:base_url=http://pot-provider:4416");
   });
 
   test("extractAudioFast falls back to the cookie path when the fast pass fails", async () => {
