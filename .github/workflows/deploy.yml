@@ -5,6 +5,12 @@ on:
     workflows: ["CI"]
     types: [completed]
 
+# Never run two production deploys at once; queue the newer one instead of
+# cancelling an in-flight SSH/compose deploy mid-way.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'

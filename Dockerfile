@@ -2,11 +2,14 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-COPY package*.json tsconfig.json ./
-RUN npm ci
+# --ignore-scripts skips the husky `prepare` hook (no .git in the build context).
+COPY package*.json tsconfig.json tsconfig.build.json ./
+RUN npm ci --ignore-scripts
 
 COPY src ./src
-RUN npx tsc
+# Match CI's `npm run build` (lean output: no sourcemaps/comments) instead of
+# the default tsconfig.json, so the image ships exactly what CI validated.
+RUN npx tsc -p tsconfig.build.json
 
 # ---- Production image ----
 FROM node:22-alpine
