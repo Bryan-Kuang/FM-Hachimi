@@ -755,7 +755,7 @@ class YouTubeExtractor {
    * extractAudioFast falls back to the cookie path on failure.
    */
   private async extractMetadataAndUrlFast(normalizedUrl: string): Promise<ExtractionPayload> {
-    return this.runDumpJson([
+    const args = [
       '--dump-json',
       '--format', AUDIO_FORMAT_SELECTOR,
       '--no-download',
@@ -763,9 +763,13 @@ class YouTubeExtractor {
       '--no-check-certificate',
       '--no-warnings',
       '--extractor-args', `youtube:player_client=${config.youtube.fastPlayerClient}`,
-      '--user-agent', this.userAgent,
-      normalizedUrl,
-    ]);
+    ];
+    // PO token provider lets the cookie-less clients pass YouTube bot-detection.
+    if (config.youtube.potProviderUrl) {
+      args.push('--extractor-args', `youtubepot-bgutilhttp:base_url=${config.youtube.potProviderUrl}`);
+    }
+    args.push('--user-agent', this.userAgent, normalizedUrl);
+    return this.runDumpJson(args);
   }
 
   /** Spawn `yt-dlp --dump-json …` with the given args and parse the result. */
