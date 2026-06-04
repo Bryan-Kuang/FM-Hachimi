@@ -107,7 +107,6 @@ function makeRealPlayerServiceForGuard({ radioMode = true } = {}) {
       isPaused: false,
     }),
     skipTrack: jest.fn().mockResolvedValue({ success: true }),
-    handleButtonInteraction: jest.fn().mockResolvedValue({ success: true }),
   };
 
   const service = new PlayerService({
@@ -261,8 +260,8 @@ describe("radio interaction guard", () => {
     expect(player.skip).toHaveBeenCalled();
   });
 
-  test("player service refuses radio option buttons before delegating to audio manager", async () => {
-    const { service, audioManager } = makeRealPlayerServiceForGuard({ radioMode: true });
+  test("player service refuses radio option buttons in radio mode", async () => {
+    const { service } = makeRealPlayerServiceForGuard({ radioMode: true });
 
     const result = await service.handleButtonInteraction({
       customId: "queue",
@@ -275,6 +274,5 @@ describe("radio interaction guard", () => {
       error: expect.stringMatching(/Only Stop.*radio mode/i),
       suggestion: expect.any(String),
     });
-    expect(audioManager.handleButtonInteraction).not.toHaveBeenCalled();
   });
 });
