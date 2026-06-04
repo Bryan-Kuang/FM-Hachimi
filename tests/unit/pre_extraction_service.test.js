@@ -88,7 +88,7 @@ describe("PreExtractionService", () => {
     expect(extractor.extractAudio).toHaveBeenCalledTimes(1);
   });
 
-  test("prewarms top three YouTube URLs only in the test guild", async () => {
+  test("prewarms top three YouTube URLs in any guild", async () => {
     const youtubeExtractor = {
       extractAudio: jest.fn().mockResolvedValue({ title: "prewarmed youtube" }),
     };
@@ -101,13 +101,14 @@ describe("PreExtractionService", () => {
       youtubeMaxPerCardSet: 3,
     });
 
+    // A non-test guild: pre-extraction is no longer gated to the test guild.
     const summary = service.prewarmYouTubeUrls([
       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
       "https://youtu.be/abcdefghijk",
       "https://www.youtube.com/shorts/ABCDEFGHIJK",
       "https://www.youtube.com/watch?v=LMNOPQRSTUV",
       "not a url",
-    ], { source: "play_search", guildId: "1376318047794761838", keyword: "hachimi" });
+    ], { source: "play_search", guildId: "guild-1", keyword: "hachimi" });
 
     expect(summary).toMatchObject({ queued: 3, skipped: 2 });
     await flushPromises();
@@ -133,7 +134,7 @@ describe("PreExtractionService", () => {
     );
   });
 
-  test("does not prewarm YouTube URLs outside the test guild", async () => {
+  test("does not prewarm YouTube URLs when youtubeEnabled is false", async () => {
     const youtubeExtractor = {
       extractAudio: jest.fn().mockResolvedValue({}),
     };
@@ -141,7 +142,7 @@ describe("PreExtractionService", () => {
       bilibiliExtractor: { extractAudio: jest.fn() },
       youtubeExtractor,
       enabled: true,
-      youtubeEnabled: true,
+      youtubeEnabled: false,
       youtubeConcurrency: 1,
       youtubeMaxPerCardSet: 3,
     });
