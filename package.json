@@ -71,7 +71,7 @@
     "node": ">=22.0.0"
   },
   "lint-staged": {
-    "src/**/*.js": "eslint --fix"
+    "src/**/*.{ts,js}": "eslint --fix"
   },
   "repository": {
     "type": "git",
