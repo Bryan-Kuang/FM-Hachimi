@@ -482,6 +482,18 @@ class AudioPlayer {
   // ── Playback orchestration ───────────────────────────────────────────
 
   async playNext(): Promise<boolean> {
+    // If a previous queue ended (cursor cleared) but tracks remain — e.g. a new
+    // track was appended after the last one finished — start from the most
+    // recently added track instead of replaying items[0]. Adds reach this path
+    // one at a time, so "newest" is the track the user just requested. Without
+    // this, /play after a natural queue-end would silently replay the old first
+    // track (previously patched only in the Bilibili path; now centralized so
+    // YouTube gets the same correct behaviour).
+    if (this.queue.currentTrack === null && this.queue.length > 0) {
+      this.queue.currentIndex = this.queue.length - 1;
+      this.queue.currentTrack = this.queue.items[this.queue.currentIndex];
+      return this.playCurrentTrack();
+    }
     const track = this.queue.peekNext();
     if (!track) {
       logger.info('Queue is empty, stopping playback');
