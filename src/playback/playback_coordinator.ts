@@ -38,6 +38,10 @@ interface YouTubeExtractorLike {
     url: string,
     options?: { priority?: 'foreground' | 'background'; source?: string; onStage?: PlaybackStageReporter },
   ): Promise<ExtractedTrackData>;
+  extractAudioFast?(
+    url: string,
+    options?: { priority?: 'foreground' | 'background'; source?: string; onStage?: PlaybackStageReporter },
+  ): Promise<ExtractedTrackData>;
 }
 
 interface PlayerServiceLike {
@@ -64,6 +68,8 @@ interface PlayUrlOptions {
   url: string;
   requestedBy?: string;
   onStage?: PlaybackStageReporter;
+  /** Use the experimental cookie-less fast extraction path (/ytfast). */
+  fast?: boolean;
 }
 
 function getGuildId(interaction: InteractionLike): string | null {
@@ -109,6 +115,7 @@ async function playYouTubeUrl({
   url,
   requestedBy,
   onStage,
+  fast,
 }: PlayUrlOptions): Promise<CoordinatorResult> {
   const guildId = getGuildId(interaction);
   const channelId = getChannelId(interaction);
@@ -140,18 +147,21 @@ async function playYouTubeUrl({
 
     const player = playerService.getPlayer(guildId);
 
+    const useFast = Boolean(fast && ytExtractor.extractAudioFast);
+
     // Concurrent extract + voice-join (shared with the Bilibili path).
     const ej = await extractAndJoin({
       player,
       voiceChannel: voiceChannel as { id?: string } & Record<string, unknown>,
       onStage,
-      logLabel: 'YouTube direct playback timing',
-      logContext: { guildId, userId: interaction.user?.id, url },
-      extract: (stage) => ytExtractor.extractAudio(url, {
-        priority: 'foreground',
-        source: 'playback',
-        onStage: stage,
-      }),
+      logLabel: useFast ? 'YouTube fast playback timing' : 'YouTube direct playback timing',
+      logContext: { guildId, userId: interaction.user?.id, url, fast: useFast },
+      extract: (stage) => {
+        const extractOpts = { priority: 'foreground' as const, source: 'playback', onStage: stage };
+        return useFast
+          ? ytExtractor.extractAudioFast!(url, extractOpts)
+          : ytExtractor.extractAudio(url, extractOpts);
+      },
     });
 
     if (!ej.ok) {
@@ -197,7 +207,13 @@ async function playYouTubeUrl({
   }
 }
 
+/** Experimental: same flow as playYouTubeUrl but via the cookie-less fast pass. */
+async function playYouTubeUrlFast(opts: PlayUrlOptions): Promise<CoordinatorResult> {
+  return playYouTubeUrl({ ...opts, fast: true });
+}
+
 export = {
   playBilibiliUrl,
   playYouTubeUrl,
+  playYouTubeUrlFast,
 };
