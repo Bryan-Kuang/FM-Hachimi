@@ -166,12 +166,12 @@ describe("Bot Commands Coverage", () => {
       {
         description: "正常停止",
         scene: { userVc: "vc-1", botVc: "vc-1", playerState: "playing" },
-        expected: { playerCalled: true, replyContains: "⏹️ Stopped" },
+        expected: { playerCalled: true, replyContains: "[■] Stopped" },
       },
       {
         description: "仅连接不播放",
         scene: { userVc: "vc-1", botVc: "vc-1", playerState: "connected" },
-        expected: { playerCalled: true, replyContains: "⏹️ Stopped" },
+        expected: { playerCalled: true, replyContains: "[■] Stopped" },
       },
       {
         description: "未连接且不播放",
@@ -244,7 +244,7 @@ describe("Bot Commands Coverage", () => {
         setup: () => {
           mockPlaybackService.pause.mockReturnValue(true);
         },
-        expected: { editReplyContains: "⏸️ 已暂停", contextCalled: true },
+        expected: { editReplyContains: "[||] 已暂停", contextCalled: true },
       },
     ];
 
@@ -304,7 +304,7 @@ describe("Bot Commands Coverage", () => {
         setup: () => {
           mockPlaybackService.resume.mockReturnValue(true);
         },
-        expected: { editReplyContains: "▶️ 已恢复", contextCalled: true },
+        expected: { editReplyContains: "> 已恢复", contextCalled: true },
       },
     ];
 
@@ -364,7 +364,7 @@ describe("Bot Commands Coverage", () => {
         setup: () => {
           mockPlaybackService.skip.mockResolvedValue(true);
         },
-        expected: { editReplyContains: "⏭️ 已跳过", contextCalled: true },
+        expected: { editReplyContains: ">> 已跳过", contextCalled: true },
       },
     ];
 
@@ -424,7 +424,7 @@ describe("Bot Commands Coverage", () => {
         setup: () => {
           mockPlaybackService.previous.mockResolvedValue(true);
         },
-        expected: { editReplyContains: "⏮️ 已返回上一首", contextCalled: true },
+        expected: { editReplyContains: "|< 已返回上一首", contextCalled: true },
       },
     ];
 
@@ -528,7 +528,7 @@ describe("Bot Commands Coverage", () => {
           isPaused: false,
           currentTrack: null,
         },
-        expectErrorTitle: "❌ Nothing Playing",
+        expectErrorTitle: "[✗] Nothing Playing",
       },
     ];
 
@@ -580,7 +580,7 @@ describe("Bot Commands Coverage", () => {
       expect(arg.embeds).toBeDefined();
       expect(snapshotMinimal(arg.embeds[0])).toMatchSnapshot();
       expect(snapshotMinimal(arg.embeds[0]).title).toBe(
-        "🎵 Bilibili音乐机器人 - 命令帮助"
+        "Bilibili Music Bot - Commands"
       );
     });
   });
@@ -703,7 +703,7 @@ describe("Bot Commands Coverage", () => {
           });
         },
         expected: {
-          editReplyContains: "🎵 已添加",
+          editReplyContains: ">> 已添加",
           deferCalled: true,
           playBilibiliCalled: true,
         },
@@ -799,7 +799,7 @@ describe("Bot Commands Coverage", () => {
             .fn()
             .mockResolvedValue({ success: true, results: [] }),
         },
-        expectTitle: "❌ No Results Found",
+        expectTitle: "[✗] No Results Found",
       },
     ];
 
