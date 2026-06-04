@@ -596,7 +596,7 @@ async function handlePlaySearch(interaction: any, customId: string, playerServic
     const lowerMsg = msg.toLowerCase();
     let content = 'An error occurred while adding the video.';
     if (lowerMsg.includes('auth/bot check') || lowerMsg.includes('automatic cookie refresh') || lowerMsg.includes('cookies expired')) {
-      content = '🔒 YouTube auth check failed after automatic cookie refresh. The bot account may need a fresh VPS browser login.';
+      content = '[✗] YouTube auth check failed after automatic cookie refresh. The bot account may need a fresh VPS browser login.';
     }
 
     const errorEmbed = EmbedBuilders.createErrorEmbed('Error Adding Video', content, { suggestion: 'Please try again.' });

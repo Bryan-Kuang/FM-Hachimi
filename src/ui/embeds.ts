@@ -36,7 +36,6 @@ interface QueueOptions {
 interface ErrorOptions {
   errorCode?: string | null;
   suggestion?: string | null;
-  timestamp?: boolean;
   color?: number;
 }
 
@@ -200,8 +199,7 @@ class EmbedBuilders {
 
     embed.setDescription(description);
     embed.setFooter({
-      text: `Bilibili Player • ${queue.length} track${queue.length !== 1 ? 's' : ''} in queue`,
-      iconURL: 'https://cdn.discordapp.com/emojis/741605543046807626.png',
+      text: `${queue.length} track${queue.length !== 1 ? 's' : ''} in queue`,
     });
 
     return embed;
@@ -214,42 +212,21 @@ class EmbedBuilders {
     const {
       errorCode = null,
       suggestion = null,
-      timestamp = true,
       color = 0xE74C3C,
     } = options;
 
     const embed = new EmbedBuilder()
       .setTitle(`[✗] ${title}`)
-      .setDescription(`**${description}**`)
+      .setDescription(description)
       .setColor(color);
 
-    if (timestamp) embed.setTimestamp();
-
-    const fields: { name: string; value: string; inline: boolean }[] = [];
-
     if (errorCode) {
-      fields.push({ name: 'Error Code', value: `\`${errorCode}\``, inline: true });
+      embed.addFields({ name: 'Code', value: `\`${errorCode}\``, inline: true });
     }
 
     if (suggestion) {
-      fields.push({ name: 'Suggestion', value: suggestion, inline: false });
+      embed.addFields({ name: 'Suggestion', value: suggestion, inline: false });
     }
-
-    const troubleshootingTips = [
-      '• Check if the video URL is valid and accessible',
-      '• Ensure the bot has proper permissions in this channel',
-      '• Try again in a few moments if this is a temporary issue',
-      '• Contact support if the problem persists',
-    ];
-
-    fields.push({ name: 'Troubleshooting', value: troubleshootingTips.join('\n'), inline: false });
-
-    if (fields.length > 0) embed.addFields(...fields);
-
-    embed.setFooter({
-      text: 'Bilibili Player • Need help? Check our documentation',
-      iconURL: 'https://cdn.discordapp.com/emojis/741605543046807626.png',
-    });
 
     return embed;
   }
