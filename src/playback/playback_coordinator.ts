@@ -1,6 +1,6 @@
 import type { ExtractedTrackData, PlayResult } from '../services/types';
-import * as logger from '../services/logger_service';
 import { emitPlaybackStage, type PlaybackStageReporter } from './stage_feedback';
+import { extractAndJoin } from './extract_join';
 
 interface GuildLike {
   id: string;
@@ -66,13 +66,6 @@ interface PlayUrlOptions {
   onStage?: PlaybackStageReporter;
 }
 
-interface PlayExtractedOptions {
-  interaction: InteractionLike;
-  playerService: PlayerServiceLike;
-  videoData: ExtractedTrackData;
-  requestedBy?: string;
-}
-
 function getGuildId(interaction: InteractionLike): string | null {
   return interaction.guild?.id ?? null;
 }
@@ -110,44 +103,6 @@ async function playBilibiliUrl({
   return result as CoordinatorResult;
 }
 
-async function playExtractedTrack({
-  interaction,
-  playerService,
-  videoData,
-  requestedBy,
-}: PlayExtractedOptions): Promise<CoordinatorResult> {
-  const guildId = getGuildId(interaction);
-  const channelId = getChannelId(interaction);
-  const voiceChannel = interaction.member?.voice?.channel;
-
-  if (!guildId || !channelId) {
-    return { success: false, error: 'Missing guild or channel context' };
-  }
-  if (!voiceChannel) {
-    return { success: false, error: 'Voice channel required' };
-  }
-
-  const player = playerService.getPlayer(guildId);
-  const joined = await player.joinVoiceChannel(voiceChannel);
-  if (!joined) {
-    return { success: false, error: 'Failed to join voice channel' };
-  }
-
-  const track = await playerService.addTrack(guildId, videoData, getRequestedBy(interaction, requestedBy));
-  if (!track) {
-    return { success: false, error: 'Failed to add track to queue' };
-  }
-
-  playerService.setUIContext(guildId, channelId);
-  if (!player.isPlaying && !player.isPaused) {
-    await playerService.play(guildId);
-  } else {
-    playerService.notifyState(guildId);
-  }
-
-  return { success: true, track, videoData };
-}
-
 async function playYouTubeUrl({
   interaction,
   playerService,
@@ -182,91 +137,33 @@ async function playYouTubeUrl({
     ) => {
       emitPlaybackStage(onStage, stage, details);
     };
-    reportStage('preparing');
 
     const player = playerService.getPlayer(guildId);
-    const totalStartedAt = Date.now();
-    const timings: Record<string, number> = {};
-    const markTotal = () => {
-      timings.totalMs = Date.now() - totalStartedAt;
-    };
-    const logTiming = (success: boolean, extra: Record<string, unknown> = {}) => {
-      markTotal();
-      logger.info('YouTube direct playback timing', {
-        guildId,
-        userId: interaction.user?.id,
-        url,
-        success,
-        ...timings,
-        ...extra,
-      });
-    };
-    const timed = async <T>(stage: string, promise: Promise<T>): Promise<T> => {
-      const startedAt = Date.now();
-      try {
-        return await promise;
-      } finally {
-        timings[stage] = Date.now() - startedAt;
-      }
-    };
-    const settle = async <T>(
-      promise: Promise<T>,
-    ): Promise<{ ok: true; value: T } | { ok: false; error: Error }> => {
-      try {
-        return { ok: true, value: await promise };
-      } catch (error: unknown) {
-        return { ok: false, error: error as Error };
-      }
-    };
 
-    const wasActiveBeforeCommand = Boolean(player.isPlaying || player.isPaused);
-    const hadVoiceConnectionBeforeCommand = Boolean(player.voiceConnection);
-    const targetChannelId = (voiceChannel as { id?: string }).id;
-    const needsVoiceJoin =
-      !player.voiceConnection ||
-      player.voiceConnection.joinConfig?.channelId !== targetChannelId;
-
-    reportStage('extracting');
-    const extractionPromise = timed('extractionMs', ytExtractor.extractAudio(url, {
-      priority: 'foreground',
-      source: 'playback',
+    // Concurrent extract + voice-join (shared with the Bilibili path).
+    const ej = await extractAndJoin({
+      player,
+      voiceChannel: voiceChannel as { id?: string } & Record<string, unknown>,
       onStage,
-    }));
-    if (needsVoiceJoin) {
-      reportStage('joining_voice');
-    }
-    const joinPromise = needsVoiceJoin
-      ? timed('voiceJoinMs', player.joinVoiceChannel(voiceChannel))
-      : Promise.resolve(true);
+      logLabel: 'YouTube direct playback timing',
+      logContext: { guildId, userId: interaction.user?.id, url },
+      extract: (stage) => ytExtractor.extractAudio(url, {
+        priority: 'foreground',
+        source: 'playback',
+        onStage: stage,
+      }),
+    });
 
-    const [extractionResult, joinResult] = await Promise.all([
-      settle(extractionPromise),
-      settle(joinPromise),
-    ]);
-
-    if (!extractionResult.ok) {
-      if (
-        joinResult.ok &&
-        joinResult.value &&
-        needsVoiceJoin &&
-        !wasActiveBeforeCommand &&
-        !hadVoiceConnectionBeforeCommand
-      ) {
-        player.leaveVoiceChannel?.();
-      }
-      reportStage('failed', { stage: 'extraction' });
-      logTiming(false, { failedStage: 'extraction' });
-      return { success: false, error: extractionResult.error.message };
+    if (!ej.ok) {
+      return {
+        success: false,
+        error: ej.failedStage === 'voiceJoin' ? 'Failed to join voice channel' : ej.error,
+      };
     }
 
-    if (!joinResult.ok || !joinResult.value) {
-      reportStage('failed', { stage: 'voiceJoin' });
-      logTiming(false, { failedStage: 'voiceJoin' });
-      return { success: false, error: 'Failed to join voice channel' };
-    }
+    const { videoData, timings, logTiming } = ej;
 
     const queueStartedAt = Date.now();
-    const videoData = extractionResult.value;
     const track = await playerService.addTrack(guildId, videoData, getRequestedBy(interaction, requestedBy));
     timings.queueAddMs = Date.now() - queueStartedAt;
     if (!track) {
@@ -302,6 +199,5 @@ async function playYouTubeUrl({
 
 export = {
   playBilibiliUrl,
-  playExtractedTrack,
   playYouTubeUrl,
 };

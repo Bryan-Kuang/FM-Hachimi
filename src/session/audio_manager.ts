@@ -9,6 +9,7 @@
 import SessionManager = require('./session_manager');
 import * as logger from '../services/logger_service';
 import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage_feedback';
+import { extractAndJoin } from '../playback/extract_join';
 import {
   RADIO_ONLY_STOP_MESSAGE,
   RADIO_ONLY_STOP_SUGGESTION,
@@ -194,48 +195,13 @@ class AudioManager {
         };
       }
 
+      // Get or create player for this guild
+      const player = this.getPlayer(guildId);
       const reportStage = (
         stage: Parameters<typeof emitPlaybackStage>[1],
         details?: Parameters<typeof emitPlaybackStage>[2],
       ) => {
         emitPlaybackStage(options.onStage, stage, details);
-      };
-      reportStage('preparing');
-
-      // Get or create player for this guild
-      const player = this.getPlayer(guildId);
-      const totalStartedAt = Date.now();
-      const timings: Record<string, number> = {};
-      const markTotal = () => {
-        timings.totalMs = Date.now() - totalStartedAt;
-      };
-      const logTiming = (success: boolean, extra: Record<string, unknown> = {}) => {
-        markTotal();
-        logger.info('Bilibili direct playback timing', {
-          guild: guild.name,
-          guildId,
-          user: user.username,
-          success,
-          ...timings,
-          ...extra,
-        });
-      };
-      const timed = async <T>(stage: string, promise: Promise<T>): Promise<T> => {
-        const startedAt = Date.now();
-        try {
-          return await promise;
-        } finally {
-          timings[stage] = Date.now() - startedAt;
-        }
-      };
-      const settle = async <T>(
-        promise: Promise<T>,
-      ): Promise<{ ok: true; value: T } | { ok: false; error: Error }> => {
-        try {
-          return { ok: true, value: await promise };
-        } catch (error: unknown) {
-          return { ok: false, error: error as Error };
-        }
       };
 
       // Extract video information
@@ -245,51 +211,24 @@ class AudioManager {
         guild: guild.name,
       });
 
-      const wasActiveBeforeCommand = Boolean(player.isPlaying || player.isPaused);
-      const hadVoiceConnectionBeforeCommand = Boolean(player.voiceConnection);
-      const targetChannelId = (voiceChannel as any).id;
-      const needsVoiceJoin =
-        !player.voiceConnection ||
-        player.voiceConnection.joinConfig.channelId !== targetChannelId;
-
-      reportStage('extracting');
-      const extractionPromise = timed('extractionMs', (this.extractor as any).extractAudio(url, 0, 2, {
+      // Concurrent extract + voice-join (shared with the YouTube path).
+      const ej = await extractAndJoin({
+        player,
+        voiceChannel: voiceChannel as { id?: string } & Record<string, unknown>,
         onStage: options.onStage,
-      }));
-      if (needsVoiceJoin) {
-        reportStage('joining_voice');
-      }
-      const joinPromise = needsVoiceJoin
-        ? timed('voiceJoinMs', player.joinVoiceChannel(voiceChannel))
-        : Promise.resolve(true);
+        logLabel: 'Bilibili direct playback timing',
+        logContext: { guild: guild.name, guildId, user: user.username },
+        extract: (onStage) => (this.extractor as any).extractAudio(url, 0, 2, { onStage }),
+      });
 
-      const [extractionResult, joinResult] = await Promise.all([
-        settle(extractionPromise),
-        settle(joinPromise),
-      ]);
-
-      if (!extractionResult.ok) {
-        if (
-          joinResult.ok &&
-          joinResult.value &&
-          needsVoiceJoin &&
-          !wasActiveBeforeCommand &&
-          !hadVoiceConnectionBeforeCommand
-        ) {
-          player.leaveVoiceChannel();
+      if (!ej.ok) {
+        if (ej.failedStage === 'extraction') {
+          return {
+            success: false,
+            error: ej.error,
+            suggestion: 'Please check the URL and try again. If the problem persists, the video might be private or region-locked.',
+          };
         }
-        reportStage('failed', { stage: 'extraction' });
-        logTiming(false, { failedStage: 'extraction' });
-        return {
-          success: false,
-          error: extractionResult.error.message,
-          suggestion: 'Please check the URL and try again. If the problem persists, the video might be private or region-locked.',
-        };
-      }
-
-      if (!joinResult.ok || !joinResult.value) {
-        reportStage('failed', { stage: 'voiceJoin' });
-        logTiming(false, { failedStage: 'voiceJoin' });
         return {
           success: false,
           error: 'Failed to join voice channel',
@@ -297,27 +236,21 @@ class AudioManager {
         };
       }
 
+      const { videoData, timings, logTiming } = ej;
+
       // Add to queue
       const queueStartedAt = Date.now();
-      const videoData = extractionResult.value;
       const track = player.addToQueue(videoData, `<@${user.id}>`);
       timings.queueAddMs = Date.now() - queueStartedAt;
       reportStage('queued');
 
-      // Start playing if nothing is currently playing
+      // Start playing if nothing is currently playing. playNext() resumes from
+      // the newest track when a prior queue ended, so no special-casing here.
       if (!player.isPlaying && !player.isPaused) {
         try {
           const playbackStartedAt = Date.now();
-          let playSuccess: boolean;
           reportStage('starting_playback');
-          // Fix: if queue ended and a new song is added, start from the newest song
-          if (player.currentTrack === null && player.queue.length > 0) {
-            player.currentIndex = player.queue.length - 1;
-            player.currentTrack = player.queue.items[player.currentIndex];
-            playSuccess = await player.playCurrentTrack();
-          } else {
-            playSuccess = await player.playNext();
-          }
+          const playSuccess = await player.playNext();
           timings.playbackStartMs = Date.now() - playbackStartedAt;
 
           if (!playSuccess) {
