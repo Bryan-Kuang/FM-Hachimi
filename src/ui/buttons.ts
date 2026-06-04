@@ -163,7 +163,7 @@ class ButtonBuilders {
       .setLabel('Skip')
       .setEmoji('⏭️')
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(!canSkip);
+      .setDisabled(radioMode ? false : !canSkip);
 
     if (radioMode) {
       row1.addComponents(stopButton, skipButton);
