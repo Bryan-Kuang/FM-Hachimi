@@ -1,0 +1,56 @@
+name: Cookie Health
+
+# Safety net for the manual cookie-recovery tier. The in-app service refreshes
+# YouTube cookies every ~6h, rewriting secrets/youtube_cookies.txt only on
+# success. If the VPS browser-profile Google session dies, refreshes silently
+# fail and the file goes stale — this catches that before playback breaks.
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # every 6h, aligned with the in-app refresh cadence
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cookie-health
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check YouTube cookie freshness on the VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          timeout: 30s
+          command_timeout: 2m
+          script: |
+            set -euo pipefail
+            FILE=~/bilibili-bot/secrets/youtube_cookies.txt
+            MAX_AGE=$((13 * 3600))   # ~2 missed 6h cycles; avoids flapping on a single transient miss
+
+            if [ ! -f "$FILE" ]; then
+              echo "youtube_cookies.txt is MISSING at $FILE"
+              exit 2
+            fi
+
+            AGE=$(( $(date +%s) - $(stat -c %Y "$FILE") ))
+            echo "cookie age: ${AGE}s (threshold ${MAX_AGE}s)"
+            if [ "$AGE" -gt "$MAX_AGE" ]; then
+              echo "STALE: in-app refresh appears to be failing — the VPS browser profile likely needs re-login."
+              exit 3
+            fi
+            echo "OK: cookies are fresh."
+
+      - name: Alert Discord on stale/missing cookies
+        if: failure()
+        run: |
+          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"embeds\":[{\"title\":\"YouTube cookies stale or missing\",\"color\":15105570,\"description\":\"The in-app YouTube cookie refresh has not produced a fresh \`youtube_cookies.txt\` within the threshold. The VPS browser profile session likely needs a manual re-login (see OPERATIONS.md).\\n[View run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\"}]}"

@@ -1,5 +1,39 @@
 const { Registry, counter, histogram, snapshot, reset } = require("../metrics");
 
+describe("metrics Gauge", () => {
+  test("set stores the latest value and get reads it", () => {
+    const reg = new Registry();
+    const g = reg.gauge("cookie_ts");
+    g.set(100);
+    g.set(250);
+    expect(g.get()).toBe(250);
+  });
+
+  test("labels create separate series", () => {
+    const reg = new Registry();
+    const g = reg.gauge("age");
+    g.set(5, { src: "a" });
+    g.set(9, { src: "b" });
+    expect(g.get({ src: "a" })).toBe(5);
+    expect(g.get({ src: "b" })).toBe(9);
+  });
+
+  test("gauge appears in the registry snapshot", () => {
+    const reg = new Registry();
+    reg.gauge("cookie_ts").set(42);
+    const snap = reg.snapshot();
+    expect(snap.gauges.cookie_ts.values._).toBe(42);
+  });
+
+  test("reset clears the gauge", () => {
+    const reg = new Registry();
+    const g = reg.gauge("g");
+    g.set(7);
+    reg.reset();
+    expect(g.get()).toBe(0);
+  });
+});
+
 describe("metrics Counter", () => {
   test("inc increments by 1 by default", () => {
     const reg = new Registry();
