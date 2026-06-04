@@ -90,7 +90,6 @@ export interface AudioManagerLike {
   shuffleQueue(guildId: GuildId): ActionResult;
   setLoopMode(guildId: GuildId, mode: string): ActionResult;
   getQueue(guildId: GuildId): QueueInfo;
-  handleButtonInteraction(interaction: unknown): Promise<ActionResult>;
 }
 
 // ─── InterfaceUpdater duck-type ──────────────────────────────────────────

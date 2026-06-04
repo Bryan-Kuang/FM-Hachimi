@@ -10,11 +10,6 @@ import SessionManager = require('./session_manager');
 import * as logger from '../services/logger_service';
 import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage_feedback';
 import { extractAndJoin } from '../playback/extract_join';
-import {
-  RADIO_ONLY_STOP_MESSAGE,
-  RADIO_ONLY_STOP_SUGGESTION,
-  isRadioBlockedButton,
-} from '../playback/radio_controls';
 
 // Discord interaction shapes used by this manager.
 // Full discord.js types are applied at the command layer (Task 13); keeping
@@ -23,11 +18,6 @@ interface PlayInteraction {
   guild: { id: string; name: string } | null;
   member: { voice: { channel: unknown } } | null;
   user: { id: string; username: string };
-}
-
-interface ButtonInteraction {
-  customId: string;
-  guild: { id: string } | null;
 }
 
 // Return shapes
@@ -573,80 +563,6 @@ class AudioManager {
     }
 
     return stats;
-  }
-
-  /**
-   * Handle Discord button interactions.
-   */
-  async handleButtonInteraction(interaction: ButtonInteraction): Promise<ActionResult> {
-    const customId = interaction.customId;
-    const guildId = interaction.guild?.id;
-
-    if (!guildId) {
-      return { success: false, error: 'Not in a guild' };
-    }
-
-    if (isRadioBlockedButton(customId) && this.getPlayer(guildId).radioMode) {
-      return {
-        success: false,
-        error: RADIO_ONLY_STOP_MESSAGE,
-        suggestion: RADIO_ONLY_STOP_SUGGESTION,
-      };
-    }
-
-    switch (customId) {
-      case 'pause_resume': {
-        const player = this.getPlayer(guildId);
-        if (player.isPlaying) {
-          return this.pausePlayback(guildId);
-        } else if (player.isPaused) {
-          return this.resumePlayback(guildId);
-        }
-        return { success: false, error: 'No audio to pause/resume' };
-      }
-
-      case 'skip':
-        return this.skipTrack(guildId);
-
-      case 'prev':
-        return this.previousTrack(guildId);
-
-      case 'stop':
-        return this.stopPlayback(guildId);
-
-      case 'queue_clear':
-        return this.clearQueue(guildId);
-
-      case 'queue_shuffle':
-        return this.shuffleQueue(guildId);
-
-      case 'loop':
-        return { success: true, showMenu: true };
-
-      case 'queue_loop': {
-        const player = this.getPlayer(guildId);
-        const currentMode: string = player.loopMode;
-        const nextMode =
-          currentMode === 'none' ? 'queue' :
-          currentMode === 'queue' ? 'track' : 'none';
-        return this.setLoopMode(guildId, nextMode);
-      }
-
-      case 'queue_remove':
-        return { success: true, showMenu: true };
-
-      case 'queue':
-        return { success: true, showQueue: true };
-
-      default:
-        if (customId.startsWith('queue_delete_')) {
-          const index = parseInt(customId.split('_')[2], 10);
-          if (!isNaN(index)) {
-            return this.removeFromQueue(guildId, index);
-          }
-        }
-        return { success: false, error: 'Unknown button interaction' };
-    }
   }
 
   /**
