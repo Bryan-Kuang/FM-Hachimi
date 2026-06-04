@@ -32,8 +32,11 @@ PAT with `read:packages` so the VPS can pull a private image. CI pushes using th
 
 ### Slash commands & the testing system
 
-Commands are **not** auto-registered — run the **Deploy Discord Commands** workflow
-(`workflow_dispatch`) separately. A command's `stage` field decides where it can live:
+**Stable (global) commands auto-deploy** when command files change on `main` (the
+`Deploy Discord Commands` workflow has a `push` trigger paths-filtered to
+`src/bot/commands/**`). **Testing / guild scopes are still manual** via that
+workflow's `workflow_dispatch` — e.g. run it with `test` after adding a
+`stage:'testing'` command. A command's `stage` field decides where it can live:
 
 - `stage: 'stable'` (or unset) → **global** (every server, ~1h propagation).
 - `stage: 'testing'` → **test guild only**, plus a runtime guard (`assertTestingGuild`)

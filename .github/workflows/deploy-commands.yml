@@ -1,6 +1,16 @@
 name: Deploy Discord Commands
 
 on:
+  # Auto-deploy stable (global) commands when command definitions change on main,
+  # so merging a command no longer requires manually running this. A push event
+  # sets none of the DEPLOY_* flags below, so it resolves to a global deploy.
+  # Testing / guild / clear scopes stay manual via workflow_dispatch.
+  push:
+    branches: [main]
+    paths:
+      - 'src/bot/commands/**'
+      - 'src/bot/testing_access.ts'
+      - 'scripts/deploy-commands.js'
   workflow_dispatch:
     inputs:
       environment:
@@ -19,6 +29,12 @@ on:
 
 permissions:
   contents: read
+
+# Serialize command deploys so an auto push-deploy and a manual dispatch can't
+# clobber each other's Discord API writes.
+concurrency:
+  group: deploy-commands
+  cancel-in-progress: false
 
 jobs:
   deploy-commands:
