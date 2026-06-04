@@ -18,6 +18,9 @@ import {
   isRadioBlockedButton,
 } from '../../../playback/radio_controls';
 import * as logger from '../../../services/logger_service';
+import * as Lock from '../../../utils/lock';
+
+const RADIO_SKIP_DEBOUNCE_MS = 5000;
 
 /**
  * Create a button interaction handler bound to the given player service.
@@ -46,7 +49,9 @@ function createButtonHandler(playerService: any) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       }
 
-      if (isRadioBlockedButton(customId) && isRadioMode(interaction, playerService)) {
+      const radioMode = isRadioMode(interaction, playerService);
+
+      if (isRadioBlockedButton(customId) && radioMode) {
         return await denyRadioControl(interaction, isControlButton);
       }
 
@@ -59,6 +64,10 @@ function createButtonHandler(playerService: any) {
             flags:   MessageFlags.Ephemeral,
           });
         }
+      }
+
+      if (customId === 'skip' && radioMode && await isRadioSkipDebounced(interaction)) {
+        return;
       }
 
       // daily_play_<bvid>: triggered from daily hachimi recommendation cards
@@ -163,6 +172,21 @@ async function denyRadioControl(interaction: any, isControlButton: boolean): Pro
   }
 
   await interaction.editReply({ content: RADIO_ONLY_STOP_MESSAGE });
+}
+
+async function isRadioSkipDebounced(interaction: any): Promise<boolean> {
+  const guildId = interaction.guild?.id;
+  if (!guildId) return false;
+
+  if (!Lock.shouldDebounce(guildId, 'radio_skip', RADIO_SKIP_DEBOUNCE_MS)) {
+    return false;
+  }
+
+  await interaction.followUp({
+    content: 'Please wait 5 seconds before skipping to the next radio video.',
+    flags: MessageFlags.Ephemeral,
+  });
+  return true;
 }
 
 async function handleControlButton(interaction: any, customId: string, playerService: any): Promise<void> {

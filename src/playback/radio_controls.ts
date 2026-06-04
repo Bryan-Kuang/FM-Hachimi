@@ -1,9 +1,8 @@
-export const RADIO_ONLY_STOP_MESSAGE = 'Only Stop is available in radio mode.';
-export const RADIO_ONLY_STOP_SUGGESTION = 'Use Stop to end radio mode before changing playback options.';
+export const RADIO_ONLY_STOP_MESSAGE = 'Only Stop and Skip are available in radio mode.';
+export const RADIO_ONLY_STOP_SUGGESTION = 'Use Stop to end radio mode, or Skip to jump to the next radio video.';
 
 const blockedRadioButtonIds = new Set([
   'pause_resume',
-  'skip',
   'prev',
   'loop',
   'queue',

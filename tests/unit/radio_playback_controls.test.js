@@ -5,7 +5,7 @@ function componentIds(rows) {
 }
 
 describe("radio playback controls", () => {
-  test("renders only the stop button for radio mode", () => {
+  test("renders stop and skip buttons for radio mode", () => {
     const rows = ButtonBuilders.createPlaybackControls({
       isPlaying: true,
       canSkip: true,
@@ -16,7 +16,7 @@ describe("radio playback controls", () => {
     });
 
     expect(rows).toHaveLength(1);
-    expect(componentIds(rows)).toEqual(["stop"]);
+    expect(componentIds(rows)).toEqual(["stop", "skip"]);
   });
 
   test("keeps normal playback controls outside radio mode", () => {

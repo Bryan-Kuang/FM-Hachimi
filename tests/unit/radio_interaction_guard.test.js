@@ -105,12 +105,15 @@ function makeRealPlayerServiceForGuard({ radioMode = true } = {}) {
       isPlaying: true,
       isPaused: false,
     }),
+    skipTrack: jest.fn().mockResolvedValue({ success: true }),
     handleButtonInteraction: jest.fn().mockResolvedValue({ success: true }),
   };
 
   const service = new PlayerService({
     audioManager,
-    interfaceUpdater: {},
+    interfaceUpdater: {
+      setPlaybackContext: jest.fn(),
+    },
     progressTracker: null,
     extractor: {},
   });
@@ -165,6 +168,33 @@ describe("radio interaction guard", () => {
     expect(playerService.stop).toHaveBeenCalledWith("guild-1");
   });
 
+  test("allows skip while radio mode is active", async () => {
+    const playerService = makePlayerService({ radioMode: true });
+    const handler = createButtonHandler(playerService);
+    const interaction = makeButtonInteraction("skip");
+
+    await handler(interaction);
+
+    expect(playerService.setUIContext).toHaveBeenCalledWith("guild-1", "channel-1");
+    expect(playerService.skip).toHaveBeenCalledWith("guild-1");
+  });
+
+  test("debounces radio skip for five seconds", async () => {
+    Lock.shouldDebounce.mockReturnValueOnce(true);
+    const playerService = makePlayerService({ radioMode: true });
+    const handler = createButtonHandler(playerService);
+    const interaction = makeButtonInteraction("skip");
+
+    await handler(interaction);
+
+    expect(Lock.shouldDebounce).toHaveBeenCalledWith("guild-1", "radio_skip", 5000);
+    expect(interaction.followUp).toHaveBeenCalledWith({
+      content: expect.stringMatching(/wait.*5 seconds/i),
+      flags: 64,
+    });
+    expect(playerService.skip).not.toHaveBeenCalled();
+  });
+
   test("blocks stale loop select menus while radio mode is active", async () => {
     const playerService = makePlayerService({ radioMode: true });
     const handler = createSelectMenuHandler(playerService);
@@ -193,6 +223,19 @@ describe("radio interaction guard", () => {
     });
     expect(playerService.removeTrack).not.toHaveBeenCalled();
     expect(Lock.acquire).not.toHaveBeenCalled();
+  });
+
+  test("player service allows radio skip before delegating to audio manager", async () => {
+    const { service, audioManager } = makeRealPlayerServiceForGuard({ radioMode: true });
+
+    const result = await service.handleButtonInteraction({
+      customId: "skip",
+      guild: { id: "guild-1" },
+      channelId: "channel-1",
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(audioManager.skipTrack).toHaveBeenCalledWith("guild-1");
   });
 
   test("player service refuses radio option buttons before delegating to audio manager", async () => {

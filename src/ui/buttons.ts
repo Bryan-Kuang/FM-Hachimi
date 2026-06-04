@@ -158,17 +158,17 @@ class ButtonBuilders {
       .setEmoji('⏹️')
       .setStyle(ButtonStyle.Secondary);
 
-    if (radioMode) {
-      row1.addComponents(stopButton);
-      return [row1];
-    }
-
     const skipButton = new ButtonBuilder()
       .setCustomId('skip')
       .setLabel('Skip')
       .setEmoji('⏭️')
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(!canSkip);
+
+    if (radioMode) {
+      row1.addComponents(stopButton, skipButton);
+      return [row1];
+    }
 
     const loopEmojis: Record<string, string> = {
       none: '🔁',
