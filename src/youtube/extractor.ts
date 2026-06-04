@@ -10,6 +10,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as logger from '../services/logger_service';
 import config = require('../config/config');
+import ExpiringCache = require('../utils/expiring_cache');
 import YouTubeValidator = require('./validator');
 import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage_feedback';
 
@@ -74,11 +75,6 @@ interface ThumbnailEntry {
   height?: number;
 }
 
-interface CacheEntry {
-  data: ExtractedAudio;
-  cachedAt: number;
-}
-
 interface SelectedFormatMetadata {
   formatId?: string;
   protocol?: string;
@@ -124,12 +120,10 @@ class YouTubeExtractor {
   private _cookiesFile: string | null;
   private _cookieRefreshService: CookieRefreshServiceLike | null;
 
-  // Extraction result cache — avoids repeated yt-dlp calls for the same video
-  private _cache: Map<string, CacheEntry>;
+  // Extraction result cache — avoids repeated yt-dlp calls for the same video.
+  // Shared ExpiringCache owns TTL eviction + size cap + cleanup timer.
+  private _cache: ExpiringCache<ExtractedAudio>;
   private _inFlightExtractions: Map<string, Promise<ExtractedAudio>>;
-  private _cacheExpiry: number;
-  private _maxCacheSize: number;
-  private _cacheCleanupInterval: NodeJS.Timeout | null;
 
   constructor() {
     this.userAgent =
@@ -138,41 +132,14 @@ class YouTubeExtractor {
     this._cookiesFile = this._resolveCookiesFile();
     this._cookieRefreshService = null;
 
-    // URL cache (mirrors BilibiliExtractor pattern)
-    this._cache = new Map();
+    // 25-min TTL — signed stream URLs are short-lived.
+    this._cache = new ExpiringCache(25 * 60 * 1000, 50, { label: 'youtube-extraction' });
     this._inFlightExtractions = new Map();
-    this._cacheExpiry = 25 * 60 * 1000; // 25 minutes
-    this._maxCacheSize = 50;
-    this._cacheCleanupInterval = setInterval(() => {
-      this._cleanupExpiredCache();
-    }, 10 * 60 * 1000).unref();
-  }
-
-  /** Clean up expired cache entries and enforce size limit. */
-  private _cleanupExpiredCache(): void {
-    const now = Date.now();
-    for (const [key, entry] of this._cache) {
-      if (now - entry.cachedAt > this._cacheExpiry) {
-        this._cache.delete(key);
-      }
-    }
-    // Enforce size limit — evict oldest entries
-    if (this._cache.size > this._maxCacheSize) {
-      const sorted = [...this._cache.entries()].sort((a, b) => a[1].cachedAt - b[1].cachedAt);
-      const excess = this._cache.size - this._maxCacheSize;
-      for (let i = 0; i < excess; i++) {
-        this._cache.delete(sorted[i][0]);
-      }
-    }
   }
 
   /** Stop the cache cleanup timer. Call on shutdown. */
   destroy(): void {
-    if (this._cacheCleanupInterval) {
-      clearInterval(this._cacheCleanupInterval);
-      this._cacheCleanupInterval = null;
-    }
-    this._cache.clear();
+    this._cache.dispose();
     this._inFlightExtractions.clear();
   }
 
@@ -316,11 +283,11 @@ class YouTubeExtractor {
 
       // Check cache first — skip yt-dlp entirely on hit
       const cached = this._cache.get(normalizedUrl);
-      if (cached && (Date.now() - cached.cachedAt < this._cacheExpiry)) {
+      if (cached) {
         logger.info('YouTube cache hit — skipping yt-dlp', {
           url: normalizedUrl,
-          title: cached.data.title,
-          cacheAgeMin: Math.round((Date.now() - cached.cachedAt) / 60000),
+          title: cached.title,
+          cacheAgeMin: Math.round((this._cache.ageMs(normalizedUrl) ?? 0) / 60000),
           source: options.source,
           priority: options.priority,
         });
@@ -333,9 +300,9 @@ class YouTubeExtractor {
           totalMs: Date.now() - totalStartedAt,
           priority: options.priority,
           source: options.source,
-          ...this.selectedFormatFromExtractedAudio(cached.data),
+          ...this.selectedFormatFromExtractedAudio(cached),
         });
-        return cached.data;
+        return cached;
       }
 
       if (retryCount === 0) {
@@ -409,7 +376,7 @@ class YouTubeExtractor {
       };
 
       // Cache the result
-      this._cache.set(normalizedUrl, { data: result, cachedAt: Date.now() });
+      this._cache.set(normalizedUrl, result);
 
       logger.info('YouTube audio extraction completed', {
         url,
