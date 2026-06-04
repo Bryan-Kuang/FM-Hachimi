@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as logger from '../services/logger_service';
+import config = require('../config/config');
 import YouTubeValidator = require('./validator');
 import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage_feedback';
 
@@ -254,10 +255,23 @@ class YouTubeExtractor {
     return [
       '--no-check-certificate',
       '--no-warnings',
-      '--js-runtimes', 'node',
+      ...this._playerClientArgs(),
       '--user-agent', this.userAgent,
       ...this._getCookieArgs(),
     ];
+  }
+
+  /**
+   * Player-client selector. 'tv,ios' return pre-signed stream URLs so yt-dlp
+   * skips downloading + executing YouTube's nsig player JS (the dominant
+   * extraction cost), which is why --js-runtimes is no longer needed on the hot
+   * path. Configurable via YOUTUBE_PLAYER_CLIENT; empty string restores yt-dlp's
+   * default clients (web + JS decipher) for bot-detection fallback.
+   */
+  private _playerClientArgs(): string[] {
+    const spec = config.youtube.playerClient;
+    if (!spec) return ['--js-runtimes', 'node'];
+    return ['--extractor-args', `youtube:player_client=${spec}`];
   }
 
   /**
@@ -453,6 +467,7 @@ class YouTubeExtractor {
       const args = [
         '--get-url',
         '--format', AUDIO_FORMAT_SELECTOR,
+        '--no-playlist',
         ...this._baseArgs(),
         url,
       ];
@@ -694,6 +709,7 @@ class YouTubeExtractor {
         '--dump-json',
         '--format', AUDIO_FORMAT_SELECTOR,
         '--no-download',
+        '--no-playlist',
         ...this._baseArgs(),
         normalizedUrl,
       ];

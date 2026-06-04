@@ -73,6 +73,7 @@ interface YouTubeConfig {
   preextractEnabled: boolean;
   preextractConcurrency: number;
   preextractMaxPerCardSet: number;
+  playerClient: string;
   cookieRefresh: YouTubeCookieRefreshConfig;
 }
 
@@ -238,6 +239,11 @@ const config: BotConfig = {
     preextractEnabled: process.env.YOUTUBE_PREEXTRACT_ENABLED !== "false",
     preextractConcurrency: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_PREEXTRACT_CONCURRENCY, 1)),
     preextractMaxPerCardSet: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_PREEXTRACT_MAX_PER_CARD_SET, 3)),
+    // yt-dlp player_client(s) used for extraction. 'tv,ios' return pre-signed
+    // stream URLs, so yt-dlp skips downloading+executing YouTube's nsig player
+    // JS — the dominant extraction cost. Set to '' to fall back to yt-dlp's
+    // default clients (web + JS decipher) if bot-detection ever requires it.
+    playerClient: (process.env.YOUTUBE_PLAYER_CLIENT ?? "tv,ios").trim(),
     cookieRefresh: {
       enabled: process.env.YOUTUBE_COOKIE_AUTO_REFRESH_ENABLED !== "false",
       cookiesFile: process.env.YOUTUBE_COOKIES_FILE || "/app/secrets/youtube_cookies.txt",

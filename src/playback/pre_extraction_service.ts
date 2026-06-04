@@ -2,7 +2,6 @@ import * as logger from '../services/logger_service';
 import UrlValidator = require('../bilibili/validator');
 import YouTubeValidator = require('../youtube/validator');
 import config = require('../config/config');
-import { isTestGuild } from '../bot/testing_access';
 
 type PreExtractionSource = 'play_search' | 'search_command' | 'daily_recommendation';
 
@@ -140,7 +139,11 @@ class PreExtractionService {
 
   prewarmYouTubeUrls(urls: string[], context: PreExtractionContext): PreExtractionSummary {
     const input = Array.isArray(urls) ? urls : [];
-    if (!this.youtubeEnabled || !this.youtubeExtractor || !isTestGuild(context.guildId)) {
+    // Previously gated to the test guild during rollout — that made pre-extraction
+    // a silent no-op in every real server, so playback always paid the full cold
+    // yt-dlp cost. Now runs anywhere YouTube pre-extraction is enabled, matching
+    // prewarmBilibiliUrls. Disable per-deployment via YOUTUBE_PREEXTRACT_ENABLED=false.
+    if (!this.youtubeEnabled || !this.youtubeExtractor) {
       return { queued: 0, skipped: input.length };
     }
 
