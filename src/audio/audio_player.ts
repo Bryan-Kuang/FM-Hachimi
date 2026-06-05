@@ -545,8 +545,8 @@ class AudioPlayer {
 
       this.cleanupFFmpegProcess();
 
-      // Re-extract audio URL if stale
-      if (this.currentTrack.normalizedUrl && this.currentTrack.isExpired()) {
+      // Re-extract audio URL if stale (never for a local media-cache file).
+      if (this.currentTrack.normalizedUrl && this.currentTrack.isExpired() && !this.currentTrack.cached) {
         try {
           const refreshExtractor = this.getRefreshExtractor(this.currentTrack);
           if (refreshExtractor) {
@@ -986,7 +986,7 @@ class AudioPlayer {
       return;
     }
 
-    if (trackAtStart.normalizedUrl) {
+    if (trackAtStart.normalizedUrl && !trackAtStart.cached) {
       try {
         const refreshExtractor = this.getRefreshExtractor(trackAtStart);
         if (refreshExtractor) {

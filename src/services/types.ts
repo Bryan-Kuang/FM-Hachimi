@@ -128,6 +128,8 @@ export interface ExtractedTrackData {
   protocol?: string;
   audioCodec?: string;
   videoCodec?: string;
+  /** True when audioUrl is a local media-cache file. */
+  cached?: boolean;
 }
 
 export interface SearchResultResponse {

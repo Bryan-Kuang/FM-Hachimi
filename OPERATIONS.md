@@ -89,6 +89,22 @@ on CAPTCHA/2FA. `scripts/refresh-youtube-cookies.sh` is the export-from-local-Ch
 
 Bilibili cookies (`bilibili_cookies.txt`) are static — refresh manually when they expire.
 
+## Media cache (YouTube)
+
+Since cold YouTube extraction is ~16s and can't be made fast on this IP, the bot
+caches the **downloaded audio file** for replayed videos. After the first play of a
+video, `YouTubeExtractor` downloads the audio (HTTP GET of the signed URL) into the
+`cache/` host bind-mount; later plays — even after the signed URL expires — read the
+local file instantly (no yt-dlp, no network). `src/audio/media_cache.ts`, keyed by
+video, LRU-evicted by entry count **and** total size.
+
+- Lives at `cache/` (mounted `/app/cache`), with a small `cache/index.json`.
+- Env: `YOUTUBE_MEDIA_CACHE_ENABLED` (default true), `YOUTUBE_MEDIA_CACHE_DIR`,
+  `YOUTUBE_MEDIA_CACHE_MAX_ENTRIES` (200), `YOUTUBE_MEDIA_CACHE_MAX_MB` (1024).
+- Cached tracks set `cached: true` so the player skips stale-URL refresh + CDN-retry.
+- Clear it any time: `rm -rf ~/bilibili-bot/cache/*` (re-downloads on next play).
+- A cache hit logs `YouTube media cache hit — playing local file`.
+
 ## Quick checks
 
 ```bash

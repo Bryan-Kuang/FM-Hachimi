@@ -8,6 +8,7 @@ import { validateEnv } from './config/env_validator';
 import BotClient = require('./bot/client');
 import BilibiliExtractor = require('./bilibili/extractor');
 import YouTubeExtractor = require('./youtube/extractor');
+import MediaCache = require('./audio/media_cache');
 import YouTubeCookieRefreshService = require('./youtube/cookie_refresh_service');
 import SessionManager = require('./session/session_manager');
 import AudioManager = require('./session/audio_manager');
@@ -74,6 +75,19 @@ class BilibiliDiscordBot {
 
       const youtubeExtractor = new YouTubeExtractor();
       logger.info('YouTube extractor initialized (requires yt-dlp)');
+
+      if (config.youtube.mediaCacheEnabled) {
+        const mediaCache = new MediaCache({
+          dir: config.youtube.mediaCacheDir,
+          maxEntries: config.youtube.mediaCacheMaxEntries,
+          maxBytes: config.youtube.mediaCacheMaxBytes,
+        });
+        youtubeExtractor.setMediaCache(mediaCache);
+        logger.info('YouTube media cache enabled', {
+          dir: config.youtube.mediaCacheDir,
+          maxEntries: config.youtube.mediaCacheMaxEntries,
+        });
+      }
 
       const youtubeCookieRefreshService = new YouTubeCookieRefreshService(config.youtube.cookieRefresh);
       youtubeCookieRefreshService.start();

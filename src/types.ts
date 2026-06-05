@@ -34,6 +34,8 @@ export interface TrackData {
   videoCodec?: string;
   /** Platform-specific headers for FFmpeg to send when fetching the audio stream. */
   streamHeaders?: StreamHeaders;
+  /** True when audioUrl is a local media-cache file — never expires, skip refresh. */
+  cached?: boolean;
 }
 
 /** UI message reference stored in GuildSession */

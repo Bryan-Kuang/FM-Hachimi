@@ -81,6 +81,8 @@ services:
       - ./secrets:/app/secrets
       - ${YOUTUBE_COOKIE_PROFILE_HOST:-/home/ubuntu/.fm-hachimi-youtube/profile}:/app/youtube-browser-profile:ro
       - ./data:/app/data
+      # Persistent downloaded-audio cache (replayed videos play from local files).
+      - ./cache:/app/cache
 
     # Network mode
     network_mode: bridge

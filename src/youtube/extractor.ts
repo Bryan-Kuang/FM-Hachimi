@@ -11,6 +11,7 @@ import * as path from 'path';
 import * as logger from '../services/logger_service';
 import config = require('../config/config');
 import ExpiringCache = require('../utils/expiring_cache');
+import MediaCache = require('../audio/media_cache');
 import YouTubeValidator = require('./validator');
 import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage_feedback';
 
@@ -47,6 +48,8 @@ interface ExtractedAudio extends VideoMetadata {
   audioCodec?: string;
   videoCodec?: string;
   streamHeaders: StreamHeaders;
+  /** True when audioUrl is a local media-cache file (skip stale-URL refresh). */
+  cached?: boolean;
 }
 
 interface SearchResult {
@@ -124,6 +127,8 @@ class YouTubeExtractor {
   // Shared ExpiringCache owns TTL eviction + size cap + cleanup timer.
   private _cache: ExpiringCache<ExtractedAudio>;
   private _inFlightExtractions: Map<string, Promise<ExtractedAudio>>;
+  // Persistent downloaded-audio cache (injected by the composition root).
+  private _mediaCache: MediaCache | null;
 
   constructor() {
     this.userAgent =
@@ -131,6 +136,7 @@ class YouTubeExtractor {
     this._ytdlpChecked = false;
     this._cookiesFile = this._resolveCookiesFile();
     this._cookieRefreshService = null;
+    this._mediaCache = null;
 
     // 25-min TTL — signed stream URLs are short-lived.
     this._cache = new ExpiringCache(25 * 60 * 1000, 50, { label: 'youtube-extraction' });
@@ -145,6 +151,10 @@ class YouTubeExtractor {
 
   setCookieRefreshService(service: CookieRefreshServiceLike | null): void {
     this._cookieRefreshService = service;
+  }
+
+  setMediaCache(cache: MediaCache | null): void {
+    this._mediaCache = cache;
   }
 
   clearCacheForUrl(url: string): void {
@@ -281,6 +291,31 @@ class YouTubeExtractor {
         throw new Error('Failed to normalize YouTube URL');
       }
 
+      // Persistent media cache: if we have the audio downloaded locally, play
+      // from the file — instant, and immune to signed-URL expiry. Checked before
+      // the URL cache because the local file never goes stale.
+      const mediaHit = this._mediaCache?.getEntry(normalizedUrl);
+      if (mediaHit) {
+        const data = mediaHit.meta as ExtractedAudio;
+        logger.info('YouTube media cache hit — playing local file', {
+          url: normalizedUrl,
+          title: data.title,
+          source: options.source,
+        });
+        emitPlaybackStage(options.onStage, 'using_cached');
+        this.logExtractionTiming({
+          cacheHit: true,
+          joinedInFlight: false,
+          ytdlpMs: 0,
+          parseMs: 0,
+          totalMs: Date.now() - totalStartedAt,
+          priority: options.priority,
+          source: `${options.source}:media`,
+          ...this.selectedFormatFromExtractedAudio(data),
+        });
+        return { ...data, audioUrl: mediaHit.path, cached: true };
+      }
+
       // Check cache first — skip yt-dlp entirely on hit
       const cached = this._cache.get(normalizedUrl);
       if (cached) {
@@ -377,6 +412,9 @@ class YouTubeExtractor {
 
       // Cache the result
       this._cache.set(normalizedUrl, result);
+      // Fire-and-forget: download the audio so future plays (incl. after the
+      // signed URL expires) hit the local file. Stores the full metadata.
+      this._mediaCache?.put(normalizedUrl, result.audioUrl, result.streamHeaders, result);
 
       logger.info('YouTube audio extraction completed', {
         url,

@@ -3,20 +3,20 @@
 set -euo pipefail
 
 echo "[deploy] preparing bind mounts..."
-mkdir -p data logs secrets
+mkdir -p data logs secrets cache
 
 # Self-heal bind-mount ownership. The container runs as HOST_UID:HOST_GID (.env)
-# and must own data/ + logs/, or daily-hachimi writes fail with EACCES (the
-# 2026-04-28 incident: dirs left owned by a different uid after HOST_UID changed).
+# and must own data/ + logs/ + cache/, or writes fail with EACCES (the 2026-04-28
+# incident: dirs left owned by a different uid after HOST_UID changed).
 # Best-effort — never fail the deploy over this.
 HUID="$(grep -E '^HOST_UID=' .env 2>/dev/null | head -1 | cut -d= -f2 | tr -d '"' || true)"
 HGID="$(grep -E '^HOST_GID=' .env 2>/dev/null | head -1 | cut -d= -f2 | tr -d '"' || true)"
 HUID="${HUID:-1000}"; HGID="${HGID:-1000}"
-if [ -n "$(find data logs -maxdepth 0 -not -uid "$HUID" -print -quit 2>/dev/null)" ]; then
+if [ -n "$(find data logs cache -maxdepth 0 -not -uid "$HUID" -print -quit 2>/dev/null)" ]; then
   echo "[deploy] fixing bind-mount ownership -> ${HUID}:${HGID}"
-  chown -R "${HUID}:${HGID}" data logs 2>/dev/null \
-    || sudo -n chown -R "${HUID}:${HGID}" data logs 2>/dev/null \
-    || echo "[deploy] WARN: could not chown data/logs — run: sudo chown -R ${HUID}:${HGID} data logs"
+  chown -R "${HUID}:${HGID}" data logs cache 2>/dev/null \
+    || sudo -n chown -R "${HUID}:${HGID}" data logs cache 2>/dev/null \
+    || echo "[deploy] WARN: could not chown data/logs/cache — run: sudo chown -R ${HUID}:${HGID} data logs cache"
 fi
 
 migrate_cookie_file() {
