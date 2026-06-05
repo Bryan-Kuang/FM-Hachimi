@@ -12,7 +12,6 @@ import search = require('./search');
 import hachimi = require('./hachimi');
 import radio = require('./radio');
 import dailyHachimi = require('./daily_hachimi');
-import ytfast = require('./ytfast');
 
 interface CommandDefinition {
   data: { name: string; toJSON?: () => unknown };
@@ -42,7 +41,6 @@ const commandFactories: CommandFactory[] = [
   hachimi,
   radio,
   dailyHachimi,
-  ytfast,
 ];
 
 const TESTING_DESCRIPTION_PREFIX = '[Testing] ';

@@ -84,40 +84,6 @@ describe("YouTubeExtractor extraction cache behavior", () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
-  test("extractAudioFast uses cookie-less android clients on the fast pass", async () => {
-    spawn.mockImplementation(() => createMockProcess({
-      stdout: youtubeJson("dQw4w9WgXcQ", "Fast YouTube"),
-      exitCode: 0,
-    }));
-
-    const result = await extractor.extractAudioFast("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
-
-    expect(result.title).toBe("Fast YouTube");
-    expect(spawn).toHaveBeenCalledTimes(1);
-    const args = spawn.mock.calls[0][1];
-    expect(args[args.indexOf("--extractor-args") + 1]).toBe("youtube:player_client=android_vr,android");
-    expect(args).not.toContain("--cookies");
-  });
-
-  test("extractAudioFast falls back to the cookie path when the fast pass fails", async () => {
-    spawn
-      .mockImplementationOnce(() => createMockProcess({ stderr: "Video unavailable", exitCode: 1 }))
-      .mockImplementationOnce(() => createMockProcess({
-        stdout: youtubeJson("dQw4w9WgXcQ", "Cookie Fallback"),
-        exitCode: 0,
-      }));
-
-    const result = await extractor.extractAudioFast("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
-
-    expect(result.title).toBe("Cookie Fallback");
-    expect(spawn).toHaveBeenCalledTimes(2);
-    // 1st = fast android clients, 2nd = standard cookie path (default tv,ios).
-    expect(spawn.mock.calls[0][1][spawn.mock.calls[0][1].indexOf("--extractor-args") + 1])
-      .toBe("youtube:player_client=android_vr,android");
-    expect(spawn.mock.calls[1][1][spawn.mock.calls[1][1].indexOf("--extractor-args") + 1])
-      .toBe("youtube:player_client=tv,ios");
-  });
-
   test("separate uncached YouTube URLs spawn independent yt-dlp processes without limiter state", async () => {
     spawn
       .mockImplementationOnce(() => createMockProcess({
