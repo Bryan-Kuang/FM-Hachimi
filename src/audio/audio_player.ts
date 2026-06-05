@@ -628,15 +628,26 @@ class AudioPlayer {
         const referer   = headers?.referer   || 'https://www.bilibili.com/';
         const userAgent = headers?.userAgent  || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+        // HTTP demuxer options (user_agent/referer/reconnect/timeout/headers) are
+        // invalid for a local `file` input — FFmpeg errors with "Option not found"
+        // and opens nothing (0 bytes → silence). Only pass them for remote URLs;
+        // media-cache hits play a local file path.
+        const isRemote = /^https?:\/\//i.test(audioUrl);
+        const networkInputArgs = isRemote
+          ? [
+              '-user_agent', userAgent,
+              '-referer', referer,
+              '-reconnect', '1',
+              '-reconnect_streamed', '1',
+              '-reconnect_delay_max', '5',
+              '-rw_timeout', '30000000',
+              '-timeout', '30000000',
+              '-headers', 'Connection: keep-alive',
+            ]
+          : [];
+
         const ffmpegProcess = spawn('ffmpeg', [
-          '-user_agent', userAgent,
-          '-referer', referer,
-          '-reconnect', '1',
-          '-reconnect_streamed', '1',
-          '-reconnect_delay_max', '5',
-          '-rw_timeout', '30000000',
-          '-timeout', '30000000',
-          '-headers', 'Connection: keep-alive',
+          ...networkInputArgs,
           // Reduced from 10M/50M — Bilibili/YouTube serve well-known containers;
           // lower values shave 1-2s off first-byte latency.
           '-analyzeduration', '2000000',
