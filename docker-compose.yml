@@ -82,29 +82,5 @@ services:
       - ${YOUTUBE_COOKIE_PROFILE_HOST:-/home/ubuntu/.fm-hachimi-youtube/profile}:/app/youtube-browser-profile:ro
       - ./data:/app/data
 
-    # On a user-defined network so the bot can resolve the PO-token provider by
-    # service name. Outbound internet + the loopback metrics port both still work.
-    networks:
-      - botnet
-    depends_on:
-      - pot-provider
-
-  # PO Token (Proof-of-Origin) provider. yt-dlp uses it to pass YouTube's
-  # "Sign in to confirm you're not a bot" check on the data-center IP without
-  # cookies — which is what makes the cookie-less fast clients usable. Internal
-  # only; the bot reaches it at http://pot-provider:4416 (see YOUTUBE_POT_PROVIDER_URL).
-  pot-provider:
-    image: brainicism/bgutil-ytdlp-pot-provider:latest
-    container_name: fm-hachimi-pot-provider
-    restart: unless-stopped
-    networks:
-      - botnet
-    # Lightweight, but cap it to stay friendly on the Oracle free tier.
-    deploy:
-      resources:
-        limits:
-          memory: 320M
-
-networks:
-  botnet:
-    driver: bridge
+    # Network mode
+    network_mode: bridge
