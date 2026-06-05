@@ -21,6 +21,9 @@ bower_components/
 # Logs
 logs/
 *.log
+
+# Downloaded-audio media cache (host bind-mount)
+cache/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

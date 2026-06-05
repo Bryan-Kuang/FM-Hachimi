@@ -74,6 +74,10 @@ interface YouTubeConfig {
   preextractConcurrency: number;
   preextractMaxPerCardSet: number;
   playerClient: string;
+  mediaCacheEnabled: boolean;
+  mediaCacheDir: string;
+  mediaCacheMaxEntries: number;
+  mediaCacheMaxBytes: number;
   cookieRefresh: YouTubeCookieRefreshConfig;
 }
 
@@ -244,6 +248,12 @@ const config: BotConfig = {
     // JS — the dominant extraction cost. Set to '' to fall back to yt-dlp's
     // default clients (web + JS decipher) if bot-detection ever requires it.
     playerClient: (process.env.YOUTUBE_PLAYER_CLIENT ?? "tv,ios").trim(),
+    // Persistent on-disk cache of downloaded audio for replayed videos — a hit
+    // plays from a local file (instant, no yt-dlp, no signed-URL expiry).
+    mediaCacheEnabled: process.env.YOUTUBE_MEDIA_CACHE_ENABLED !== "false",
+    mediaCacheDir: process.env.YOUTUBE_MEDIA_CACHE_DIR || "/app/cache",
+    mediaCacheMaxEntries: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_MEDIA_CACHE_MAX_ENTRIES, 200)),
+    mediaCacheMaxBytes: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_MEDIA_CACHE_MAX_MB, 1024)) * 1024 * 1024,
     cookieRefresh: {
       enabled: process.env.YOUTUBE_COOKIE_AUTO_REFRESH_ENABLED !== "false",
       cookiesFile: process.env.YOUTUBE_COOKIES_FILE || "/app/secrets/youtube_cookies.txt",

@@ -15,6 +15,9 @@ youtube_cookies.txt
 logs/
 *.log
 
+# Media cache (host bind-mount, not build context)
+cache/
+
 # Testing
 coverage/
 .nyc_output/

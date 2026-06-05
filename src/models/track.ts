@@ -28,6 +28,7 @@ class Track implements TrackData {
   audioCodec?: string;
   videoCodec?: string;
   streamHeaders?: StreamHeaders;
+  cached?: boolean;
 
   // Queue-time fields:
   requestedBy: string | null;
