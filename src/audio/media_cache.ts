@@ -29,6 +29,13 @@ interface IndexEntry {
   meta: unknown;
 }
 
+interface DownloadTask {
+  id: string;
+  audioUrl: string;
+  headers?: StreamHeaders;
+  meta?: unknown;
+}
+
 interface MediaCacheOptions {
   dir: string;
   maxEntries: number;
@@ -47,7 +54,12 @@ class MediaCache {
   private readonly downloadTimeoutMs: number;
   private readonly indexPath: string;
   private index: Map<string, IndexEntry>;
-  private inFlight: Map<string, Promise<void>>;
+  // Downloads run serially (one at a time) so they don't contend with the live
+  // playback stream for the box's limited CPU/bandwidth. `queued` dedups ids
+  // sitting in the queue or actively downloading.
+  private queue: DownloadTask[];
+  private queued: Set<string>;
+  private worker: Promise<void> | null;
   private seq: number;
 
   constructor(opts: MediaCacheOptions) {
@@ -59,7 +71,9 @@ class MediaCache {
     this.downloadTimeoutMs = opts.downloadTimeoutMs ?? 60_000;
     this.indexPath = path.join(this.dir, INDEX_FILE);
     this.index = new Map();
-    this.inFlight = new Map();
+    this.queue = [];
+    this.queued = new Set();
+    this.worker = null;
     if (this.enabled) this._load();
   }
 
@@ -98,23 +112,40 @@ class MediaCache {
    */
   put(id: string, audioUrl: string, headers?: StreamHeaders, meta?: unknown): void {
     if (!this.enabled || !id || !audioUrl) return;
-    if (this.index.has(id) || this.inFlight.has(id)) return;
+    if (this.index.has(id) || this.queued.has(id)) return;
     if (/\.m3u8(\?|$)/i.test(audioUrl) || /\.mpd(\?|$)/i.test(audioUrl) || /[?&]manifest/i.test(audioUrl)) {
       return;
     }
-    const promise = this._download(id, audioUrl, headers, meta)
-      .catch((error: unknown) => {
-        logger.warn('Media cache download failed', { id, error: (error as Error).message });
-      })
-      .finally(() => {
-        this.inFlight.delete(id);
-      });
-    this.inFlight.set(id, promise);
+    this.queue.push({ id, audioUrl, headers, meta });
+    this.queued.add(id);
+    this._pump();
   }
 
-  /** Await all in-flight downloads (for graceful shutdown / tests). */
+  /** Await all queued + in-flight downloads (for graceful shutdown / tests). */
   async drain(): Promise<void> {
-    await Promise.allSettled([...this.inFlight.values()]);
+    while (this.worker) await this.worker;
+  }
+
+  /** Start the single serial worker if it isn't already running. */
+  private _pump(): void {
+    if (this.worker) return;
+    this.worker = this._runQueue().finally(() => { this.worker = null; });
+  }
+
+  /** Process queued downloads one at a time. Picks up items enqueued mid-run. */
+  private async _runQueue(): Promise<void> {
+    while (this.queue.length > 0) {
+      const task = this.queue.shift()!;
+      try {
+        if (!this.index.has(task.id)) {
+          await this._download(task.id, task.audioUrl, task.headers, task.meta);
+        }
+      } catch (error: unknown) {
+        logger.warn('Media cache download failed', { id: task.id, error: (error as Error).message });
+      } finally {
+        this.queued.delete(task.id);
+      }
+    }
   }
 
   get size(): number {
