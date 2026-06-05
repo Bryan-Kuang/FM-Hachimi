@@ -409,74 +409,6 @@ class YouTubeExtractor {
   }
 
   /**
-   * Experimental fast extraction (used by the test-only /ytfast command).
-   * Tries cookie-less android clients first (~4-5s); on any failure — e.g. an
-   * age-restricted / bot-checked video the cookie-less clients can't open —
-   * transparently falls back to the standard cookie-based extractAudio (~24s).
-   * Shares the same result cache as extractAudio.
-   */
-  async extractAudioFast(url: string, options: ExtractionOptions = {}): Promise<ExtractedAudio> {
-    const opts = this.resolveExtractionOptions(options);
-    const totalStartedAt = Date.now();
-
-    if (!this._ytdlpChecked) {
-      const available = await this.checkYtDlpAvailability();
-      if (!available) throw new Error('yt-dlp is not available. Please install it: pip install yt-dlp');
-      this._ytdlpChecked = true;
-    }
-
-    if (!YouTubeValidator.isValidYouTubeUrl(url)) throw new Error('Invalid YouTube URL format');
-    const normalizedUrl = YouTubeValidator.normalizeUrl(url);
-    if (!normalizedUrl) throw new Error('Failed to normalize YouTube URL');
-
-    const cached = this._cache.get(normalizedUrl);
-    if (cached) {
-      emitPlaybackStage(opts.onStage, 'using_cached');
-      return cached;
-    }
-
-    try {
-      const { metadata, audioUrl, selectedFormat, ytdlpMs, parseMs } =
-        await this.extractMetadataAndUrlFast(normalizedUrl);
-
-      const result: ExtractedAudio = {
-        ...metadata,
-        audioUrl,
-        ...selectedFormat,
-        platform: 'youtube',
-        originalUrl: url,
-        normalizedUrl,
-        extractedAt: new Date().toISOString(),
-        streamHeaders: { referer: 'https://www.youtube.com/', userAgent: this.userAgent },
-      };
-
-      this._cache.set(normalizedUrl, result);
-      this.logExtractionTiming({
-        cacheHit: false,
-        joinedInFlight: false,
-        ytdlpMs,
-        parseMs,
-        totalMs: Date.now() - totalStartedAt,
-        priority: opts.priority,
-        source: `${opts.source}:fast`,
-        ...selectedFormat,
-      });
-      logger.info('YouTube fast extraction completed', {
-        url,
-        title: result.title,
-        client: config.youtube.fastPlayerClient,
-      });
-      return result;
-    } catch (fastError: unknown) {
-      logger.info('YouTube fast extraction failed; falling back to cookie path', {
-        url,
-        error: (fastError as Error).message,
-      });
-      return this.extractAudio(url, options);
-    }
-  }
-
-  /**
    * Get audio stream URL only (for CDN URL refresh on stale tracks).
    */
   async getAudioStreamUrl(url: string): Promise<string> {
@@ -738,40 +670,17 @@ class YouTubeExtractor {
   }
 
   private async extractMetadataAndUrl(normalizedUrl: string): Promise<ExtractionPayload> {
-    return this.runDumpJson([
-      '--dump-json',
-      '--format', AUDIO_FORMAT_SELECTOR,
-      '--no-download',
-      '--no-playlist',
-      ...this._baseArgs(),
-      normalizedUrl,
-    ]);
-  }
-
-  /**
-   * Cookie-less "fast pass" used by the experimental /ytfast command. Uses the
-   * android_vr/android player clients, which return a playable URL in ~4-5s but
-   * don't support cookies — so this only works for non-restricted videos, and
-   * extractAudioFast falls back to the cookie path on failure.
-   */
-  private async extractMetadataAndUrlFast(normalizedUrl: string): Promise<ExtractionPayload> {
-    return this.runDumpJson([
-      '--dump-json',
-      '--format', AUDIO_FORMAT_SELECTOR,
-      '--no-download',
-      '--no-playlist',
-      '--no-check-certificate',
-      '--no-warnings',
-      '--extractor-args', `youtube:player_client=${config.youtube.fastPlayerClient}`,
-      '--user-agent', this.userAgent,
-      normalizedUrl,
-    ]);
-  }
-
-  /** Spawn `yt-dlp --dump-json …` with the given args and parse the result. */
-  private runDumpJson(args: string[]): Promise<ExtractionPayload> {
     return new Promise((resolve, reject) => {
       const ytdlpStartedAt = Date.now();
+      const args = [
+        '--dump-json',
+        '--format', AUDIO_FORMAT_SELECTOR,
+        '--no-download',
+        '--no-playlist',
+        ...this._baseArgs(),
+        normalizedUrl,
+      ];
+
       const ytdlp: ChildProcess = spawn('yt-dlp', args);
       let stdout = '';
       let stderr = '';
