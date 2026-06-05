@@ -66,6 +66,30 @@ describe("MediaCache", () => {
     expect(cache.get("vid")).toBeNull();
   });
 
+  test("runs downloads serially — never more than one at a time", async () => {
+    let active = 0;
+    let maxActive = 0;
+    axios.get.mockImplementation(() => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      return new Promise((resolve) => setImmediate(() => {
+        active -= 1;
+        resolve({ data: Readable.from([Buffer.from("x")]) });
+      }));
+    });
+
+    const cache = new MediaCache({ dir, maxEntries: 10, maxBytes: 1e6 });
+    cache.put("a", "https://cdn/a.m4a");
+    cache.put("b", "https://cdn/b.m4a");
+    cache.put("c", "https://cdn/c.m4a");
+    await cache.drain();
+
+    expect(maxActive).toBe(1);
+    expect(cache.get("a")).not.toBeNull();
+    expect(cache.get("b")).not.toBeNull();
+    expect(cache.get("c")).not.toBeNull();
+  });
+
   test("evicts least-recently-used over the entry-count cap", async () => {
     mockDownload(Buffer.from("aaa"));
     const cache = new MediaCache({ dir, maxEntries: 2, maxBytes: 1e9 });
