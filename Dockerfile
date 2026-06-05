@@ -25,12 +25,7 @@ RUN apk add --no-cache \
 # [default] extras include yt-dlp-ejs — the External JavaScript Solver
 # scripts that YouTube's signature challenge requires. Node.js (already in
 # this image) is used as the JS runtime via --js-runtimes node.
-# bgutil-ytdlp-pot-provider is the yt-dlp plugin that fetches Proof-of-Origin
-# tokens from the pot-provider sidecar (see docker-compose.yml) to bypass
-# YouTube bot-detection on the data-center IP.
-RUN pip3 install --no-cache-dir --break-system-packages --upgrade \
-        "yt-dlp[default]" \
-        bgutil-ytdlp-pot-provider && \
+RUN pip3 install --no-cache-dir --break-system-packages --upgrade "yt-dlp[default]" && \
     mkdir -p /home/node/.config/yt-dlp && \
     echo "--js-runtimes node" > /home/node/.config/yt-dlp/config && \
     chown -R node:node /home/node/.config

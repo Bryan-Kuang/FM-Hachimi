@@ -89,22 +89,6 @@ on CAPTCHA/2FA. `scripts/refresh-youtube-cookies.sh` is the export-from-local-Ch
 
 Bilibili cookies (`bilibili_cookies.txt`) are static — refresh manually when they expire.
 
-## PO-token provider (experimental, for /ytfast)
-
-`docker compose` runs a `pot-provider` sidecar (`brainicism/bgutil-ytdlp-pot-provider`)
-on the internal `botnet` network. The bot image ships the `bgutil-ytdlp-pot-provider`
-yt-dlp plugin, and the **fast** extraction path (used only by the test-only `/ytfast`
-command) passes `--extractor-args youtubepot-bgutilhttp:base_url=$YOUTUBE_POT_PROVIDER_URL`
-(default `http://pot-provider:4416`) so cookie-less clients can pass YouTube's
-"confirm you're not a bot" check on the data-center IP.
-
-- Disable by setting `YOUTUBE_POT_PROVIDER_URL=` (empty) in `.env`.
-- The standard `/play` path is **unchanged** — this is wired through `/ytfast` only,
-  to be benchmarked in the test guild before any graduation to `/play`.
-- Quick check: `docker compose logs pot-provider | tail` and a `/ytfast` run — its
-  `YouTube fast playback timing` log line should show a low `extractionMs` and no
-  `falling back to cookie path`.
-
 ## Quick checks
 
 ```bash
