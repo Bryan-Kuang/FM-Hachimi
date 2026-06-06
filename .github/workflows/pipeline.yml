@@ -1,0 +1,166 @@
+name: Pipeline
+
+# One connected graph: check -> image -> deploy -> deploy-commands.
+# Replaces the old separate CI / Deploy (workflow_run) / Deploy Commands workflows.
+# (The scheduled cookie-health monitor stays separate — it isn't part of this flow.)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Manual command deploy: global=stable everywhere (~1h); test=stage:testing -> test guild (instant, no dups); guild=ALL -> one guild (can duplicate global); clear_guild=remove guild-scoped cmds'
+        required: false
+        default: 'global'
+        type: choice
+        options:
+          - global
+          - test
+          - guild
+          - clear_guild
+      guild_id:
+        description: 'Guild ID for guild / clear_guild. Empty = GUILD_ID secret. (test uses TEST_GUILD_ID.)'
+        required: false
+
+# Cancel superseded PR runs; serialize main-branch pipelines (never cancel a
+# deploy mid-flight — cancel-in-progress is true only for pull requests).
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # ── 1. Quality gate (lint, typecheck, test, build, compose) ──────────────
+  check:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Prepare compose env
+        run: cp .env.example .env
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+        env:
+          TEST_MODE: true
+          NODE_ENV: test
+          HUSKY: 0
+      - name: Build
+        run: npm run build
+      - name: Validate Docker Compose
+        run: docker compose config
+
+  # ── 2. Build the image once; push to GHCR on main (PRs build-only) ───────
+  image:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compute lowercase image name
+        id: img
+        run: echo "name=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build image (push only on push to main)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ${{ steps.img.outputs.name }}:latest
+            ${{ steps.img.outputs.name }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── 3. Deploy the tested image to the VPS (main only) ────────────────────
+  deploy:
+    needs: image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Deploy to Oracle Cloud
+        uses: appleboy/ssh-action@v1
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          GHCR_USER: ${{ github.repository_owner }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN
+          timeout: 30s
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            cd ~/bilibili-bot
+
+            echo "[deploy] fetching origin/main..."
+            timeout 120 git fetch --prune origin main
+
+            echo "[deploy] fast-forward pulling..."
+            timeout 60 git pull --ff-only origin main
+
+            bash scripts/deploy/remote-deploy.sh
+      - name: Notify Discord on failure
+        if: failure()
+        run: |
+          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"embeds\":[{\"title\":\"Deploy Failed\",\"color\":15158332,\"description\":\"**Commit:** \`${{ github.sha }}\`\\n[View run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\"}]}"
+
+  # ── 4. Register slash commands ───────────────────────────────────────────
+  # After a successful production deploy (global), or on manual dispatch (any
+  # scope). A push event sets none of the DEPLOY_* flags -> global deploy.
+  deploy-commands:
+    needs: deploy
+    if: |
+      always() &&
+      (
+        (github.event_name == 'push' && needs.deploy.result == 'success') ||
+        github.event_name == 'workflow_dispatch'
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Deploy slash commands to Discord
+        run: node scripts/deploy-commands.js
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          GUILD_ID: ${{ (inputs.environment == 'guild' || inputs.environment == 'clear_guild') && (inputs.guild_id || secrets.GUILD_ID) || '' }}
+          DEPLOY_TEST_COMMANDS: ${{ inputs.environment == 'test' && 'true' || '' }}
+          DEPLOY_LEGACY_GUILD_COMMANDS: ${{ (inputs.environment == 'guild' || inputs.environment == 'clear_guild') && 'true' || '' }}
+          CLEAR_GUILD_COMMANDS: ${{ inputs.environment == 'clear_guild' && 'true' || '' }}
