@@ -18,12 +18,14 @@ Runbook for deploying and operating F.M. Hachimi on the VPS.
 
 ## Deploy flow
 
-`push → main` → **CI** `check` (lint, typecheck, test, build) → **CI `image`** builds and
-pushes the Docker image to **GHCR** (`ghcr.io/bryan-kuang/fm-hachimi`, tagged `latest` +
-commit SHA) → on success **Deploy** SSHes to the VPS → `git pull --ff-only` →
-`scripts/deploy/remote-deploy.sh` → `docker login ghcr.io` + `docker compose pull` +
-`up -d` (pulls the **exact image CI tested** via `IMAGE_TAG`=commit SHA) → healthcheck poll.
-Failures ping Discord. (PRs build the image for validation but do not push.)
+One **`Pipeline`** workflow, a single `needs:` graph: **`check → image → deploy → deploy-commands`**.
+`push → main` runs `check` (lint, typecheck, test, build, compose) → `image` builds and
+pushes to **GHCR** (`ghcr.io/bryan-kuang/fm-hachimi`, tagged `latest` + commit SHA) →
+`deploy` SSHes to the VPS → `git pull --ff-only` → `scripts/deploy/remote-deploy.sh` →
+`docker login ghcr.io` + `docker compose pull` + `up -d` (pulls the **exact image CI tested**
+via `IMAGE_TAG`=commit SHA) → healthcheck poll → `deploy-commands` registers global commands.
+Failures ping Discord. PRs run `check` + `image` (build-only, no push/deploy). The scheduled
+`Cookie Health` monitor is a separate workflow.
 
 **Registry deploy prerequisites** (one-time): either make the `fm-hachimi` GHCR package
 **public** (then no auth needed to pull), or add a repo secret **`GHCR_TOKEN`** = a classic
@@ -32,10 +34,10 @@ PAT with `read:packages` so the VPS can pull a private image. CI pushes using th
 
 ### Slash commands & the testing system
 
-**Stable (global) commands auto-deploy** when command files change on `main` (the
-`Deploy Discord Commands` workflow has a `push` trigger paths-filtered to
-`src/bot/commands/**`). **Testing / guild scopes are still manual** via that
-workflow's `workflow_dispatch` — e.g. run it with `test` after adding a
+**Stable (global) commands auto-deploy** at the end of the `Pipeline` (the
+`deploy-commands` job, after a successful deploy on `main`). **Testing / guild scopes
+are manual** via the `Pipeline` workflow's `workflow_dispatch` — e.g. run it with `test`
+after adding a
 `stage:'testing'` command. A command's `stage` field decides where it can live:
 
 - `stage: 'stable'` (or unset) → **global** (every server, ~1h propagation).
