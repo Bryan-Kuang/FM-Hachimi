@@ -646,6 +646,12 @@ class AudioPlayer {
             ]
           : [];
 
+        // Audio filter chain (config.audio.audioFilter, env AUDIO_FILTER). Default
+        // dynaudnorm levels loudness across/within tracks; empty disables it.
+        const audioFilterArgs = config.audio.audioFilter
+          ? ['-af', config.audio.audioFilter]
+          : [];
+
         const ffmpegProcess = spawn('ffmpeg', [
           ...networkInputArgs,
           // Reduced from 10M/50M — Bilibili/YouTube serve well-known containers;
@@ -654,8 +660,7 @@ class AudioPlayer {
           '-probesize', '5000000',
           '-fflags', '+genpts+discardcorrupt',
           '-i', audioUrl,
-          // Removed loudnorm (buffered ~0.5-1s). Use simple volume filter instead.
-          '-af', 'volume=1.0',
+          ...audioFilterArgs,
           '-f', 's16le',
           '-ar', '48000',
           '-ac', '2',
