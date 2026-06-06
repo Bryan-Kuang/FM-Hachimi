@@ -25,7 +25,9 @@ class GuildSession {
     this.uiSeq = 0;
     this.progressTracker = null;
     this.history = new Set();
-    this.historyLimit = 50;
+    // Recently-played bvids excluded from random Hachimi/radio picks. Larger
+    // window = fewer near-term repeats (paired with varied search ordering).
+    this.historyLimit = 100;
   }
 
   /**

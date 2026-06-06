@@ -383,13 +383,20 @@ class BilibiliAPI {
     { maxPages = 3, pageSize = 50, timeoutMs = 8000 } = {}
   ): Promise<VideoInfo[]> {
     try {
-      // Always include page 1 for relevance
+      // Vary the sort order so we don't always draw the same "totalrank" top set.
+      // Each order (most-played, newest, most-danmaku, most-favorited, …) surfaces
+      // a different slice of the Hachimi corpus — the main lever for variety.
+      // page 1 of the chosen order stays the relevance anchor; the hard 哈基米
+      // relevance filter downstream guards against drift on deeper/other orders.
+      const ORDERS = ['totalrank', 'click', 'pubdate', 'dm', 'stow', 'scores'];
+      const order = ORDERS[Math.floor(Math.random() * ORDERS.length)];
+
       const pages = [1];
-      // Randomly add 1-2 pages from [2,10]
+      // Randomly add 1-2 pages from a wider range [2,14].
       const extraCount = Math.floor(Math.random() * 2) + 1; // 1 or 2
       const candidates = new Set<number>();
       for (let i = 0; i < extraCount; i++) {
-        const p = 2 + Math.floor(Math.random() * 9); // 2..10
+        const p = 2 + Math.floor(Math.random() * 13); // 2..14
         candidates.add(p);
       }
       const extraPages = Array.from(candidates).slice(
@@ -407,7 +414,7 @@ class BilibiliAPI {
             keyword: keyword,
             page: p,
             pagesize: pageSize,
-            order: "totalrank",
+            order,
             duration: 0,
             tids: 0,
           },
