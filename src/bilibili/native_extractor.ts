@@ -22,6 +22,12 @@ interface ViewApiStat {
   like?: number;
 }
 
+interface ViewApiPage {
+  cid?: number;
+  duration?: number;
+  part?: string;
+}
+
 interface ViewApiData {
   bvid?: string;
   aid?: number;
@@ -33,6 +39,7 @@ interface ViewApiData {
   pubdate?: number;
   stat?: ViewApiStat;
   pic?: string;
+  pages?: ViewApiPage[];
 }
 
 interface DashAudioItem {
@@ -259,11 +266,18 @@ class NativeBilibiliExtractor {
     const bvid = view.bvid || (identity.type === 'BV' ? identity.bvid : null);
     const id = bvid || (view.aid ? `av${view.aid}` : null);
 
+    // Multi-part (分P) videos: view.duration is the SUM of all parts, but we play
+    // only the default part (view.cid). Use that part's own duration so the
+    // now-playing card matches the audio (e.g. an 8-part video showing 21:12
+    // total while a 2:29 part plays).
+    const playedPart = view.pages?.find((p) => p.cid === view.cid);
+    const duration = playedPart?.duration ?? view.duration ?? 0;
+
     return {
       success: true,
       title: view.title || 'Unknown Title',
       description: view.desc || '',
-      duration: view.duration || 0,
+      duration,
       uploader: view.owner?.name || 'Unknown',
       uploadDate,
       uploadDateFormatted: uploadDate ? `${uploadDate.slice(0, 4)}-${uploadDate.slice(4, 6)}-${uploadDate.slice(6, 8)}` : undefined,

@@ -25,7 +25,7 @@ const NativeBilibiliExtractor = require("../../src/bilibili/native_extractor");
 
 const VIDEO_URL = "https://www.bilibili.com/video/BV1xx411c7BF";
 
-function mockNativeResponses({ audio = undefined, navCode = 0, navMessage = undefined } = {}) {
+function mockNativeResponses({ audio = undefined, navCode = 0, navMessage = undefined, duration = 123, pages = undefined } = {}) {
   axios.get.mockImplementation((url) => {
     if (url.includes("/x/web-interface/view")) {
       return Promise.resolve({
@@ -37,7 +37,8 @@ function mockNativeResponses({ audio = undefined, navCode = 0, navMessage = unde
             cid: 990001,
             title: "Native Bilibili Track",
             desc: "native metadata",
-            duration: 123,
+            duration,
+            ...(pages ? { pages } : {}),
             owner: { name: "Native Uploader" },
             pubdate: 1760000000,
             stat: { view: 1234, like: 56 },
@@ -147,6 +148,20 @@ describe("Bilibili native extractor", () => {
       expect.stringContaining("/x/player/wbi/playurl"),
       expect.objectContaining({ params: expect.objectContaining({ cid: 990001 }) }),
     );
+  });
+
+  test("uses the played part's duration for multi-part (分P) videos, not the total", async () => {
+    mockNativeResponses({
+      duration: 1272, // total of all 分P parts
+      pages: [
+        { cid: 990001, duration: 149, part: "We Are Charlie Kirk" }, // default cid (played)
+        { cid: 990002, duration: 225, part: "Full Song" },
+      ],
+    });
+
+    const result = await extractor.extractAudio(VIDEO_URL);
+
+    expect(result.duration).toBe(149); // the played part, not 1272
   });
 
   test("falls back to yt-dlp and emits fallback stage when native extraction finds no audio", async () => {
