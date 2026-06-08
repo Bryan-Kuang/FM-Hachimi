@@ -107,6 +107,36 @@ video, LRU-evicted by entry count **and** total size.
 - Clear it any time: `rm -rf ~/bilibili-bot/cache/*` (re-downloads on next play).
 - A cache hit logs `YouTube media cache hit — playing local file`.
 
+## World Cup (temporal feature)
+
+A time-boxed feature that pushes **live World Cup updates** (kickoff / goal /
+full-time) to a subscribed channel and answers on-demand `/worldcup` queries. It
+is **inert outside the tournament window** and needs no teardown — it simply stops
+responding after `WORLD_CUP_END`.
+
+- **Data source:** ESPN's public scoreboard JSON (`fifa.world`) — no login, no key,
+  the same data backing a public site. Wrapped behind `src/world_cup/source.ts` so
+  the crawl target is swappable. `src/world_cup/world_cup_service.ts` polls it
+  (adaptive cadence: ~`livePollMs` while a match is live, else `idlePollMs`), diffs
+  successive polls, and posts only the changes.
+- **Commands** (`/worldcup`): `subscribe #channel` / `unsubscribe` (Manage Server),
+  `today`, `schedule date:YYYY-MM-DD`, `status`. The `today`/`schedule` commands
+  fetch **independently of the poller** — they are the reliable manual fallback when
+  live updates are degraded. `status` shows updater health.
+- **State** lives under the persisted `data/` mount (no new mount): `data/world_cup/`
+  with `subscriptions.json` (per-guild channel) and `state.json` (last match scores
+  for diffing — reloaded on boot so a restart never re-posts past events).
+- **Env:** `WORLD_CUP_ENABLED` (default true), `WORLD_CUP_START` (`2026-06-11`),
+  `WORLD_CUP_END` (`2026-07-21`, exclusive — margin past the Jul 19 final),
+  `WORLD_CUP_SOURCE_URL`,
+  `WORLD_CUP_LIVE_POLL_MS` (60000), `WORLD_CUP_IDLE_POLL_MS` (600000),
+  `WORLD_CUP_REQUEST_TIMEOUT_MS` (10000), `WORLD_CUP_TIMEZONE`, `WORLD_CUP_DATA_DIR`.
+- **Reset:** `rm -rf ~/bilibili-bot/data/world_cup/*` (re-seeds on next poll;
+  subscriptions are lost). To disable mid-tournament: set `WORLD_CUP_ENABLED=false`
+  and redeploy.
+- A degraded source logs `WorldCup poll failed; commands remain available as fallback`
+  and `/worldcup status` reports `⚠️ Auto-updates degraded`.
+
 ## Quick checks
 
 ```bash

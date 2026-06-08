@@ -130,3 +130,6 @@ yt-dlp.exe
 
 # Daily Hachimi runtime data
 data/*.json
+
+# World Cup runtime state (subscriptions.json, state.json)
+data/world_cup/
