@@ -72,6 +72,7 @@ describe("command registry", () => {
       "hachimi",
       "radio",
       "daily-hachimi",
+      "worldcup",
     ]);
     expect(new Set(names).size).toBe(names.length);
   });
@@ -120,6 +121,7 @@ describe("command registry", () => {
       "hachimi",
       "radio",
       "daily-hachimi",
+      "worldcup",
     ]);
     expect(registry.getGlobalCommands(null, null).map((command) => command.data.name)).toEqual([
       "play",
@@ -135,6 +137,7 @@ describe("command registry", () => {
       "hachimi",
       "radio",
       "daily-hachimi",
+      "worldcup",
     ]);
 
     const testingCommands = registry.getTestingCommands(null, null);

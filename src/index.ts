@@ -18,6 +18,8 @@ import HistoryStore = require('./utils/history_store');
 import PlayerService = require('./services/player_service');
 import RadioService = require('./services/radio_service');
 import DailyHachimiService = require('./services/daily_hachimi_service');
+import WorldCupSource = require('./world_cup/source');
+import WorldCupService = require('./world_cup/world_cup_service');
 import PreExtractionService = require('./playback/pre_extraction_service');
 import * as logger from './services/logger_service';
 import TokenPrecheck = require('./utils/token_precheck');
@@ -30,6 +32,7 @@ class BilibiliDiscordBot {
   private sessionManager: any;
   private metricsServer:  any;
   private youtubeCookieRefreshService: YouTubeCookieRefreshService | null;
+  private worldCupService: WorldCupService | null;
   private isRunning:      boolean;
 
   constructor() {
@@ -37,6 +40,7 @@ class BilibiliDiscordBot {
     this.sessionManager = null;
     this.metricsServer  = null;
     this.youtubeCookieRefreshService = null;
+    this.worldCupService = null;
     this.isRunning      = false;
   }
 
@@ -126,12 +130,24 @@ class BilibiliDiscordBot {
       playerService.setRadioService(radioService as any);
 
       const dailyHachimiService = new DailyHachimiService(config as any, preExtractionService);
+
+      // Temporal World Cup feature (live scores). Inert outside the tournament
+      // window; commands degrade to a manual fallback if the source is down.
+      let worldCupService: WorldCupService | null = null;
+      if (config.worldCup.enabled) {
+        const worldCupSource = new WorldCupSource({
+          baseUrl: config.worldCup.sourceUrl,
+          timeoutMs: config.worldCup.requestTimeoutMs,
+        });
+        worldCupService = new WorldCupService(config.worldCup, worldCupSource);
+        this.worldCupService = worldCupService;
+      }
       Debug.trace('inject.dependencies');
 
       // Bot client
       logger.info('Initializing Discord bot client');
       Debug.trace('client.init');
-      this.botClient = new BotClient(playerService, dailyHachimiService);
+      this.botClient = new BotClient(playerService, dailyHachimiService, worldCupService);
       this.botClient.setExtractor(extractor);
 
       // Initialize bot client (login, load commands, bind UI)
@@ -139,6 +155,9 @@ class BilibiliDiscordBot {
 
       // Initialize daily hachimi service after bot is ready (needs Discord client)
       dailyHachimiService.initialize(this.botClient.getClient() as any, bilibiliApi);
+
+      // Initialize World Cup service after bot is ready (needs Discord client)
+      worldCupService?.initialize(this.botClient.getClient() as any);
       audioManager.prewarmPlaybackTools([youtubeExtractor]);
       Debug.trace('client.initialize.done');
 
@@ -187,6 +206,11 @@ class BilibiliDiscordBot {
       if (this.youtubeCookieRefreshService) {
         this.youtubeCookieRefreshService.stop();
         this.youtubeCookieRefreshService = null;
+      }
+
+      if (this.worldCupService) {
+        this.worldCupService.stop();
+        this.worldCupService = null;
       }
 
       this.isRunning = false;
