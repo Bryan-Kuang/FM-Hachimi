@@ -27,6 +27,11 @@ function createDeploymentPlan(env = process.env) {
   }
 
   if (deployTesting) {
+    if (!TestingAccess.TEST_GUILD_ID) {
+      throw new Error(
+        "TEST_GUILD_ID is required when DEPLOY_TEST_COMMANDS=true (no hardcoded fallback)"
+      );
+    }
     const commands = clear ? [] : CommandRegistry.getGuildCommandsForTestServer(null, null);
     return {
       scope: "test_guild",
