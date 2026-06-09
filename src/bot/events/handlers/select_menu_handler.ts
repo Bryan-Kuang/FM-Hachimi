@@ -83,91 +83,93 @@ async function handleQueueRemove(interaction: any, playerService: any): Promise<
     return;
   }
 
-  const selectedValue = interaction.values[0] as string;
-
-  logger.debug('Queue remove select menu interaction received', {
-    selectedValue,
-    user:  user.username,
-    guild: interaction.guild?.name,
-  });
-
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
-  let responseEmbed: any;
-  let responseButtons: any;
-
-  if (selectedValue === 'clear_all' || selectedValue === 'remove_all') {
-    const cleared = playerService.clearQueue(interaction.guild.id);
-    if (!cleared) {
-      const errorEmbed = EmbedBuilders.createErrorEmbed(
-        'Clear Queue Failed', 'Failed to clear the queue',
-        { suggestion: 'Please try again.' },
-      );
-      return await interaction.editReply({ embeds: [errorEmbed] });
-    }
-
-    responseEmbed   = EmbedBuilders.createSuccessEmbed('Queue Cleared', '\u{1F5D1}️ All tracks have been removed from the queue');
-    responseButtons = ButtonBuilders.createQueueControls({ hasQueue: false });
-  } else {
-    const indexMatch = selectedValue.match(/^remove_(\d+)$/);
-    if (!indexMatch) {
-      const errorEmbed = EmbedBuilders.createErrorEmbed(
-        'Invalid Selection', 'Invalid track selection format',
-        { suggestion: 'Please try selecting a track again.' },
-      );
-      return await interaction.editReply({ embeds: [errorEmbed] });
-    }
-
-    const index = parseInt(indexMatch[1]);
-    const ok    = playerService.removeTrack(interaction.guild.id, index);
-
-    if (!ok) {
-      const errorEmbed = EmbedBuilders.createErrorEmbed(
-        'Remove Track Failed', 'Failed to remove the track',
-        { suggestion: 'Please try again.' },
-      );
-      return await interaction.editReply({ embeds: [errorEmbed] });
-    }
-
-    responseEmbed = EmbedBuilders.createSuccessEmbed('Track Removed', '\u{1F5D1}️ Track has been removed from the queue');
-
-    const queueInfoAfter = playerService.getQueue(interaction.guild.id);
-    responseButtons      = ButtonBuilders.createQueueControls({
-      hasQueue: queueInfoAfter.queue.length > 0,
-    });
-  }
-
-  Lock.release(interaction.guild.id, customId);
-
-  // Best-effort: refresh the queue message UI.
-  // Wrapped in its own try/catch so a Discord API hiccup cannot clobber the
-  // success reply that the user should always see.
   try {
-    const queueInfo  = playerService.getQueue(interaction.guild.id);
-    const queueEmbed = EmbedBuilders.createQueueEmbed(queueInfo.queue, {
-      currentTrack: queueInfo.currentTrack,
-      page:         1,
-      itemsPerPage: 10,
-      totalPages:   Math.ceil((queueInfo.state?.queueLength ?? 0) / 10) || 1,
-    });
-    const response: Record<string, any> = { embeds: [queueEmbed] };
-    if (responseButtons) {
-      response.components = responseButtons;
-    }
-    await interaction.message.edit(response);
-  } catch (_editErr: unknown) {
-    logger.warn('Failed to refresh queue message after track removal', {
+    const selectedValue = interaction.values[0] as string;
+
+    logger.debug('Queue remove select menu interaction received', {
+      selectedValue,
+      user:  user.username,
       guild: interaction.guild?.name,
     });
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    let responseEmbed: any;
+    let responseButtons: any;
+
+    if (selectedValue === 'clear_all' || selectedValue === 'remove_all') {
+      const cleared = playerService.clearQueue(interaction.guild.id);
+      if (!cleared) {
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          'Clear Queue Failed', 'Failed to clear the queue',
+          { suggestion: 'Please try again.' },
+        );
+        return await interaction.editReply({ embeds: [errorEmbed] });
+      }
+
+      responseEmbed   = EmbedBuilders.createSuccessEmbed('Queue Cleared', '\u{1F5D1}️ All tracks have been removed from the queue');
+      responseButtons = ButtonBuilders.createQueueControls({ hasQueue: false });
+    } else {
+      const indexMatch = selectedValue.match(/^remove_(\d+)$/);
+      if (!indexMatch) {
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          'Invalid Selection', 'Invalid track selection format',
+          { suggestion: 'Please try selecting a track again.' },
+        );
+        return await interaction.editReply({ embeds: [errorEmbed] });
+      }
+
+      const index = parseInt(indexMatch[1]);
+      const ok    = playerService.removeTrack(interaction.guild.id, index);
+
+      if (!ok) {
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          'Remove Track Failed', 'Failed to remove the track',
+          { suggestion: 'Please try again.' },
+        );
+        return await interaction.editReply({ embeds: [errorEmbed] });
+      }
+
+      responseEmbed = EmbedBuilders.createSuccessEmbed('Track Removed', '\u{1F5D1}️ Track has been removed from the queue');
+
+      const queueInfoAfter = playerService.getQueue(interaction.guild.id);
+      responseButtons      = ButtonBuilders.createQueueControls({
+        hasQueue: queueInfoAfter.queue.length > 0,
+      });
+    }
+
+    // Best-effort: refresh the queue message UI.
+    // Wrapped in its own try/catch so a Discord API hiccup cannot clobber the
+    // success reply that the user should always see.
+    try {
+      const queueInfo  = playerService.getQueue(interaction.guild.id);
+      const queueEmbed = EmbedBuilders.createQueueEmbed(queueInfo.queue, {
+        currentTrack: queueInfo.currentTrack,
+        page:         1,
+        itemsPerPage: 10,
+        totalPages:   Math.ceil((queueInfo.state?.queueLength ?? 0) / 10) || 1,
+      });
+      const response: Record<string, any> = { embeds: [queueEmbed] };
+      if (responseButtons) {
+        response.components = responseButtons;
+      }
+      await interaction.message.edit(response);
+    } catch (_editErr: unknown) {
+      logger.warn('Failed to refresh queue message after track removal', {
+        guild: interaction.guild?.name,
+      });
+    }
+
+    await interaction.editReply({ embeds: [responseEmbed], flags: MessageFlags.Ephemeral });
+
+    logger.info('Track removed via select menu', {
+      selectedValue,
+      user:  user.username,
+      guild: interaction.guild?.name,
+    });
+  } finally {
+    Lock.release(interaction.guild.id, customId);
   }
-
-  await interaction.editReply({ embeds: [responseEmbed], flags: MessageFlags.Ephemeral });
-
-  logger.info('Track removed via select menu', {
-    selectedValue,
-    user:  user.username,
-    guild: interaction.guild?.name,
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -188,38 +190,41 @@ async function handleLoopSelect(interaction: any, playerService: any): Promise<v
     return;
   }
 
-  logger.debug('Loop select menu interaction received', {
-    selectedMode,
-    user:  user.username,
-    guild: interaction.guild?.name,
-  });
+  try {
+    logger.debug('Loop select menu interaction received', {
+      selectedMode,
+      user:  user.username,
+      guild: interaction.guild?.name,
+    });
 
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const result = playerService.setLoopMode(interaction.guild.id, selectedMode);
+    const result = playerService.setLoopMode(interaction.guild.id, selectedMode);
 
-  if (!result.success) {
-    const errorEmbed = EmbedBuilders.createErrorEmbed(
-      'Loop Mode Failed',
-      result.error || 'Failed to change loop mode',
-      { suggestion: result.suggestion || 'Please try again.' },
-    );
-    return await interaction.editReply({ embeds: [errorEmbed] });
+    if (!result.success) {
+      const errorEmbed = EmbedBuilders.createErrorEmbed(
+        'Loop Mode Failed',
+        result.error || 'Failed to change loop mode',
+        { suggestion: result.suggestion || 'Please try again.' },
+      );
+      return await interaction.editReply({ embeds: [errorEmbed] });
+    }
+
+    const loopEmoji  = selectedMode === 'none' ? '➡️' : selectedMode === 'queue' ? '\u{1F501}' : '\u{1F502}';
+    const loopText   = selectedMode === 'none' ? 'disabled' : selectedMode === 'queue' ? 'enabled (queue)' : 'enabled (single)';
+    const successEmbed = EmbedBuilders.createSuccessEmbed('Loop Mode Changed', `${loopEmoji} Loop mode ${loopText}`);
+
+    await interaction.editReply({ embeds: [successEmbed] });
+    playerService.notifyState(interaction.guild.id);
+
+    logger.info('Loop mode changed via select menu', {
+      mode:  selectedMode,
+      user:  user.username,
+      guild: interaction.guild?.name,
+    });
+  } finally {
+    Lock.release(interaction.guild.id, customId);
   }
-
-  const loopEmoji  = selectedMode === 'none' ? '➡️' : selectedMode === 'queue' ? '\u{1F501}' : '\u{1F502}';
-  const loopText   = selectedMode === 'none' ? 'disabled' : selectedMode === 'queue' ? 'enabled (queue)' : 'enabled (single)';
-  const successEmbed = EmbedBuilders.createSuccessEmbed('Loop Mode Changed', `${loopEmoji} Loop mode ${loopText}`);
-
-  await interaction.editReply({ embeds: [successEmbed] });
-  Lock.release(interaction.guild.id, customId);
-  playerService.notifyState(interaction.guild.id);
-
-  logger.info('Loop mode changed via select menu', {
-    mode:  selectedMode,
-    user:  user.username,
-    guild: interaction.guild?.name,
-  });
 }
 
 type DirectSelectionPlatform = 'bilibili' | 'youtube';

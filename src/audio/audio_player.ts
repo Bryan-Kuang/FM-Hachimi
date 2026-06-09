@@ -261,7 +261,10 @@ class AudioPlayer {
     this.isPlaying = false;
     this.cleanupFFmpegProcess();
 
-    const actualPlaybackDuration = this.startTime ? Date.now() - this.startTime : 0;
+    let actualPlaybackDuration = this._accumulatedPlayMs;
+    if (this._currentPlayStartedAt !== null) {
+      actualPlaybackDuration += Date.now() - this._currentPlayStartedAt;
+    }
 
     if (this._manualNavigating) {
       logger.info('Idle event ignored during manual navigation', {
@@ -514,6 +517,7 @@ class AudioPlayer {
   async playCurrentTrack(): Promise<boolean> {
     if (!this.currentTrack) {
       logger.warn('No current track to play');
+      this._enterIdle();
       return false;
     }
     this._cancelInactivityTimer();
@@ -521,6 +525,7 @@ class AudioPlayer {
 
     if (!this.voiceConnection) {
       logger.warn('No voice connection available');
+      this._enterIdle();
       return false;
     }
 
@@ -600,6 +605,7 @@ class AudioPlayer {
         voiceConnectionStatus: this.voiceConnection?.state?.status,
         playerStatus: this.audioPlayer.state.status,
       });
+      this._enterIdle();
       throw error;
     }
   }
@@ -1109,7 +1115,7 @@ class AudioPlayer {
         }
         processToCleanup.kill('SIGTERM');
         setTimeout(() => {
-          if (processToCleanup && !processToCleanup.killed) {
+          if (processToCleanup && processToCleanup.exitCode === null) {
             logger.warn('Force killing FFmpeg process', { pid: pidToCleanup });
             processToCleanup.kill('SIGKILL');
           }
