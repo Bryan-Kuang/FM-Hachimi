@@ -3,8 +3,9 @@
 Use the testing feature gate for anything that should be tried only in the
 private test server before it reaches public servers.
 
-The test server is `1376318047794761838` by default. Override it with
-`TEST_GUILD_ID` only when intentionally moving the test environment.
+The test server is configured via the `TEST_GUILD_ID` environment variable
+(repository secret in CI). There is no built-in default: when unset, testing
+features are disabled in every guild and test-scope deploys fail fast.
 
 Testing access is fail-closed. DMs, missing guild IDs, and any guild other than
 the configured test server are denied with an ephemeral response.

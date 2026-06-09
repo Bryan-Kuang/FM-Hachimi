@@ -29,8 +29,9 @@ Deploy testing commands only to the test server:
 npm run deploy:commands:test
 ```
 
-The test server defaults to `1376318047794761838`. Override it with
-`TEST_GUILD_ID` only when intentionally moving the test environment.
+The test server is configured via `TEST_GUILD_ID` (env var locally, repository
+secret in CI). There is no built-in default — test-scope deploys fail fast with
+a clear error when it is unset.
 
 To clear test-server commands:
 
