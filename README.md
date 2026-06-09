@@ -43,11 +43,12 @@ Stable public commands are deployed globally:
 npm run deploy:commands
 ```
 
-Testing commands are deployed only to the configured test server, which defaults
-to `1376318047794761838`:
+Testing commands are deployed only to the test server configured via the
+`TEST_GUILD_ID` environment variable (required for this mode — there is no
+built-in default):
 
 ```bash
-npm run deploy:commands:test
+TEST_GUILD_ID=<your-test-guild-id> npm run deploy:commands:test
 ```
 
 Commands or components marked as testing are also runtime-blocked outside the
