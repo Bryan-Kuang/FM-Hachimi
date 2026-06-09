@@ -7,7 +7,7 @@ function makeCommand(name, description) {
   };
 }
 
-function loadDeployCommands() {
+function loadDeployCommands({ testGuildId = "1376318047794761838" } = {}) {
   jest.resetModules();
 
   const stableCommand = makeCommand("play", "Play music");
@@ -31,7 +31,7 @@ function loadDeployCommands() {
       guildId: "legacy-guild",
     },
     test: {
-      guildId: "1376318047794761838",
+      guildId: testGuildId,
     },
   }));
 
@@ -69,6 +69,14 @@ describe("deploy command payload selection", () => {
     expect(plan.scope).toBe("test_guild");
     expect(plan.guildId).toBe("1376318047794761838");
     expect(plan.commandData.map((command) => command.name)).toEqual(["experiment"]);
+  });
+
+  test("test deploy fails fast when TEST_GUILD_ID is not configured", () => {
+    const { createDeploymentPlan } = loadDeployCommands({ testGuildId: "" });
+
+    expect(() => createDeploymentPlan({ DEPLOY_TEST_COMMANDS: "true" })).toThrow(
+      /TEST_GUILD_ID is required/
+    );
   });
 
   test("clear mode for test deploy targets the test guild", () => {

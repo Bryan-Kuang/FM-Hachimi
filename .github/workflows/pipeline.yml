@@ -160,6 +160,7 @@ jobs:
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          TEST_GUILD_ID: ${{ secrets.TEST_GUILD_ID }}
           GUILD_ID: ${{ (inputs.environment == 'guild' || inputs.environment == 'clear_guild') && (inputs.guild_id || secrets.GUILD_ID) || '' }}
           DEPLOY_TEST_COMMANDS: ${{ inputs.environment == 'test' && 'true' || '' }}
           DEPLOY_LEGACY_GUILD_COMMANDS: ${{ (inputs.environment == 'guild' || inputs.environment == 'clear_guild') && 'true' || '' }}
