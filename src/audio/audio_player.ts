@@ -264,6 +264,8 @@ class AudioPlayer {
     let actualPlaybackDuration = this._accumulatedPlayMs;
     if (this._currentPlayStartedAt !== null) {
       actualPlaybackDuration += Date.now() - this._currentPlayStartedAt;
+    } else if (this.startTime) {
+      actualPlaybackDuration += Date.now() - this.startTime;
     }
 
     if (this._manualNavigating) {
@@ -1115,7 +1117,7 @@ class AudioPlayer {
         }
         processToCleanup.kill('SIGTERM');
         setTimeout(() => {
-          if (processToCleanup && processToCleanup.exitCode === null) {
+          if (processToCleanup && (processToCleanup.exitCode === null || !processToCleanup.killed)) {
             logger.warn('Force killing FFmpeg process', { pid: pidToCleanup });
             processToCleanup.kill('SIGKILL');
           }
