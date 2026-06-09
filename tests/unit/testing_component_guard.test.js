@@ -20,6 +20,10 @@ jest.mock("../../src/services/logger_service", () => ({
   debug: jest.fn(),
 }));
 
+jest.mock("../../src/config/config", () => ({
+  test: { guildId: "1376318047794761838" },
+}));
+
 const createInteractionHandler = require("../../src/bot/events/interactionCreate");
 
 function makeInteraction({ customId, guildId, kind }) {

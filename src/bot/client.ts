@@ -244,7 +244,7 @@ class BotClient {
           if (!allowed) return;
         }
 
-        if (this.checkCooldown(interaction, command)) return;
+        if (await this.checkCooldown(interaction, command)) return;
 
         await command.execute(interaction);
 
@@ -263,10 +263,17 @@ class BotClient {
 
         const errorMessage = 'Sorry, there was an error executing this command!';
 
-        if (interaction.replied || interaction.deferred) {
-          await interaction.followUp({ content: errorMessage, flags: MessageFlags.Ephemeral });
-        } else {
-          await interaction.reply({ content: errorMessage, flags: MessageFlags.Ephemeral });
+        try {
+          if (interaction.replied || interaction.deferred) {
+            await interaction.followUp({ content: errorMessage, flags: MessageFlags.Ephemeral });
+          } else {
+            await interaction.reply({ content: errorMessage, flags: MessageFlags.Ephemeral });
+          }
+        } catch (replyError: unknown) {
+          logger.warn('Failed to send error reply to user', {
+            originalError: (error as Error).message,
+            replyError: (replyError as Error).message,
+          });
         }
       }
     });
@@ -380,7 +387,7 @@ class BotClient {
   /**
    * Check command cooldowns
    */
-  checkCooldown(interaction: any, command: CommandDef): boolean {
+  async checkCooldown(interaction: any, command: CommandDef): Promise<boolean> {
     const cooldownAmount = (command.cooldown ?? 3) * 1000;
     const timestamps     = this.client.cooldowns;
 
@@ -398,9 +405,11 @@ class BotClient {
 
       if (now < expirationTime) {
         const timeLeft = (expirationTime - now) / 1000;
-        interaction.reply({
+        await interaction.reply({
           content: `Please wait ${timeLeft.toFixed(1)} more second(s) before reusing the \`${command.data.name}\` command.`,
           flags:   MessageFlags.Ephemeral,
+        }).catch((err: Error) => {
+          logger.warn('Failed to send cooldown message', { error: err.message });
         });
         return true;
       }

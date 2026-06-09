@@ -219,16 +219,22 @@ class DailyHachimiService {
     try {
       channel = await this.client!.channels.fetch(channelId);
     } catch (err: unknown) {
-      logger.error('DailyHachimi: failed to fetch channel — schedule may have been deleted', {
+      logger.error('DailyHachimi: failed to fetch channel — disabling schedule', {
         guildId,
         channelId,
         error: (err as Error).message,
       });
+      this._stopCron(guildId);
+      delete this.schedules[guildId];
+      this._persistSchedules();
       return;
     }
 
     if (!channel || !channel.isTextBased()) {
-      logger.error('DailyHachimi: channel is not text-based', { guildId, channelId });
+      logger.error('DailyHachimi: channel is not text-based — disabling schedule', { guildId, channelId });
+      this._stopCron(guildId);
+      delete this.schedules[guildId];
+      this._persistSchedules();
       return;
     }
 
@@ -422,6 +428,24 @@ class DailyHachimiService {
         error: (err as Error).message,
       });
       this.schedules = {};
+    }
+  }
+
+  private _persistSchedules(): void {
+    try {
+      const dir = path.dirname(this._dataFile);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(this._dataFile, JSON.stringify(this.schedules, null, 2), 'utf8');
+      logger.debug('DailyHachimi schedules persisted', {
+        count: Object.keys(this.schedules).length,
+      });
+    } catch (err: unknown) {
+      logger.error('DailyHachimi: failed to persist schedules file', {
+        file: this._dataFile,
+        error: (err as Error).message,
+      });
     }
   }
 
