@@ -80,6 +80,17 @@ function createButtonHandler(playerService: any) {
         return await handleControlButton(interaction, customId, playerService);
       }
 
+      // Queue-mutating buttons require voice channel presence
+      const queueMutatingButtons = ['queue_clear', 'queue_shuffle', 'queue_remove', 'loop', 'loop_select'];
+      if (queueMutatingButtons.includes(customId)) {
+        if (!interaction.member.voice.channel) {
+          return await interaction.editReply({
+            content: '\u{1F507} Join the voice channel where music is playing first.',
+            flags:   MessageFlags.Ephemeral,
+          });
+        }
+      }
+
       // Non-control buttons: delegate to PlayerService
       const result = await playerService.handleButtonInteraction(interaction);
 

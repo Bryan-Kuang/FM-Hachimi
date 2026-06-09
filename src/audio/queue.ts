@@ -201,7 +201,9 @@ class Queue {
     if (this.loopMode === 'queue' && this.items.length > 0) {
       this.currentIndex = 0;
       this.currentTrack = this.items[0];
-      this.currentTrack.resetRetry?.();
+      if ((this.currentTrack.retryCount ?? 0) <= 2) {
+        this.currentTrack.resetRetry?.();
+      }
       logger.info('Queue loop: restarting from beginning', { queueLength: this.items.length });
       return { track: this.currentTrack, ended: false };
     }

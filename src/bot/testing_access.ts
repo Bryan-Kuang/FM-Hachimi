@@ -1,8 +1,6 @@
 import { MessageFlags } from 'discord.js';
 import config = require('../config/config');
 
-const DEFAULT_TEST_GUILD_ID = '1376318047794761838';
-
 interface CommandLike {
   stage?: string;
   featureName?: string;
@@ -25,9 +23,10 @@ interface TestingReplyPayload {
   flags: number;
 }
 
-export const TEST_GUILD_ID = config.test?.guildId?.trim() || DEFAULT_TEST_GUILD_ID;
+export const TEST_GUILD_ID = config.test?.guildId?.trim() || null;
 
 export function isTestGuild(guildId: string | null | undefined): boolean {
+  if (!TEST_GUILD_ID) return false;
   return typeof guildId === 'string' && guildId.length > 0 && guildId === TEST_GUILD_ID;
 }
 

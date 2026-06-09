@@ -24,13 +24,21 @@ describe("testing access gate", () => {
     jest.dontMock("../../src/config/config");
   });
 
-  test("allows the default testing server and blocks other guilds", () => {
+  test("requires explicit TEST_GUILD_ID config and blocks without it", () => {
     const access = loadTestingAccess();
+
+    expect(access.TEST_GUILD_ID).toBe(null);
+    expect(access.isTestGuild("1376318047794761838")).toBe(false);
+    expect(access.isTestGuild("1203812841128329246")).toBe(false);
+    expect(access.isTestGuild(null)).toBe(false);
+  });
+
+  test("allows the configured testing server when set explicitly", () => {
+    const access = loadTestingAccess({ test: { guildId: "1376318047794761838" } });
 
     expect(access.TEST_GUILD_ID).toBe("1376318047794761838");
     expect(access.isTestGuild("1376318047794761838")).toBe(true);
     expect(access.isTestGuild("1203812841128329246")).toBe(false);
-    expect(access.isTestGuild(null)).toBe(false);
   });
 
   test("uses TEST_GUILD_ID override from config", () => {
@@ -92,7 +100,7 @@ describe("testing access gate", () => {
   });
 
   test("assertTestingGuild allows the test guild without replying", async () => {
-    const access = loadTestingAccess();
+    const access = loadTestingAccess({ test: { guildId: "1376318047794761838" } });
     const interaction = makeInteraction({ guildId: "1376318047794761838" });
 
     const allowed = await access.assertTestingGuild(interaction, "Experimental queue");

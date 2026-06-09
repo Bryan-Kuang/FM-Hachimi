@@ -454,7 +454,7 @@ class BilibiliExtractor {
           } else if (stderr.includes('certificate') || stderr.includes('SSL')) {
             errorMessage = 'SSL certificate error';
           } else if (stderr) {
-            errorMessage += `: ${stderr}`;
+            errorMessage += `: ${stderr.substring(0, 200)}`;
           }
 
           reject(new Error(errorMessage));
@@ -635,7 +635,7 @@ class BilibiliExtractor {
           } else if (stderr.includes('certificate') || stderr.includes('SSL')) {
             errorMessage = 'SSL certificate error';
           } else if (stderr) {
-            errorMessage += `: ${stderr}`;
+            errorMessage += `: ${stderr.substring(0, 200)}`;
           }
 
           reject(new Error(errorMessage));
@@ -792,7 +792,7 @@ class BilibiliExtractor {
           } else if (stderr.includes('No audio stream')) {
             errorMessage = 'No audio stream available for this video';
           } else if (stderr) {
-            errorMessage += `: ${stderr}`;
+            errorMessage += `: ${stderr.substring(0, 200)}`;
           }
 
           reject(new Error(errorMessage));

@@ -58,6 +58,21 @@ function prefixTestingDescription(description: string, fallback: string): string
   return `${prefixed.slice(0, DISCORD_DESCRIPTION_LIMIT - 3)}...`;
 }
 
+function ensureDMPermission(command: CommandDefinition): CommandDefinition {
+  const originalData = command.data as Record<string, unknown>;
+  if (typeof originalData.setDMPermission !== 'function') return command;
+
+  const wrappedData = Object.create(originalData) as CommandDefinition['data'];
+  wrappedData.name = originalData.name as string;
+
+  (originalData.setDMPermission as (value: boolean) => void)(false);
+
+  return {
+    ...command,
+    data: wrappedData,
+  };
+}
+
 function withTestingDescription(command: CommandDefinition): CommandDefinition {
   if (command.stage !== 'testing') return command;
 
@@ -93,6 +108,7 @@ function createCommands(
 ): CommandDefinition[] {
   return commandFactories
     .map((factory) => factory(playerService, playerService, dailyHachimiService, worldCupService))
+    .map(ensureDMPermission)
     .map(withTestingDescription);
 }
 
