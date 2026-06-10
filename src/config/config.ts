@@ -69,6 +69,7 @@ interface BilibiliConfig {
   hachimiAllowedTids: number[];
   hachimiMaxDurationSec: number;
   hachimiMinDurationSec: number;
+  hachimiSearchKeywords: string[];
 }
 
 interface YouTubeConfig {
@@ -266,6 +267,17 @@ const config: BotConfig = {
     // passed through so we don't silently drop otherwise-valid results.
     hachimiMaxDurationSec: parseInt(process.env.HACHIMI_MAX_DURATION_SEC!) || 360,  // 6 min
     hachimiMinDurationSec: parseInt(process.env.HACHIMI_MIN_DURATION_SEC!) || 60,   // 1 min
+    // Search keywords for the 哈基米 meme-music corpus. The bare keyword "哈基米"
+    // ranks lots of non-music content (cat vlogs, game clips, anime cuts) that the
+    // downstream filters can't reliably reject, which is how off-topic videos kept
+    // reaching recommendations. Music-focused queries keep results on the meme
+    // songs; each search samples from this list, which also diversifies the pool.
+    hachimiSearchKeywords: parseListEnv(process.env.HACHIMI_SEARCH_KEYWORDS, [
+      "哈基米音乐",
+      "哈基米 音mad",
+      "哈基米 鬼畜",
+      "哈基米 remix",
+    ]),
   },
   youtube: {
     preextractEnabled: process.env.YOUTUBE_PREEXTRACT_ENABLED !== "false",
