@@ -33,9 +33,9 @@ describe("search results view duration display", () => {
       currentPage: 1,
     });
 
-    const column = embedFields(message)[0].value;
-    expect(column).toContain("`00:01:05`");
-    expect(column).toContain("`01:02:03`");
+    const fields = embedFields(message);
+    expect(fields[0].value).toContain("`00:01:05`");
+    expect(fields[1].value).toContain("`01:02:03`");
   });
 
   test("select options show plain durations and unknown durations fall back", () => {
@@ -54,6 +54,6 @@ describe("search results view duration display", () => {
     });
 
     expect(optionDescriptions(message)).toEqual(["A | 00:02:03", "B | --:--"]);
-    expect(embedFields(message)[0].value).toContain("`--:--`");
+    expect(embedFields(message)[1].value).toContain("`--:--`");
   });
 });

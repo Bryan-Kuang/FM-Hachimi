@@ -139,7 +139,9 @@ describe("search results view pagination", () => {
     );
   }
 
-  test("single platform shows two columns of 5 and pages 10 at a time", () => {
+  const BLANK = "​"; // zero-width space
+
+  test("single platform lays out rows of two and pages 10 at a time", () => {
     const session = makeSession(manyEntries(25));
 
     // 25 entries at 2 × 5 per page = 3 pages.
@@ -147,13 +149,13 @@ describe("search results view pagination", () => {
 
     const first = SearchResultsView.buildSearchResultsMessage(TOKEN, session);
     const embed = first.embeds[0].toJSON();
-    expect(embed.fields).toHaveLength(2);
-    expect(embed.fields[0].inline).toBe(true);
-    expect(embed.fields[1].inline).toBe(true);
-    expect(embed.fields[0].value).toContain("**1.**");
-    expect(embed.fields[0].value).toContain("**5.**");
-    expect(embed.fields[1].value).toContain("**6.**");
-    expect(embed.fields[1].value).toContain("**10.**");
+    // 5 rows × (left + right + invisible row-closer) = 15 fields.
+    expect(embed.fields).toHaveLength(15);
+    expect(embed.fields.every(field => field.inline)).toBe(true);
+    expect(embed.fields[0].name).toBe("1. Video 0");
+    expect(embed.fields[1].name).toBe("2. Video 1");
+    expect(embed.fields[2].name).toBe(BLANK);
+    expect(embed.fields[3].name).toBe("3. Video 2");
 
     const [prev, indicator, next] = pageButtons(first);
     expect(prev.custom_id).toBe(`search_page_${TOKEN}_prev`);
@@ -164,8 +166,12 @@ describe("search results view pagination", () => {
     session.currentPage = 3;
     const last = SearchResultsView.buildSearchResultsMessage(TOKEN, session);
     const lastEmbed = last.embeds[0].toJSON();
-    expect(lastEmbed.fields[0].value).toContain("**21.**");
-    expect(lastEmbed.fields[0].value).toContain("**25.**");
+    // Page 3 holds entries 21–25: rows (21,22), (23,24), (25,blank) = 9 fields.
+    expect(lastEmbed.fields[0].name).toBe("21. Video 20");
+    expect(lastEmbed.fields).toHaveLength(9);
+    // 25 is odd, so the last row's right slot is an invisible placeholder.
+    expect(lastEmbed.fields[6].name).toBe("25. Video 24");
+    expect(lastEmbed.fields[7].name).toBe(BLANK);
     const [lastPrev, , lastNext] = pageButtons(last);
     expect(lastPrev.disabled).toBe(false);
     expect(lastNext.disabled).toBe(true);
@@ -174,7 +180,7 @@ describe("search results view pagination", () => {
     expect(selectMenu(last).options).toHaveLength(25);
   });
 
-  test("dual platform pages each column independently", () => {
+  test("dual platform pairs each row and pages each column independently", () => {
     const session = makeSession(
       [...manyEntries(13, "bilibili"), ...manyEntries(12, "youtube", 13)],
       "dual",
@@ -185,21 +191,24 @@ describe("search results view pagination", () => {
 
     const first = SearchResultsView.buildSearchResultsMessage(TOKEN, session);
     const embed = first.embeds[0].toJSON();
-    expect(embed.fields.map(field => field.name)).toEqual(["Bilibili", "YouTube"]);
-    expect(embed.fields[0].value).toContain("**B1.**");
-    expect(embed.fields[0].value).toContain("**B5.**");
-    expect(embed.fields[1].value).toContain("**Y1.**");
-    expect(embed.fields[1].value).toContain("**Y5.**");
+    expect(embed.fields).toHaveLength(15);
+    expect(embed.fields[0].name).toBe("B1. Video 0");
+    expect(embed.fields[1].name).toBe("Y1. Video 0");
+    expect(embed.fields[2].name).toBe(BLANK);
+    expect(embed.fields[3].name).toBe("B2. Video 1");
+    expect(embed.fields[4].name).toBe("Y2. Video 1");
 
     session.currentPage = 3;
     const last = SearchResultsView.buildSearchResultsMessage(TOKEN, session).embeds[0].toJSON();
-    expect(last.fields[0].value).toContain("**B11.**");
-    expect(last.fields[0].value).toContain("**B13.**");
-    expect(last.fields[1].value).toContain("**Y11.**");
-    expect(last.fields[1].value).toContain("**Y12.**");
+    expect(last.fields[0].name).toBe("B11. Video 10");
+    expect(last.fields[1].name).toBe("Y11. Video 10");
+    // Row 3 has B13 but no Y13 — the right slot is an invisible placeholder.
+    expect(last.fields[6].name).toBe("B13. Video 12");
+    expect(last.fields[7].name).toBe(BLANK);
+    expect(last.fields).toHaveLength(9);
   });
 
-  test("an exhausted dual column renders a placeholder instead of an empty field", () => {
+  test("an exhausted dual column renders placeholders instead of empty fields", () => {
     const session = makeSession(
       [...manyEntries(8, "bilibili"), ...manyEntries(3, "youtube", 8)],
       "dual",
@@ -207,8 +216,9 @@ describe("search results view pagination", () => {
     session.currentPage = 2;
 
     const embed = SearchResultsView.buildSearchResultsMessage(TOKEN, session).embeds[0].toJSON();
-    expect(embed.fields[0].value).toContain("**B6.**");
-    expect(embed.fields[1].value).toBe("​"); // zero-width space placeholder
+    expect(embed.fields[0].name).toBe("B6. Video 5");
+    expect(embed.fields[1].name).toBe(BLANK);
+    expect(embed.fields[1].value).toBe(BLANK);
   });
 
   test("single page hides the page buttons row", () => {
