@@ -79,29 +79,70 @@ function createSessionEntries(
   });
 }
 
+// Zero-width space — embed field names/values must be non-empty.
+const BLANK = '​';
+
+interface EmbedFieldData {
+  name: string;
+  value: string;
+  inline: boolean;
+}
+
 /** "B3" / "Y1" labels in dual mode, plain "3" in single-platform mode. */
 function entryLabel(entry: SearchSessionEntry, indexInPlatform: number, dual: boolean): string {
   if (!dual) return String(indexInPlatform + 1);
   return `${entry.platform === 'youtube' ? 'Y' : 'B'}${indexInPlatform + 1}`;
 }
 
-function formatColumnLine(entry: SearchSessionEntry, label: string): string {
-  const title = Formatters.escapeMarkdown(Formatters.truncateText(entry.title, COLUMN_TITLE_LENGTH));
+// Field names render bold without markdown parsing, so the title needs
+// no escaping; the value line carries duration + uploader.
+function entryField(entry: SearchSessionEntry, label: string): EmbedFieldData {
+  const title = Formatters.truncateText(entry.title, COLUMN_TITLE_LENGTH);
   const uploader = Formatters.escapeMarkdown(Formatters.truncateText(entry.uploader, 20));
   const duration = Formatters.formatInlineTimeHms(entry.duration, '`--:--`');
-  return `**${label}.** ${title}\n${duration} ${uploader}`;
+  return { name: `${label}. ${title}`, value: `${duration} ${uploader}`, inline: true };
 }
 
-function buildColumnValue(
-  entries: SearchSessionEntry[],
-  pageStart: number,
-  dual: boolean,
-): string {
-  const pageEntries = entries.slice(pageStart, pageStart + RESULTS_PER_PAGE);
-  if (pageEntries.length === 0) return '​'; // zero-width space — field values must be non-empty
-  return pageEntries
-    .map((entry, i) => formatColumnLine(entry, entryLabel(entry, pageStart + i, dual)))
-    .join('\n');
+function blankField(): EmbedFieldData {
+  return { name: BLANK, value: BLANK, inline: true };
+}
+
+/**
+ * Lay results out as a grid of paired inline fields: each row holds one
+ * Bilibili and one YouTube entry (dual) or two consecutive entries
+ * (single platform), closed by an invisible third field so Discord
+ * starts a fresh 3-column row. Rows therefore stay top-aligned no matter
+ * how far an individual title wraps.
+ */
+function buildFieldGrid(session: SearchSessionLike, page: number): EmbedFieldData[] {
+  const fields: EmbedFieldData[] = [];
+
+  if (session.mode === 'dual') {
+    const bili = platformEntries(session, 'bilibili');
+    const yt   = platformEntries(session, 'youtube');
+    const pageStart = (page - 1) * RESULTS_PER_PAGE;
+    for (let i = 0; i < RESULTS_PER_PAGE; i++) {
+      const left  = bili[pageStart + i];
+      const right = yt[pageStart + i];
+      if (!left && !right) break;
+      fields.push(left ? entryField(left, `B${pageStart + i + 1}`) : blankField());
+      fields.push(right ? entryField(right, `Y${pageStart + i + 1}`) : blankField());
+      fields.push(blankField());
+    }
+    return fields;
+  }
+
+  const pageStart = (page - 1) * RESULTS_PER_PAGE * 2;
+  for (let row = 0; row < RESULTS_PER_PAGE; row++) {
+    const leftIndex = pageStart + row * 2;
+    const left  = session.entries[leftIndex];
+    const right = session.entries[leftIndex + 1];
+    if (!left) break;
+    fields.push(entryField(left, String(leftIndex + 1)));
+    fields.push(right ? entryField(right, String(leftIndex + 2)) : blankField());
+    fields.push(blankField());
+  }
+  return fields;
 }
 
 function formatOptionDescription(entry: SearchSessionEntry, dual: boolean): string {
@@ -184,28 +225,12 @@ function buildSearchResultsMessage(
 ): { embeds: EmbedBuilder[]; components: ActionRowBuilder<StringSelectMenuBuilder | ButtonBuilder>[] } {
   const totalPages = totalPagesFor(session);
   const page = Math.min(Math.max(session.currentPage, 1), totalPages);
-  const dual = session.mode === 'dual';
 
   const embed = new EmbedBuilder()
     .setTitle(`搜索结果「${Formatters.escapeMarkdown(session.keyword)}」`)
     .setDescription(`共 ${session.entries.length} 个结果 · 第 ${page}/${totalPages} 页`)
-    .setColor(SEARCH_ACCENT_COLOR);
-
-  if (dual) {
-    const bili = platformEntries(session, 'bilibili');
-    const yt   = platformEntries(session, 'youtube');
-    const pageStart = (page - 1) * RESULTS_PER_PAGE;
-    embed.addFields(
-      { name: 'Bilibili', value: buildColumnValue(bili, pageStart, true), inline: true },
-      { name: 'YouTube',  value: buildColumnValue(yt, pageStart, true),  inline: true },
-    );
-  } else {
-    const pageStart = (page - 1) * RESULTS_PER_PAGE * 2;
-    embed.addFields(
-      { name: '​', value: buildColumnValue(session.entries, pageStart, false), inline: true },
-      { name: '​', value: buildColumnValue(session.entries, pageStart + RESULTS_PER_PAGE, false), inline: true },
-    );
-  }
+    .setColor(SEARCH_ACCENT_COLOR)
+    .addFields(buildFieldGrid(session, page));
 
   const components: ActionRowBuilder<StringSelectMenuBuilder | ButtonBuilder>[] = [
     buildSelectRow(token, session),
