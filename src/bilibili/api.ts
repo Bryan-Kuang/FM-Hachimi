@@ -357,10 +357,10 @@ class BilibiliAPI {
   /**
    * Keep only videos that are genuinely about 哈基米.
    * At least one of title or tag must contain the keyword "哈基米".
-   * Using the search query "哈基米" already biases results, but random
-   * page sampling (pages 2-10) can surface drift content that happens to
-   * rank for the term without being hachimi-related. This hard filter
-   * prevents those from reaching the queue.
+   * The music-focused search queries (config hachimiSearchKeywords) already
+   * bias results, but random page sampling (pages 2-14) can surface drift
+   * content that happens to rank for the terms without being hachimi-related.
+   * This hard filter prevents those from reaching the queue.
    * @param {Array} videos
    * @returns {Array}
    */
@@ -573,22 +573,50 @@ class BilibiliAPI {
     };
   }
 
+  /**
+   * Sample up to `count` distinct search keywords from the configured
+   * hachimiSearchKeywords list (music-focused queries — see config.ts).
+   */
+  sampleSearchKeywords(count: number): string[] {
+    const configured = config.bilibili.hachimiSearchKeywords;
+    const pool = Array.isArray(configured) && configured.length > 0
+      ? configured.slice()
+      : ["哈基米音乐"];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = pool[i];
+      pool[i] = pool[j];
+      pool[j] = tmp;
+    }
+    return pool.slice(0, Math.max(1, Math.min(count, pool.length)));
+  }
+
   async searchHachimiVideos(
     maxResults = 5,
     guildId: string | null = null,
     options: ProcessCandidatesOptions = {},
   ): Promise<SearchHachimiResult> {
     try {
+      // Query two different music-focused keywords and merge their result sets:
+      // a single query's qualified pool is small enough that the same page-1
+      // videos kept resurfacing across recommendations.
+      const keywords = this.sampleSearchKeywords(2);
       logger.info("Searching for Hachimi videos (Randomized)", {
         maxResults,
         guildId,
+        keywords,
       });
 
-      const rawCandidates = await this.fetchRawCandidates("哈基米", {
-        maxPages: config.bilibili.hachimiMaxPages,
-        pageSize: config.bilibili.hachimiPageSize,
-        timeoutMs: config.bilibili.searchTimeout,
-      });
+      const batches = await Promise.all(
+        keywords.map((keyword) =>
+          this.fetchRawCandidates(keyword, {
+            maxPages: config.bilibili.hachimiMaxPages,
+            pageSize: config.bilibili.hachimiPageSize,
+            timeoutMs: config.bilibili.searchTimeout,
+          })
+        )
+      );
+      const rawCandidates = batches.flat();
 
       if (!rawCandidates || rawCandidates.length === 0) {
         logger.warn("No Hachimi videos found even after fallback");
