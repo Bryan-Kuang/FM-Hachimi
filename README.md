@@ -67,8 +67,6 @@ YouTube playback often needs browser cookies on cloud servers. In Docker, the bo
 
 The Docker compose file mounts `secrets/` as a directory, not `youtube_cookies.txt` as a single file, so refreshed cookie contents are visible to the running container without a restart.
 
-Production validation on June 2, 2026 confirmed the VPS Chrome-profile export path works again for both a short public video (`dQw4w9WgXcQ`) and the previously failing long video (`AUfXW1EdLew`).
-
 For emergency/manual recovery only:
 
 ```bash
@@ -96,4 +94,4 @@ npm run build
 npm start
 ```
 
-More deployment and cookie details live in `docs/ops.md`.
+The full deployment, cookie, and monitoring runbook lives in `OPERATIONS.md`.

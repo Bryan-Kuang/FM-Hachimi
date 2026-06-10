@@ -57,7 +57,8 @@ Workflow options:
 **Duplicates** = a command registered both globally and guild-scoped. Use `global` + `test`
 (non-overlapping → never duplicates); reserve `guild` for deliberate cases and clean up with
 `clear_guild`. Note: `stage:'testing'` is currently unused — tag a command with it to route it
-through the `test` flow.
+through the `test` flow. Authoring and graduation rules for testing features live in
+[`docs/testing-features.md`](docs/testing-features.md).
 
 ## YouTube cookies — two tiers
 
@@ -87,9 +88,20 @@ ssh -L 5907:127.0.0.1:5907 ubuntu@<vps>
 
 `scripts/ops/youtube-cookie-login-repair.sh` attempts an automated login using
 `~/.fm-hachimi-youtube/credentials.env` (mode 600, **VPS-only, never in git**) but fails closed
-on CAPTCHA/2FA. `scripts/refresh-youtube-cookies.sh` is the export-from-local-Chrome fallback.
+on CAPTCHA/2FA. It needs `xdotool` and `xclip` on the VPS so credentials are pasted without
+appearing as process arguments. `scripts/refresh-youtube-cookies.sh` is the
+export-from-local-Chrome fallback.
 
-Bilibili cookies (`bilibili_cookies.txt`) are static — refresh manually when they expire.
+Bilibili cookies (`bilibili_cookies.txt`) are static — refresh manually when they expire:
+
+```bash
+yt-dlp --cookies-from-browser chrome \
+  --cookies secrets/bilibili_cookies.txt \
+  --skip-download \
+  "https://www.bilibili.com/video/BV1GJ411x7h7"
+```
+
+Never commit `secrets/`, cookie files, browser profiles, or bot-account credentials.
 
 ## Media cache (YouTube)
 
@@ -148,4 +160,13 @@ echo $(( $(date +%s) - $(stat -c %Y ~/bilibili-bot/secrets/youtube_cookies.txt) 
 
 # metrics over the loopback binding
 curl -s 127.0.0.1:9090/metrics | jq '.gauges, .counters.youtube_cookie_refresh_total'
+
+# validate the live YouTube cookie file end-to-end (prints the video id on success)
+docker exec bilibili-discord-bot yt-dlp \
+  --js-runtimes node \
+  --cookies /app/secrets/youtube_cookies.txt \
+  --skip-download --no-playlist --no-warnings \
+  --format 'bestaudio[vcodec=none][acodec!=none]/best[height<=360][acodec!=none]/worst[acodec!=none]' \
+  --print id \
+  'https://www.youtube.com/watch?v=AUfXW1EdLew'
 ```
