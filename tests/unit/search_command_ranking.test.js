@@ -36,16 +36,17 @@ jest.mock("../../src/services/logger_service", () => ({
 }));
 
 jest.mock("../../src/ui/embeds", () => ({
-  createSearchResultsEmbed: jest.fn().mockReturnValue({ title: "Search Results" }),
   createErrorEmbed: jest.fn().mockReturnValue({ title: "Error" }),
 }));
 
-jest.mock("../../src/ui/buttons", () => ({
-  createSearchResultsMenu: jest.fn().mockReturnValue({ type: "menu" }),
+jest.mock("../../src/ui/search_results_view", () => ({
+  RESULTS_PER_PAGE: 5,
+  createSessionEntries: jest.fn(() => []),
+  buildSearchResultsMessage: jest.fn().mockReturnValue({ embeds: [], components: [] }),
+  totalPagesFor: jest.fn().mockReturnValue(1),
 }));
 
-const EmbedBuilders = require("../../src/ui/embeds");
-const ButtonBuilders = require("../../src/ui/buttons");
+const SearchResultsView = require("../../src/ui/search_results_view");
 const createSearchCommand = require("../../src/bot/commands/search");
 
 function makeInteraction(platform = "bilibili") {
@@ -102,14 +103,11 @@ describe("/search result relevance ranking", () => {
 
     await command.execute(makeInteraction("bilibili"));
 
-    expect(extractor.searchVideos).toHaveBeenCalledWith("哈基米无止境电台", 5);
-    const [displayedResults] = EmbedBuilders.createSearchResultsEmbed.mock.calls[0];
+    expect(extractor.searchVideos).toHaveBeenCalledWith("哈基米无止境电台", 25);
+    const [displayedResults] = SearchResultsView.createSessionEntries.mock.calls[0];
     expect(displayedResults[0]).toEqual(expect.objectContaining({ id: "BV1JuhNz6Eg6" }));
     expect(displayedResults).toHaveLength(5);
     expect(displayedResults.map(result => result.title)).toContain("完全无关 0");
-    expect(ButtonBuilders.createSearchResultsMenu.mock.calls[0][0][0]).toEqual(
-      expect.objectContaining({ id: "BV1JuhNz6Eg6" }),
-    );
     expect(playbackService.prewarmBilibiliUrls).toHaveBeenCalledWith(
       expect.arrayContaining(["https://www.bilibili.com/video/BV1JuhNz6Eg6"]),
       expect.objectContaining({
@@ -147,14 +145,11 @@ describe("/search result relevance ranking", () => {
 
     await command.execute(makeInteraction("youtube"));
 
-    expect(ytExtractor.searchVideos).toHaveBeenCalledWith("哈基米无止境电台", 5);
-    const [displayedResults] = EmbedBuilders.createSearchResultsEmbed.mock.calls[0];
+    expect(ytExtractor.searchVideos).toHaveBeenCalledWith("哈基米无止境电台", 25);
+    const [displayedResults] = SearchResultsView.createSessionEntries.mock.calls[0];
     expect(displayedResults[0]).toEqual(expect.objectContaining({ id: "ytidtarget1" }));
     expect(displayedResults).toHaveLength(5);
     expect(displayedResults.map(result => result.title)).toContain("Unrelated 0");
-    expect(ButtonBuilders.createSearchResultsMenu.mock.calls[0][0][0]).toEqual(
-      expect.objectContaining({ id: "ytidtarget1" }),
-    );
     expect(playbackService.prewarmBilibiliUrls).not.toHaveBeenCalled();
     expect(playbackService.prewarmYouTubeUrls).toHaveBeenCalledWith(
       expect.arrayContaining(["https://www.youtube.com/watch?v=ytidtarget1"]),

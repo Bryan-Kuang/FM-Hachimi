@@ -6,9 +6,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { SlashCommandBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { routeQuery } from '../../utils/url_router';
-import EmbedBuilders = require('../../ui/embeds');
-import ButtonBuilders = require('../../ui/buttons');
+import SearchResultsView = require('../../ui/search_results_view');
 import SearchService = require('../../search/search_service');
+import SearchSessionStore = require('../../search/search_session_store');
 import BilibiliUrls = require('../../search/bilibili_urls');
 import YouTubeUrls = require('../../search/youtube_urls');
 import PlaybackCoordinator = require('../../playback/playback_coordinator');
@@ -140,7 +140,7 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
       await interaction.editReply({ content: `[?] Searching "${query}" on Bilibili & YouTube...` });
 
       const ytExtractorForSearch = playbackService.getYouTubeExtractor();
-      const perPlatformLimit = 5;
+      const perPlatformLimit = 13;
 
       // Bilibili uses the HTTP API here so initial discovery stays fast.
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -160,18 +160,27 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         return;
       }
 
-      const searchEmbed = EmbedBuilders.createDualSearchEmbed(biliResults, ytResults, query as string);
-      let components: any[] = [];
-      try {
-        components = [ButtonBuilders.createDualSearchMenu(biliResults, ytResults, query as string)];
-      } catch { /* select menu unavailable */ }
+      // Combined 25-entry session: Bilibili first, then YouTube, paginated by
+      // the shared search results view. The startIndex keeps fallback
+      // selection values unique across the two platforms.
+      const biliEntries = SearchResultsView.createSessionEntries(biliResults as any[], 'bilibili');
+      const ytEntries   = SearchResultsView.createSessionEntries(ytResults as any[], 'youtube', biliEntries.length);
+      const session = {
+        keyword: query as string,
+        mode: 'dual' as const,
+        entries: [...biliEntries, ...ytEntries].slice(0, 25),
+      };
+      const token = SearchSessionStore.create(session);
 
-      const payload: Record<string, unknown> = { embeds: [searchEmbed] };
-      if (components.length > 0) payload.components = components;
-      await interaction.editReply(payload);
+      // Clear the "Searching..." text so only the results embed remains.
+      await interaction.editReply({
+        content: null,
+        ...SearchResultsView.buildSearchResultsMessage(token, { ...session, currentPage: 1 }),
+      });
 
+      // Only prewarm the first page's worth per platform; the rest may never be viewed.
       playbackService.prewarmBilibiliUrls?.(
-        BilibiliUrls.collectBilibiliUrls(biliResults, perPlatformLimit),
+        BilibiliUrls.collectBilibiliUrls(biliResults, SearchResultsView.RESULTS_PER_PAGE),
         {
           source: 'play_search',
           guildId: interaction.guild.id,
@@ -179,7 +188,7 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         },
       );
       playbackService.prewarmYouTubeUrls?.(
-        YouTubeUrls.collectYouTubeUrls(ytResults, perPlatformLimit),
+        YouTubeUrls.collectYouTubeUrls(ytResults, SearchResultsView.RESULTS_PER_PAGE),
         {
           source: 'play_search',
           guildId: interaction.guild.id,

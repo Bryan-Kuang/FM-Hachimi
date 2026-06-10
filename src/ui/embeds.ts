@@ -49,14 +49,6 @@ interface BotStats {
   id?: string;
 }
 
-// Shape of a search result for createSearchResultsEmbed
-interface SearchResultItem {
-  title: string;
-  uploader?: string;
-  duration?: string | number;
-  viewCount?: string | number;
-}
-
 // Shape of a queue track item for createQueueEmbed
 interface QueueItem {
   title?: string;
@@ -338,84 +330,6 @@ class EmbedBuilders {
     return embed;
   }
 
-  /**
-   * Create a search results embed.
-   */
-  static createSearchResultsEmbed(results: SearchResultItem[], keyword: string): EmbedBuilder {
-    const embed = new EmbedBuilder()
-      .setTitle('[?] Search Results')
-      .setDescription(`Found ${results.length} results for "**${Formatters.escapeMarkdown(keyword)}**"`)
-      .setColor(0x00ae86)
-      .setTimestamp();
-
-    results.slice(0, 10).forEach((result, index) => {
-      const title = result.title.length > 80 ? result.title.substring(0, 80) + '...' : result.title;
-      const uploader = result.uploader || 'Unknown';
-      const duration = Formatters.formatInlineTimeHms(result.duration);
-      const viewCount = result.viewCount
-        ? Formatters.formatNumber(parseInt(String(result.viewCount)))
-        : 'Unknown';
-
-      embed.addFields({
-        name: `${index + 1}. ${Formatters.escapeMarkdown(title)}`,
-        value: `by **${Formatters.escapeMarkdown(uploader)}** | ${duration} | **${viewCount} views**`,
-        inline: false,
-      });
-    });
-
-    embed.setFooter({
-      text: 'Select a video from the dropdown menu below to add it to the queue',
-    });
-
-    return embed;
-  }
-
-  /**
-   * Create a dual-platform search results embed (Bilibili + YouTube).
-   */
-  static createDualSearchEmbed(
-    biliResults: SearchResultItem[],
-    ytResults: SearchResultItem[],
-    keyword: string,
-  ): EmbedBuilder {
-    const total = biliResults.length + ytResults.length;
-    const embed = new EmbedBuilder()
-      .setTitle('[?] Search Results')
-      .setDescription(`Found ${total} results for "**${Formatters.escapeMarkdown(keyword)}**"`)
-      .setColor(0x00ae86)
-      .setTimestamp();
-
-    if (biliResults.length > 0) {
-      embed.addFields({ name: 'Bilibili', value: '\u200B', inline: false });
-      biliResults.forEach((result, index) => {
-        const title = result.title.length > 70 ? result.title.substring(0, 70) + '...' : result.title;
-        const uploader = result.uploader || 'Unknown';
-        const duration = Formatters.formatInlineTimeHms(result.duration);
-        embed.addFields({
-          name: `B${index + 1}. ${Formatters.escapeMarkdown(title)}`,
-          value: `by ${Formatters.escapeMarkdown(uploader)} | ${duration}`,
-          inline: false,
-        });
-      });
-    }
-
-    if (ytResults.length > 0) {
-      embed.addFields({ name: 'YouTube', value: '\u200B', inline: false });
-      ytResults.forEach((result, index) => {
-        const title = result.title.length > 70 ? result.title.substring(0, 70) + '...' : result.title;
-        const uploader = result.uploader || 'Unknown';
-        const duration = Formatters.formatInlineTimeHms(result.duration);
-        embed.addFields({
-          name: `Y${index + 1}. ${Formatters.escapeMarkdown(title)}`,
-          value: `by ${Formatters.escapeMarkdown(uploader)} | ${duration}`,
-          inline: false,
-        });
-      });
-    }
-
-    embed.setFooter({ text: 'Select a video from the dropdown menu below' });
-    return embed;
-  }
 }
 
 export = EmbedBuilders;

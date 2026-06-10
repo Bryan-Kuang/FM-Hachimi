@@ -12,6 +12,8 @@ import {
 } from 'discord.js';
 import EmbedBuilders = require('../../../ui/embeds');
 import ButtonBuilders = require('../../../ui/buttons');
+import SearchResultsView = require('../../../ui/search_results_view');
+import SearchSessionStore = require('../../../search/search_session_store');
 import { createInteractionStageReporter } from '../../../playback/stage_feedback';
 import {
   RADIO_ONLY_STOP_MESSAGE,
@@ -36,6 +38,12 @@ function createButtonHandler(playerService: any) {
         user:  user.username,
         guild: interaction.guild?.name,
       });
+
+      // Search pagination edits the search results message in place, so it
+      // needs deferUpdate() instead of the generic deferReply(ephemeral) below.
+      if (customId.startsWith('search_page_')) {
+        return await handleSearchPage(interaction, customId);
+      }
 
       // Immediately defer to beat Discord's 3-second timeout.
       // Control buttons use deferUpdate() so the original now-playing embed
@@ -132,6 +140,51 @@ function createButtonHandler(playerService: any) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * search_page_<token>_<prev|next>: flip a page of the paginated search
+ * results message in place. Errors are handled here (not in the generic
+ * handler) so the search results message is never overwritten with an
+ * error embed.
+ */
+async function handleSearchPage(interaction: any, customId: string): Promise<void> {
+  try {
+    await interaction.deferUpdate();
+
+    const match = customId.match(/^search_page_([0-9a-f]+)_(prev|next)$/);
+    if (!match) return;
+
+    const [, token, direction] = match;
+    const session = SearchSessionStore.get(token);
+    if (!session) {
+      await interaction.followUp({
+        content: '搜索已过期，请重新搜索。',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const totalPages = SearchResultsView.totalPagesFor(session);
+    const nextPage = session.currentPage + (direction === 'next' ? 1 : -1);
+    session.currentPage = Math.min(Math.max(nextPage, 1), totalPages);
+
+    await interaction.editReply(
+      SearchResultsView.buildSearchResultsMessage(token, session),
+    );
+  } catch (error: unknown) {
+    logger.error('Search page button failed', {
+      customId,
+      user:  interaction.user?.username,
+      error: (error as Error).message,
+    });
+    try {
+      await interaction.followUp({
+        content: '翻页失败，请重新搜索。',
+        flags: MessageFlags.Ephemeral,
+      });
+    } catch { /* best effort */ }
+  }
+}
 
 async function handleDailyPlay(interaction: any, customId: string, playerService: any): Promise<void> {
   if (!interaction.member.voice.channel) {

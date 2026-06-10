@@ -81,6 +81,15 @@ jest.mock("../../src/bilibili/api", () => ({
   searchVideos: jest.fn().mockResolvedValue([]),
 }));
 
+// The view needs the real discord.js builders, which the wholesale
+// discord.js mock above does not provide.
+jest.mock("../../src/ui/search_results_view", () => ({
+  RESULTS_PER_PAGE: 5,
+  createSessionEntries: jest.fn(() => []),
+  buildSearchResultsMessage: jest.fn().mockReturnValue({ embeds: [], components: [] }),
+  totalPagesFor: jest.fn().mockReturnValue(1),
+}));
+
 // Mock player used by SceneFactory
 const mockPlayer = {
   isPlaying: false,
@@ -811,9 +820,10 @@ describe("Bot Commands Coverage", () => {
       await searchCommand.execute(interaction);
 
       expect(interaction.deferReply).toHaveBeenCalled();
+      // The command fetches a fixed batch of 25 and paginates client-side.
       expect(extractor.searchVideos).toHaveBeenCalledWith(
         scene.options.keyword,
-        scene.options.results
+        25
       );
 
       if (expectTitle) {
@@ -828,7 +838,7 @@ describe("Bot Commands Coverage", () => {
         );
       } else {
         expect(interaction.editReply).toHaveBeenCalledWith(
-          expect.objectContaining({ embeds: expect.any(Array) })
+          expect.objectContaining({ components: expect.any(Array) })
         );
       }
     });

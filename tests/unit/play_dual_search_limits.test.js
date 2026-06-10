@@ -28,17 +28,24 @@ jest.mock("../../src/bilibili/api", () => ({
   searchVideos: jest.fn(),
 }));
 
-jest.mock("../../src/ui/embeds", () => ({
-  createDualSearchEmbed: jest.fn().mockReturnValue({ title: "Search Results" }),
-}));
-
-jest.mock("../../src/ui/buttons", () => ({
-  createDualSearchMenu: jest.fn().mockReturnValue({ type: "menu" }),
+// The view needs the real discord.js builders, which the wholesale
+// discord.js mock above does not provide.
+jest.mock("../../src/ui/search_results_view", () => ({
+  RESULTS_PER_PAGE: 5,
+  createSessionEntries: jest.fn((results, platform, startIndex = 0) =>
+    results.map((result, index) => ({
+      platform,
+      title: result.title,
+      uploader: result.uploader || "Unknown",
+      url: result.url || null,
+      selectionValue: `idx_${startIndex + index}`,
+    }))),
+  buildSearchResultsMessage: jest.fn().mockReturnValue({ embeds: [], components: [] }),
+  totalPagesFor: jest.fn().mockReturnValue(3),
 }));
 
 const bilibiliApi = require("../../src/bilibili/api");
-const EmbedBuilders = require("../../src/ui/embeds");
-const ButtonBuilders = require("../../src/ui/buttons");
+const SearchResultsView = require("../../src/ui/search_results_view");
 const createPlayCommand = require("../../src/bot/commands/play");
 
 function makeInteraction(query = "hachimi") {
@@ -67,7 +74,7 @@ describe("/play dual-platform keyword search limits", () => {
     jest.clearAllMocks();
   });
 
-  test("requests and displays five results from each platform", async () => {
+  test("requests 13 results from each platform and prewarms only the first page", async () => {
     const biliResults = Array.from({ length: 20 }, (_, index) => ({
       title: `Bili ${index}`,
       bvid: `BV${index}`,
@@ -95,18 +102,20 @@ describe("/play dual-platform keyword search limits", () => {
 
     await command.execute(makeInteraction());
 
-    expect(bilibiliApi.searchVideos).toHaveBeenCalledWith("hachimi", 1, 5);
-    expect(ytExtractor.searchVideos).toHaveBeenCalledWith("hachimi", 5);
-    expect(EmbedBuilders.createDualSearchEmbed).toHaveBeenCalledWith(
-      expect.arrayContaining([expect.objectContaining({ title: "Bili 0" })]),
-      expect.arrayContaining([expect.objectContaining({ title: "YouTube 0" })]),
-      "hachimi",
-    );
-    const [biliDisplayed, ytDisplayed] = EmbedBuilders.createDualSearchEmbed.mock.calls[0];
-    expect(biliDisplayed).toHaveLength(5);
-    expect(ytDisplayed).toHaveLength(5);
-    expect(ButtonBuilders.createDualSearchMenu.mock.calls[0][0]).toHaveLength(5);
-    expect(ButtonBuilders.createDualSearchMenu.mock.calls[0][1]).toHaveLength(5);
+    expect(bilibiliApi.searchVideos).toHaveBeenCalledWith("hachimi", 1, 13);
+    expect(ytExtractor.searchVideos).toHaveBeenCalledWith("hachimi", 13);
+
+    const [biliDisplayed] = SearchResultsView.createSessionEntries.mock.calls[0];
+    const [ytDisplayed] = SearchResultsView.createSessionEntries.mock.calls[1];
+    expect(biliDisplayed[0]).toEqual(expect.objectContaining({ title: "Bili 0" }));
+    expect(ytDisplayed[0]).toEqual(expect.objectContaining({ title: "YouTube 0" }));
+    expect(biliDisplayed).toHaveLength(13);
+    expect(ytDisplayed).toHaveLength(8);
+
+    // YouTube entries are appended after the 13 Bilibili entries, so the
+    // index fallback offset must skip them.
+    expect(SearchResultsView.createSessionEntries.mock.calls[1][2]).toBe(13);
+
     expect(playbackService.prewarmBilibiliUrls).toHaveBeenCalledWith(
       expect.arrayContaining([
         "https://www.bilibili.com/video/BV0",
@@ -118,6 +127,7 @@ describe("/play dual-platform keyword search limits", () => {
         keyword: "hachimi",
       }),
     );
+    expect(playbackService.prewarmBilibiliUrls.mock.calls[0][0]).toHaveLength(5);
     expect(playbackService.prewarmYouTubeUrls).toHaveBeenCalledWith(
       expect.arrayContaining([
         "https://www.youtube.com/watch?v=ytid0000000",
@@ -129,9 +139,10 @@ describe("/play dual-platform keyword search limits", () => {
         keyword: "hachimi",
       }),
     );
+    expect(playbackService.prewarmYouTubeUrls.mock.calls[0][0]).toHaveLength(5);
   });
 
-  test("promotes exact title matches within the returned five results", async () => {
+  test("promotes exact title matches within the returned results", async () => {
     const biliResults = [
       ...Array.from({ length: 4 }, (_, index) => ({
         title: `完全无关 ${index}`,
@@ -174,7 +185,8 @@ describe("/play dual-platform keyword search limits", () => {
 
     await command.execute(makeInteraction("哈基米无止境电台"));
 
-    const [biliDisplayed, ytDisplayed] = EmbedBuilders.createDualSearchEmbed.mock.calls[0];
+    const [biliDisplayed] = SearchResultsView.createSessionEntries.mock.calls[0];
+    const [ytDisplayed] = SearchResultsView.createSessionEntries.mock.calls[1];
     expect(biliDisplayed[0]).toEqual(expect.objectContaining({ bvid: "BV1JuhNz6Eg6" }));
     expect(ytDisplayed[0]).toEqual(expect.objectContaining({ id: "ytidtarget1" }));
     expect(biliDisplayed).toHaveLength(5);
