@@ -9,6 +9,7 @@ import { MessageFlags } from 'discord.js';
 import EmbedBuilders = require('../../../ui/embeds');
 import ButtonBuilders = require('../../../ui/buttons');
 import SearchService = require('../../../search/search_service');
+import SearchSessionStore = require('../../../search/search_session_store');
 import PlaybackCoordinator = require('../../../playback/playback_coordinator');
 import { createInteractionStageReporter } from '../../../playback/stage_feedback';
 import {
@@ -40,6 +41,12 @@ function createSelectMenuHandler(playerService: any) {
 
       if (customId === 'loop_select') {
         return await handleLoopSelect(interaction, playerService);
+      }
+
+      // Paginated search results (Components V2) — must be checked before
+      // the legacy 'search_select_' prefix, which it also matches.
+      if (customId.startsWith('search_select_v2_')) {
+        return await handleSearchSelectV2(interaction, customId, playerService);
       }
 
       if (customId.startsWith('search_select_')) {
@@ -383,6 +390,68 @@ async function playDirectSelection(interaction: any, playerService: any, selecti
   }
 
   return playYouTubeSelection(interaction, playerService, selection.url);
+}
+
+// ---------------------------------------------------------------------------
+// Search Select (Components V2, paginated)
+// ---------------------------------------------------------------------------
+
+/**
+ * search_select_v2_<token>: selection from the paginated search results view.
+ * Option values are direct identities ("bili:<id>" / "yt:<id>") or an
+ * "idx_<n>" fallback resolved against the stored session entry's URL.
+ */
+async function handleSearchSelectV2(interaction: any, customId: string, playerService: any): Promise<void> {
+  const user          = interaction.user;
+  const selectedValue = interaction.values[0] as string;
+
+  logger.debug('Search result select menu (v2) interaction received', {
+    selectedValue,
+    user:  user.username,
+    guild: interaction.guild?.name,
+  });
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const directSelection = parseDirectSelectionValue(selectedValue);
+  if (directSelection) {
+    const played = await playDirectSelection(interaction, playerService, directSelection);
+    if (!played) return;
+    logger.info('Video added to queue from paginated search results', {
+      platform: directSelection.platform,
+      user:     user.username,
+      guild:    interaction.guild?.name,
+    });
+    return;
+  }
+
+  const indexMatch = selectedValue.match(/^idx_(\d+)$/);
+  if (!indexMatch) {
+    return await editInvalidSelection(interaction);
+  }
+
+  const token = customId.slice('search_select_v2_'.length);
+  const session = SearchSessionStore.get(token);
+  const entry = session?.entries[parseInt(indexMatch[1], 10)];
+  if (!entry || !entry.url) {
+    const errorEmbed = EmbedBuilders.createErrorEmbed(
+      'Search Expired', '搜索已过期，请重新搜索。',
+      { suggestion: 'Please perform a new search.' },
+    );
+    return await interaction.editReply({ embeds: [errorEmbed] });
+  }
+
+  const played = entry.platform === 'youtube'
+    ? await playYouTubeSelection(interaction, playerService, entry.url, entry.title)
+    : await playBilibiliSelection(interaction, playerService, entry.url, entry.title);
+  if (!played) return;
+
+  logger.info('Video added to queue from paginated search results (index fallback)', {
+    platform:   entry.platform,
+    videoTitle: entry.title,
+    user:       user.username,
+    guild:      interaction.guild?.name,
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -6,11 +6,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { SlashCommandBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import EmbedBuilders = require('../../ui/embeds');
-import ButtonBuilders = require('../../ui/buttons');
+import SearchResultsView = require('../../ui/search_results_view');
 import SearchService = require('../../search/search_service');
+import SearchSessionStore = require('../../search/search_session_store');
 import BilibiliUrls = require('../../search/bilibili_urls');
 import YouTubeUrls = require('../../search/youtube_urls');
 import * as logger from '../../services/logger_service';
+
+// Fetched once per search and paginated client-side via the session store.
+const TOTAL_RESULTS = 25;
 
 const createSearchCommand = (playbackService: any) => ({
   data: new SlashCommandBuilder()
@@ -31,14 +35,6 @@ const createSearchCommand = (playbackService: any) => ({
           { name: 'Bilibili', value: 'bilibili' },
           { name: 'YouTube', value: 'youtube' },
         ),
-    )
-    .addIntegerOption((option) =>
-      option
-        .setName('results')
-        .setDescription('显示结果数量（1-10）')
-        .setMinValue(1)
-        .setMaxValue(10)
-        .setRequired(false),
     ),
 
   cooldown: 5,
@@ -46,10 +42,9 @@ const createSearchCommand = (playbackService: any) => ({
   async execute(interaction: ChatInputCommandInteraction<'cached'>): Promise<void> {
     let deferred = false;
     try {
-      const keyword    = interaction.options.getString('keyword', true);
-      const platform   = interaction.options.getString('platform') || 'bilibili';
-      const maxResults = interaction.options.getInteger('results') ?? 5;
-      const user       = interaction.user;
+      const keyword  = interaction.options.getString('keyword', true);
+      const platform = interaction.options.getString('platform') || 'bilibili';
+      const user     = interaction.user;
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       deferred = true;
@@ -68,7 +63,7 @@ const createSearchCommand = (playbackService: any) => ({
 
         const results = await SearchService.searchYouTube({
           keyword,
-          limit: maxResults,
+          limit: TOTAL_RESULTS,
           youtubeExtractor: ytExtractor,
         });
 
@@ -81,17 +76,19 @@ const createSearchCommand = (playbackService: any) => ({
           return;
         }
 
-        const searchEmbed = EmbedBuilders.createSearchResultsEmbed(results, keyword);
-        let components: any[] = [];
-        try {
-          components = [ButtonBuilders.createSearchResultsMenu(results, keyword, 'youtube')];
-        } catch { /* StringSelectMenuBuilder unavailable */ }
+        const session = {
+          keyword,
+          mode: 'youtube' as const,
+          entries: SearchResultsView.createSessionEntries(results as any[], 'youtube'),
+        };
+        const token = SearchSessionStore.create(session);
+        await interaction.editReply(
+          SearchResultsView.buildSearchResultsMessage(token, { ...session, currentPage: 1 }),
+        );
 
-        const payload: Record<string, unknown> = { embeds: [searchEmbed] };
-        if (components.length > 0) payload.components = components;
-        await interaction.editReply(payload);
+        // Only prewarm the first page; the rest may never be viewed.
         playbackService.prewarmYouTubeUrls?.(
-          YouTubeUrls.collectYouTubeUrls(results, maxResults),
+          YouTubeUrls.collectYouTubeUrls(results, SearchResultsView.RESULTS_PER_PAGE),
           {
             source: 'search_command',
             guildId: interaction.guildId || interaction.guild?.id,
@@ -122,7 +119,7 @@ const createSearchCommand = (playbackService: any) => ({
 
       const results = await SearchService.searchBilibili({
         keyword,
-        limit: maxResults,
+        limit: TOTAL_RESULTS,
         extractor,
       });
 
@@ -135,20 +132,19 @@ const createSearchCommand = (playbackService: any) => ({
         return;
       }
 
-      const searchEmbed = EmbedBuilders.createSearchResultsEmbed(results, keyword);
+      const session = {
+        keyword,
+        mode: 'bilibili' as const,
+        entries: SearchResultsView.createSessionEntries(results as any[], 'bilibili'),
+      };
+      const token = SearchSessionStore.create(session);
+      await interaction.editReply(
+        SearchResultsView.buildSearchResultsMessage(token, { ...session, currentPage: 1 }),
+      );
 
-      // Build the select menu; may not be available in all runtime environments
-      let components: any[] = [];
-      try {
-        components = [ButtonBuilders.createSearchResultsMenu(results, keyword, 'bilibili')];
-      } catch { /* StringSelectMenuBuilder unavailable — reply with embeds only */ }
-
-      const payload: Record<string, unknown> = { embeds: [searchEmbed] };
-      if (components.length > 0) payload.components = components;
-
-      await interaction.editReply(payload);
+      // Only prewarm the first page; the rest may never be viewed.
       playbackService.prewarmBilibiliUrls?.(
-        BilibiliUrls.collectBilibiliUrls(results, maxResults),
+        BilibiliUrls.collectBilibiliUrls(results, SearchResultsView.RESULTS_PER_PAGE),
         {
           source: 'search_command',
           guildId: interaction.guildId || interaction.guild?.id,

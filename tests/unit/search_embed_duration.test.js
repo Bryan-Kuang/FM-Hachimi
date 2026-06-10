@@ -1,76 +1,59 @@
-jest.mock("discord.js", () => {
-  class MockEmbedBuilder {
-    constructor() {
-      this.data = { fields: [] };
-    }
+// Duration display in the paginated search results embed.
+// Uses the real discord.js builders, overriding the global mock in tests/setup.js.
+jest.unmock("discord.js");
 
-    setTitle(title) {
-      this.data.title = title;
-      return this;
-    }
+const SearchResultsView = require("../../src/ui/search_results_view");
 
-    setDescription(description) {
-      this.data.description = description;
-      return this;
-    }
+const TOKEN = "aabbccddee";
 
-    setColor(color) {
-      this.data.color = color;
-      return this;
-    }
-
-    setTimestamp() {
-      this.data.timestamp = true;
-      return this;
-    }
-
-    addFields(...fields) {
-      this.data.fields.push(...fields);
-      return this;
-    }
-
-    setFooter(footer) {
-      this.data.footer = footer;
-      return this;
-    }
-  }
-
-  return { EmbedBuilder: MockEmbedBuilder };
-});
-
-const EmbedBuilders = require("../../src/ui/embeds");
-const CLOCK_ICON = String.fromCodePoint(0x23f1, 0xfe0f);
-
-function fieldValues(embed) {
-  return embed.data.fields.map(field => field.value);
+function embedFields(message) {
+  return message.embeds[0].toJSON().fields;
 }
 
-describe("search embed duration display", () => {
-  test("single-platform search results show inline hh:mm:ss durations without clock icon", () => {
-    const embed = EmbedBuilders.createSearchResultsEmbed(
-      [
-        { title: "Short", uploader: "A", duration: 65, viewCount: 123 },
-        { title: "Long", uploader: "B", duration: "1:02:03", viewCount: 456 },
-      ],
-      "hachimi",
-    );
+function optionDescriptions(message) {
+  const row = message.components
+    .map(component => component.toJSON())
+    .find(component => component.components[0].type === 3);
+  return row.components[0].options.map(option => option.description);
+}
 
-    const values = fieldValues(embed);
-    expect(values.join("\n")).not.toContain(CLOCK_ICON);
-    expect(values[0]).toContain("`00:01:05`");
-    expect(values[1]).toContain("`01:02:03`");
+describe("search results view duration display", () => {
+  test("columns show inline hh:mm:ss durations from numeric and string inputs", () => {
+    const entries = SearchResultsView.createSessionEntries(
+      [
+        { title: "Short", bvid: "BV1a", uploader: "A", duration: 65, viewCount: 123 },
+        { title: "Long", bvid: "BV1b", uploader: "B", duration: "1:02:03", viewCount: 456 },
+      ],
+      "bilibili",
+    );
+    const message = SearchResultsView.buildSearchResultsMessage(TOKEN, {
+      keyword: "hachimi",
+      mode: "bilibili",
+      entries,
+      currentPage: 1,
+    });
+
+    const column = embedFields(message)[0].value;
+    expect(column).toContain("`00:01:05`");
+    expect(column).toContain("`01:02:03`");
   });
 
-  test("dual-platform search results show inline hh:mm:ss durations without clock icon", () => {
-    const embed = EmbedBuilders.createDualSearchEmbed(
-      [{ title: "Bili", uploader: "A", duration: "2:03" }],
-      [{ title: "YT", uploader: "B", duration: 3723 }],
-      "hachimi",
+  test("select options show plain durations and unknown durations fall back", () => {
+    const entries = SearchResultsView.createSessionEntries(
+      [
+        { title: "Known", bvid: "BV1a", uploader: "A", duration: "2:03" },
+        { title: "Unknown", bvid: "BV1b", uploader: "B" },
+      ],
+      "bilibili",
     );
+    const message = SearchResultsView.buildSearchResultsMessage(TOKEN, {
+      keyword: "hachimi",
+      mode: "bilibili",
+      entries,
+      currentPage: 1,
+    });
 
-    const values = fieldValues(embed);
-    expect(values.join("\n")).not.toContain(CLOCK_ICON);
-    expect(values).toContain("by A | `00:02:03`");
-    expect(values).toContain("by B | `01:02:03`");
+    expect(optionDescriptions(message)).toEqual(["A | 00:02:03", "B | --:--"]);
+    expect(embedFields(message)[0].value).toContain("`--:--`");
   });
 });
