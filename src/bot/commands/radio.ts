@@ -14,7 +14,7 @@ const createRadioCommand = (playbackService: any) => {
   const command = {
     data: new SlashCommandBuilder()
       .setName('radio')
-      .setDescription('Radio · Endless random Hachimi playback (use /radio again or /stop to turn off)'),
+      .setDescription('电台模式 · 无限随机播放哈基米歌曲（再次 /radio 或 /stop 关闭）'),
 
     cooldown: 10,
 

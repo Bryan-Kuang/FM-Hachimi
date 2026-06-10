@@ -28,35 +28,35 @@ const createWorldCupCommand = (
 ) => ({
   data: new SlashCommandBuilder()
     .setName('worldcup')
-    .setDescription('2026 World Cup — live scores & schedule')
+    .setDescription('2026 世界杯 — 实时比分与赛程')
     .addSubcommand((sub) =>
       sub
         .setName('subscribe')
-        .setDescription('Post live match updates to a channel (needs Manage Server)')
+        .setDescription('将比赛实时更新推送到指定频道（需要管理服务器权限）')
         .addChannelOption((opt) =>
           opt
             .setName('channel')
-            .setDescription('Channel for live kickoff / goal / full-time updates')
+            .setDescription('接收开球 / 进球 / 完场更新的文字频道')
             .addChannelTypes(ChannelType.GuildText)
             .setRequired(true),
         ),
     )
     .addSubcommand((sub) =>
-      sub.setName('unsubscribe').setDescription('Stop live updates in this server (needs Manage Server)'),
+      sub.setName('unsubscribe').setDescription('关闭本服务器的实时更新（需要管理服务器权限）'),
     )
     .addSubcommand((sub) =>
-      sub.setName('today').setDescription("Today's fixtures and scores"),
+      sub.setName('today').setDescription('查看今天的赛程与比分'),
     )
     .addSubcommand((sub) =>
       sub
         .setName('schedule')
-        .setDescription('Fixtures and scores for a date')
+        .setDescription('查看指定日期的赛程与比分')
         .addStringOption((opt) =>
-          opt.setName('date').setDescription('Date as YYYY-MM-DD (default: today, UTC)').setRequired(false),
+          opt.setName('date').setDescription('日期，格式 YYYY-MM-DD（默认今天，UTC 时区）').setRequired(false),
         ),
     )
     .addSubcommand((sub) =>
-      sub.setName('status').setDescription('Subscription + live-updater health'),
+      sub.setName('status').setDescription('查看订阅状态与实时更新健康状况'),
     ),
 
   async execute(interaction: ChatInputCommandInteraction<'cached'>): Promise<void> {
