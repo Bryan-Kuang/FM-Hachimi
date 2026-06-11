@@ -16,10 +16,11 @@ function espnPayload(events) {
   return { data: { events } };
 }
 
-function event({ id, date, state, detail, clock, home, away, homeScore, awayScore, group, venue }) {
+function event({ id, date, state, detail, clock, home, away, homeScore, awayScore, group, venue, links }) {
   return {
     id,
     date,
+    links,
     status: { displayClock: clock, type: { state, detail, description: detail } },
     competitions: [
       {
@@ -60,6 +61,19 @@ describe("WorldCupSource", () => {
     });
     expect(matches[1]).toMatchObject({ id: "2", status: "live", clock: "67'", home: { score: 2 }, away: { score: 1 } });
     expect(matches[2]).toMatchObject({ id: "3", status: "final", home: { score: 2 }, away: { score: 1 } });
+  });
+
+  test("uses the source's match-page link, with a gameId fallback", async () => {
+    const httpGet = jest.fn().mockResolvedValue(
+      espnPayload([
+        event({ id: "1", date: "2026-06-11T19:00Z", state: "pre", detail: "Scheduled", clock: "0'", home: "Mexico", away: "South Africa", homeScore: 0, awayScore: 0, links: [{ href: "https://www.espn.com/soccer/match/_/gameId/1/mexico-south-africa" }] }),
+        event({ id: "2", date: "2026-06-11T22:00Z", state: "in", detail: "67'", clock: "67'", home: "Argentina", away: "Saudi Arabia", homeScore: 2, awayScore: 1 }),
+      ])
+    );
+    const matches = await makeSource(httpGet).fetchMatchesForDate("20260611");
+
+    expect(matches[0].link).toBe("https://www.espn.com/soccer/match/_/gameId/1/mexico-south-africa");
+    expect(matches[1].link).toBe("https://www.espn.com/soccer/match/_/gameId/2");
   });
 
   test("passes the date param + timeout to the HTTP getter", async () => {

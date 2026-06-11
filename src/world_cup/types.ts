@@ -26,6 +26,8 @@ export interface Match {
   /** Group/round label, e.g. "Group A" (best-effort; may be empty). */
   group: string;
   venue: string;
+  /** Live match page URL (from the source, with an id-based fallback). */
+  link: string;
 }
 
 /** Persisted per-match snapshot used to diff successive polls. */
