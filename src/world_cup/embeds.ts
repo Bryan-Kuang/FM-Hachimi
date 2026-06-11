@@ -10,15 +10,16 @@ import type { Match, EventKind } from './types';
 const WC_COLOR = 0x326295; // FIFA blue
 const LIVE_COLOR = 0x1DB954; // green for live events
 
-/** "🔴 67' · Argentina 2–1 Saudi Arabia · Group C" */
+/** "🔴 67' · [Argentina 2–1 Saudi Arabia](match page) · Group C" */
 function matchLine(m: Match): string {
   const score = `${m.home.name} ${m.home.score}–${m.away.score} ${m.away.name}`;
+  const linked = m.link ? `[${score}](${m.link})` : score;
   let prefix: string;
   if (m.status === 'live') prefix = `🔴 ${m.clock || 'LIVE'}`;
   else if (m.status === 'final') prefix = '✅ FT';
   else prefix = `⏰ ${formatKickoff(m.utcDate)}`;
   const group = m.group ? ` · ${m.group}` : '';
-  return `${prefix} · **${score}**${group}`;
+  return `${prefix} · **${linked}**${group}`;
 }
 
 function formatKickoff(utcDate: string): string {
@@ -49,18 +50,23 @@ function buildEventEmbed(m: Match, kind: EventKind, side?: 'home' | 'away'): Emb
   let title: string;
 
   if (kind === 'kickoff') {
-    title = `🟢 Kickoff — ${m.home.name} vs ${m.away.name}${group}`;
+    title = `🟢 World Cup kickoff — ${m.home.name} vs ${m.away.name}${group}`;
   } else if (kind === 'goal') {
     const scorer = side === 'home' ? m.home.name : m.away.name;
-    title = `⚽ GOAL! ${scorer} — ${score}`;
+    title = `⚽ World Cup GOAL! ${scorer} — ${score}`;
   } else {
-    title = `🏁 Full-time — ${score}${group}`;
+    title = `🏁 World Cup full-time — ${score}${group}`;
   }
 
   const embed = new EmbedBuilder()
     .setColor(kind === 'fulltime' ? WC_COLOR : LIVE_COLOR)
     .setTitle(title.slice(0, 256));
-  if (kind === 'goal' && m.clock) embed.setDescription(`${m.clock}${group}`);
+  if (m.link) embed.setURL(m.link);
+
+  const lines: string[] = [];
+  if (kind === 'goal' && m.clock) lines.push(`${m.clock}${group}`);
+  if (m.link) lines.push(`🔗 [Follow live](${m.link})`);
+  if (lines.length > 0) embed.setDescription(lines.join('\n'));
   return embed;
 }
 

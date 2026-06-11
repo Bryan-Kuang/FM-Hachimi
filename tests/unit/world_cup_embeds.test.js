@@ -14,6 +14,10 @@ function lastDescription() {
   const builder = EmbedBuilder.mock.results[EmbedBuilder.mock.results.length - 1].value;
   return builder.setDescription.mock.calls[0]?.[0];
 }
+function lastURL() {
+  const builder = EmbedBuilder.mock.results[EmbedBuilder.mock.results.length - 1].value;
+  return builder.setURL.mock.calls[0]?.[0];
+}
 
 function mk(overrides = {}) {
   return {
@@ -26,6 +30,7 @@ function mk(overrides = {}) {
     away: { name: "Saudi Arabia", abbrev: "KSA", score: 1 },
     group: "Group C",
     venue: "MetLife",
+    link: "https://www.espn.com/soccer/match/_/gameId/m1",
     ...overrides,
   };
 }
@@ -35,7 +40,7 @@ beforeEach(() => jest.clearAllMocks());
 describe("buildEventEmbed", () => {
   test("kickoff names both teams", () => {
     WcEmbeds.buildEventEmbed(mk({ status: "live" }), "kickoff");
-    expect(lastTitle()).toContain("Kickoff");
+    expect(lastTitle()).toContain("kickoff");
     expect(lastTitle()).toContain("Argentina");
     expect(lastTitle()).toContain("Saudi Arabia");
   });
@@ -49,8 +54,24 @@ describe("buildEventEmbed", () => {
 
   test("full-time shows the final score", () => {
     WcEmbeds.buildEventEmbed(mk({ status: "final" }), "fulltime");
-    expect(lastTitle()).toContain("Full-time");
+    expect(lastTitle()).toContain("full-time");
     expect(lastTitle()).toContain("2–1");
+  });
+
+  test.each(["kickoff", "goal", "fulltime"])("%s title says it's the World Cup", (kind) => {
+    WcEmbeds.buildEventEmbed(mk(), kind, "home");
+    expect(lastTitle()).toContain("World Cup");
+  });
+
+  test("links to the live match page (title URL + description link)", () => {
+    WcEmbeds.buildEventEmbed(mk(), "goal", "away");
+    expect(lastURL()).toBe("https://www.espn.com/soccer/match/_/gameId/m1");
+    expect(lastDescription()).toContain("(https://www.espn.com/soccer/match/_/gameId/m1)");
+  });
+
+  test("omits the link gracefully when the match has none", () => {
+    WcEmbeds.buildEventEmbed(mk({ link: "" }), "kickoff");
+    expect(lastURL()).toBeUndefined();
   });
 });
 
@@ -68,6 +89,7 @@ describe("buildMatchListEmbed", () => {
     expect(desc).toContain("🔴"); // live marker
     expect(desc).toContain("✅ FT"); // final marker
     expect(desc.split("\n")).toHaveLength(3);
+    expect(desc).toContain("](https://www.espn.com/soccer/match/_/gameId/m1)"); // live link per line
   });
 
   test("empty list renders a friendly message", () => {

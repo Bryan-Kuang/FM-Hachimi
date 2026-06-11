@@ -103,6 +103,10 @@ class WorldCupSource {
         away: side(awayC),
         group: String(comp?.notes?.[0]?.headline || ''),
         venue: String(comp?.venue?.fullName || ''),
+        link: String(
+          (Array.isArray(e.links) && e.links[0]?.href)
+            || `https://www.espn.com/soccer/match/_/gameId/${e.id}`,
+        ),
       };
     } catch (err: unknown) {
       logger.warn('WorldCupSource: failed to parse an event, skipping', {
