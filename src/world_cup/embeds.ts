@@ -44,7 +44,7 @@ function buildMatchListEmbed(matches: Match[], label: string): EmbedBuilder {
 }
 
 /** A single live event push (kickoff / goal / full-time). */
-function buildEventEmbed(m: Match, kind: EventKind, side?: 'home' | 'away'): EmbedBuilder {
+function buildEventEmbed(m: Match, kind: EventKind): EmbedBuilder {
   const score = `${m.home.name} ${m.home.score}–${m.away.score} ${m.away.name}`;
   const group = m.group ? ` (${m.group})` : '';
   let title: string;
@@ -52,8 +52,7 @@ function buildEventEmbed(m: Match, kind: EventKind, side?: 'home' | 'away'): Emb
   if (kind === 'kickoff') {
     title = `🟢 World Cup kickoff — ${m.home.name} vs ${m.away.name}${group}`;
   } else if (kind === 'goal') {
-    const scorer = side === 'home' ? m.home.name : m.away.name;
-    title = `⚽ World Cup GOAL! ${scorer} — ${score}`;
+    title = `⚽ World Cup GOAL! ${score}`;
   } else {
     title = `🏁 World Cup full-time — ${score}${group}`;
   }

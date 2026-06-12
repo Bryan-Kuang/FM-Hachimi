@@ -45,11 +45,12 @@ describe("buildEventEmbed", () => {
     expect(lastTitle()).toContain("Saudi Arabia");
   });
 
-  test("goal names the scoring side and shows the score", () => {
-    WcEmbeds.buildEventEmbed(mk(), "goal", "away");
+  test("goal shows the score without repeating a team name", () => {
+    WcEmbeds.buildEventEmbed(mk(), "goal");
     expect(lastTitle()).toContain("GOAL");
-    expect(lastTitle()).toContain("Saudi Arabia"); // away scored
-    expect(lastTitle()).toContain("2–1");
+    expect(lastTitle()).toContain("Argentina 2–1 Saudi Arabia");
+    expect(lastTitle().match(/Saudi Arabia/g)).toHaveLength(1);
+    expect(lastTitle().match(/Argentina/g)).toHaveLength(1);
   });
 
   test("full-time shows the final score", () => {
@@ -59,12 +60,12 @@ describe("buildEventEmbed", () => {
   });
 
   test.each(["kickoff", "goal", "fulltime"])("%s title says it's the World Cup", (kind) => {
-    WcEmbeds.buildEventEmbed(mk(), kind, "home");
+    WcEmbeds.buildEventEmbed(mk(), kind);
     expect(lastTitle()).toContain("World Cup");
   });
 
   test("links to the live match page (title URL + description link)", () => {
-    WcEmbeds.buildEventEmbed(mk(), "goal", "away");
+    WcEmbeds.buildEventEmbed(mk(), "goal");
     expect(lastURL()).toBe("https://www.espn.com/soccer/match/_/gameId/m1");
     expect(lastDescription()).toContain("(https://www.espn.com/soccer/match/_/gameId/m1)");
   });

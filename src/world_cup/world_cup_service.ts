@@ -40,7 +40,6 @@ interface DiscordClient {
 interface DetectedEvent {
   match: Match;
   kind: EventKind;
-  side?: 'home' | 'away';
 }
 
 const FAILURE_BACKOFF_THRESHOLD = 3;
@@ -275,8 +274,9 @@ class WorldCupService {
       if (prev.status === 'scheduled' && m.status === 'live') {
         events.push({ match: m, kind: 'kickoff' });
       }
-      if (m.home.score > prev.homeScore) events.push({ match: m, kind: 'goal', side: 'home' });
-      if (m.away.score > prev.awayScore) events.push({ match: m, kind: 'goal', side: 'away' });
+      // One event per scoring side so simultaneous goals each get a push.
+      if (m.home.score > prev.homeScore) events.push({ match: m, kind: 'goal' });
+      if (m.away.score > prev.awayScore) events.push({ match: m, kind: 'goal' });
       if (prev.status !== 'final' && m.status === 'final') {
         events.push({ match: m, kind: 'fulltime' });
       }
@@ -298,7 +298,7 @@ class WorldCupService {
       if (!channel) continue;
       for (const ev of events) {
         try {
-          const embed = WcEmbeds.buildEventEmbed(ev.match, ev.kind, ev.side);
+          const embed = WcEmbeds.buildEventEmbed(ev.match, ev.kind);
           await channel.send({ embeds: [embed] });
         } catch (err: unknown) {
           logger.error('WorldCup: failed to post live event', {
