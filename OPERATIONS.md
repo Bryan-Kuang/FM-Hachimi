@@ -8,7 +8,9 @@ Runbook for deploying and operating F.M. Hachimi on the VPS.
 - **Runtime:** single Docker container (`docker compose`), healthchecked, metrics on `127.0.0.1:9090` (loopback only).
 - **State lives on the host (bind mounts), never in the image:**
   - `secrets/` — `youtube_cookies.txt`, `bilibili_cookies.txt` (mode 600)
-  - `data/` — `daily_hachimi.json` (must survive rebuilds)
+  - `data/` — `daily_hachimi.json` (must survive rebuilds); `resume_state.json`
+    (playback snapshot written on shutdown so active sessions resume after a deploy —
+    consumed on startup, discarded if older than `RESUME_MAX_AGE_MS`, default 15 min)
   - `logs/`
   - `~/.fm-hachimi-youtube/profile` → mounted read-only at `/app/youtube-browser-profile`
 
