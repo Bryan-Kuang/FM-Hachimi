@@ -45,9 +45,9 @@ describe("buildEventEmbed", () => {
     expect(lastTitle()).toContain("Saudi Arabia");
   });
 
-  test("goal shows the score without repeating a team name", () => {
+  test("goal leads with GOAL! and shows the score without repeating a team name", () => {
     WcEmbeds.buildEventEmbed(mk(), "goal");
-    expect(lastTitle()).toContain("GOAL");
+    expect(lastTitle()).toMatch(/^⚽ GOAL!/);
     expect(lastTitle()).toContain("Argentina 2–1 Saudi Arabia");
     expect(lastTitle().match(/Saudi Arabia/g)).toHaveLength(1);
     expect(lastTitle().match(/Argentina/g)).toHaveLength(1);

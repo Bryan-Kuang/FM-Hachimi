@@ -52,7 +52,7 @@ function buildEventEmbed(m: Match, kind: EventKind): EmbedBuilder {
   if (kind === 'kickoff') {
     title = `🟢 World Cup kickoff — ${m.home.name} vs ${m.away.name}${group}`;
   } else if (kind === 'goal') {
-    title = `⚽ World Cup GOAL! ${score}`;
+    title = `⚽ GOAL! ${score} — World Cup`;
   } else {
     title = `🏁 World Cup full-time — ${score}${group}`;
   }
