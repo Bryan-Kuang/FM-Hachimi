@@ -186,6 +186,42 @@ describe("live-event diffing", () => {
   });
 });
 
+describe("poll cadence", () => {
+  // _nextDelay is TS-private; tests exercise it directly (compile-time only).
+  async function delayAfterPoll(matches) {
+    const source = makeSource(matches);
+    const { client } = makeClient();
+    const service = startService(makeConfig(dir), source, client);
+    await service.pollOnce();
+    return service._nextDelay();
+  }
+
+  test("live match → live cadence", async () => {
+    expect(await delayAfterPoll([mk("live", 0, 0)])).toBe(60000);
+  });
+
+  test("no matches at all → idle cadence", async () => {
+    expect(await delayAfterPoll([])).toBe(600000);
+  });
+
+  test("wakes for the next kickoff instead of idling through it", async () => {
+    const inFiveMin = { ...mk("scheduled", 0, 0), utcDate: new Date(Date.now() + 5 * 60000).toISOString() };
+    const delay = await delayAfterPoll([inFiveMin]);
+    expect(delay).toBeGreaterThan(60000);
+    expect(delay).toBeLessThanOrEqual(5 * 60000);
+  });
+
+  test("a kickoff that is due but not started yet → live cadence", async () => {
+    const dueNow = { ...mk("scheduled", 0, 0), utcDate: new Date(Date.now() - 60000).toISOString() };
+    expect(await delayAfterPoll([dueNow])).toBe(60000);
+  });
+
+  test("a kickoff more than 2h overdue is treated as postponed → idle cadence", async () => {
+    const postponed = { ...mk("scheduled", 0, 0), utcDate: new Date(Date.now() - 3 * 3600000).toISOString() };
+    expect(await delayAfterPoll([postponed])).toBe(600000);
+  });
+});
+
 describe("subscriptions", () => {
   test("set/get/remove and persistence across a restart", () => {
     const { client } = makeClient();
