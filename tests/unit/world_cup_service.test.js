@@ -14,7 +14,7 @@ jest.mock("../../src/services/logger_service", () => ({
 // Here we only care WHICH events the diff produced, so return a tagged object.
 jest.mock("../../src/world_cup/embeds", () => ({
   buildMatchListEmbed: jest.fn(() => ({ kind: "list" })),
-  buildEventEmbed: jest.fn((match, kind, side) => ({ kind, side, matchId: match.id })),
+  buildEventEmbed: jest.fn((match, kind) => ({ kind, matchId: match.id })),
   matchLine: jest.fn(() => ""),
 }));
 
@@ -64,7 +64,7 @@ function makeClient() {
   return { client, send };
 }
 
-// Each send carries one tagged embed: { kind, side, matchId }.
+// Each send carries one tagged embed: { kind, matchId }.
 function eventsOf(send) {
   return send.mock.calls.map((c) => c[0].embeds[0]);
 }
@@ -103,7 +103,7 @@ describe("window gate", () => {
 });
 
 describe("live-event diffing", () => {
-  test("emits exactly one kickoff, one goal (correct side), one full-time across a match", async () => {
+  test("emits exactly one kickoff, one goal, one full-time across a match", async () => {
     const source = makeSource();
     const { client, send } = makeClient();
     const service = startService(makeConfig(dir), source, client);
@@ -124,10 +124,22 @@ describe("live-event diffing", () => {
 
     const events = eventsOf(send);
     expect(events.filter((e) => e.kind === "kickoff")).toHaveLength(1);
-    const goals = events.filter((e) => e.kind === "goal");
-    expect(goals).toHaveLength(1);
-    expect(goals[0].side).toBe("home"); // home side scored
+    expect(events.filter((e) => e.kind === "goal")).toHaveLength(1);
     expect(events.filter((e) => e.kind === "fulltime")).toHaveLength(1);
+  });
+
+  test("both sides scoring between polls produces two goal messages", async () => {
+    const source = makeSource();
+    const { client, send } = makeClient();
+    const service = startService(makeConfig(dir), source, client);
+    service.setSubscription("g1", "c1");
+
+    source.fetchMatchesForDate.mockResolvedValue([mk("live", 0, 0)]);
+    await service.pollOnce(); // seed
+    source.fetchMatchesForDate.mockResolvedValue([mk("live", 1, 1)]);
+    await service.pollOnce(); // a goal for each side in one poll
+
+    expect(eventsOf(send).filter((e) => e.kind === "goal")).toHaveLength(2);
   });
 
   test("a match first seen already live is seeded silently (no replayed kickoff)", async () => {
