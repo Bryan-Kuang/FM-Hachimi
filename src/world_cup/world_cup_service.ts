@@ -60,6 +60,9 @@ class WorldCupService {
 
   private health: { lastOkAt: number; lastError: string | null; consecutiveFailures: number };
 
+  /** Formats a timestamp as YYYY-MM-DD in the configured timezone. */
+  private readonly dayFormatter: Intl.DateTimeFormat;
+
   private readonly subsFile: string;
   private readonly stateFile: string;
 
@@ -76,6 +79,14 @@ class WorldCupService {
     this.stopped = false;
     this.hadAnyLive = false;
     this.health = { lastOkAt: 0, lastError: null, consecutiveFailures: 0 };
+
+    const dayFormat: Intl.DateTimeFormatOptions = { year: 'numeric', month: '2-digit', day: '2-digit' };
+    try {
+      this.dayFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: config.timezone, ...dayFormat });
+    } catch {
+      logger.warn('WorldCup: invalid timezone, falling back to UTC', { timezone: config.timezone });
+      this.dayFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC', ...dayFormat });
+    }
 
     this.subsFile = path.join(config.dataDir, 'subscriptions.json');
     this.stateFile = path.join(config.dataDir, 'state.json');
@@ -167,18 +178,32 @@ class WorldCupService {
   // On-demand reads (the backup path — independent of the poller)
   // ---------------------------------------------------------------------------
 
-  /** Matches for a date (YYYYMMDD, UTC), cached ~60s. Throws if the source fails. */
+  /**
+   * Matches whose kickoff falls on the given calendar day (YYYYMMDD, in the
+   * configured timezone), cached ~60s. Throws if the source fails.
+   *
+   * The source groups its scoreboard by ITS OWN calendar day (ESPN uses US
+   * Eastern), which rarely lines up with ours — e.g. the Jun 11 22:00 ET
+   * kickoff is 02:00 UTC Jun 12 and sits on ESPN's Jun 11 board. So one local
+   * day can span two boards: fetch the adjacent boards too and filter by each
+   * match's own kickoff time instead of trusting the board it came from.
+   */
   async getMatchesForDate(yyyymmdd: string): Promise<Match[]> {
     const cached = this.cache.get(yyyymmdd);
     if (cached) return cached;
-    const matches = await this.source.fetchMatchesForDate(yyyymmdd);
+    const all = await this._fetchBoards([this._shiftDay(yyyymmdd, -1), yyyymmdd, this._shiftDay(yyyymmdd, 1)]);
+    const matches = all.filter((m) => {
+      const t = Date.parse(m.utcDate);
+      // Keep matches with unparseable dates rather than risk hiding them.
+      return Number.isFinite(t) ? this._dayKey(t) === yyyymmdd : true;
+    });
     this.cache.set(yyyymmdd, matches);
     return matches;
   }
 
-  /** Today's matches (UTC). Throws if the source fails. */
+  /** Today's matches (in the configured timezone). Throws if the source fails. */
   async getToday(): Promise<Match[]> {
-    return this.getMatchesForDate(this._utcDate(0));
+    return this.getMatchesForDate(this._todayKey(0));
   }
 
   // ---------------------------------------------------------------------------
@@ -304,12 +329,20 @@ class WorldCupService {
     }
   }
 
-  /** Fetch today + tomorrow (UTC-boundary safety), de-duped by match id. */
+  /**
+   * Fetch yesterday + today + tomorrow boards, de-duped by match id. Yesterday
+   * matters: a match that kicked off late on the source's previous calendar day
+   * (see getMatchesForDate) is still live now and must stay in the diff window.
+   */
   private async _fetchWindow(): Promise<Match[]> {
-    const dates = [this._utcDate(0), this._utcDate(1)];
+    return this._fetchBoards([this._todayKey(-1), this._todayKey(0), this._todayKey(1)]);
+  }
+
+  /** Fetch several scoreboard days, concatenated and de-duped by match id. */
+  private async _fetchBoards(days: string[]): Promise<Match[]> {
     const seen = new Set<string>();
     const all: Match[] = [];
-    for (const d of dates) {
+    for (const d of days) {
       const ms = await this.source.fetchMatchesForDate(d);
       for (const m of ms) {
         if (!seen.has(m.id)) {
@@ -321,8 +354,23 @@ class WorldCupService {
     return all;
   }
 
-  private _utcDate(offsetDays: number): string {
-    const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000);
+  /** YYYYMMDD for a timestamp in the configured timezone. */
+  private _dayKey(t: number): string {
+    return this.dayFormatter.format(t).replace(/-/g, '');
+  }
+
+  private _todayKey(offsetDays: number): string {
+    return this._shiftDay(this._dayKey(Date.now()), offsetDays);
+  }
+
+  /** Shift a YYYYMMDD day key by whole days (pure calendar arithmetic). */
+  private _shiftDay(yyyymmdd: string, offsetDays: number): string {
+    const base = Date.UTC(
+      Number(yyyymmdd.slice(0, 4)),
+      Number(yyyymmdd.slice(4, 6)) - 1,
+      Number(yyyymmdd.slice(6, 8)),
+    );
+    const d = new Date(base + offsetDays * 24 * 60 * 60 * 1000);
     const y = d.getUTCFullYear();
     const m = String(d.getUTCMonth() + 1).padStart(2, '0');
     const day = String(d.getUTCDate()).padStart(2, '0');

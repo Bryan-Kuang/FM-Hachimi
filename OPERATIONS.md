@@ -135,6 +135,12 @@ responding after `WORLD_CUP_END`.
   `today`, `schedule date:YYYY-MM-DD`, `status`. The `today`/`schedule` commands
   fetch **independently of the poller** — they are the reliable manual fallback when
   live updates are degraded. `status` shows updater health.
+- **Day boundaries:** "today" and `schedule` dates are calendar days in
+  `WORLD_CUP_TIMEZONE` (default `America/Toronto` — matches venue-evening dates in
+  official listings). ESPN groups its scoreboard by US-Eastern day, so the service
+  fetches adjacent boards and filters by each match's own kickoff time; late
+  kickoffs near midnight UTC are not dropped (e.g. a 22:00 ET match is 02:00 UTC
+  the next day).
 - **State** lives under the persisted `data/` mount (no new mount): `data/world_cup/`
   with `subscriptions.json` (per-guild channel) and `state.json` (last match scores
   for diffing — reloaded on boot so a restart never re-posts past events).

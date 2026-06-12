@@ -27,7 +27,7 @@ function isoDate(offsetDays) {
   return new Date(Date.now() + offsetDays * 86400000).toISOString().slice(0, 10);
 }
 
-function makeConfig(dir, { start, end } = {}) {
+function makeConfig(dir, { start, end, timezone } = {}) {
   return {
     enabled: true,
     startDate: start || isoDate(-1),
@@ -35,14 +35,14 @@ function makeConfig(dir, { start, end } = {}) {
     livePollMs: 60000,
     idlePollMs: 600000,
     dataDir: dir,
-    timezone: "UTC",
+    timezone: timezone || "UTC",
   };
 }
 
 function mk(status, h, a) {
   return {
     id: "m1",
-    utcDate: "2026-06-11T19:00Z",
+    utcDate: new Date().toISOString(), // kicking off "now" → always on today's day key
     status,
     detail: "",
     clock: status === "live" ? "45'" : "",
@@ -198,6 +198,48 @@ describe("backup path (independent of poller)", () => {
     const today = await service.getToday();
     expect(today).toHaveLength(1);
     service.stop();
+  });
+
+  test("finds a match listed on the source's previous day board (date-boundary regression)", async () => {
+    // South Korea–Czechia scenario: kickoff 02:00 UTC Jun 12 sits on ESPN's
+    // Jun 11 (US-Eastern) board. Asking for the UTC day 20260612 must still
+    // find it by also fetching the adjacent boards and filtering by kickoff.
+    const boundaryMatch = { ...mk("live", 1, 0), id: "kor-cze", utcDate: "2026-06-12T02:00:00Z" };
+    const source = {
+      fetchMatchesForDate: jest.fn((d) => Promise.resolve(d === "20260611" ? [boundaryMatch] : [])),
+    };
+    const service = new WorldCupService(makeConfig(dir), source);
+
+    const matches = await service.getMatchesForDate("20260612");
+    expect(matches).toHaveLength(1);
+    expect(matches[0].id).toBe("kor-cze");
+    expect(source.fetchMatchesForDate.mock.calls.map((c) => c[0])).toEqual(["20260611", "20260612", "20260613"]);
+
+    // ...and it is NOT listed under the day it does not belong to.
+    expect(await service.getMatchesForDate("20260611")).toHaveLength(0);
+    service.stop();
+  });
+
+  test("day boundaries follow the configured timezone", async () => {
+    // 02:00 UTC Jun 12 is 22:00 Jun 11 in Toronto → a "June 11" match there.
+    const boundaryMatch = { ...mk("scheduled", 0, 0), id: "kor-cze", utcDate: "2026-06-12T02:00:00Z" };
+    const source = makeSource([boundaryMatch]);
+    const service = new WorldCupService(makeConfig(dir, { timezone: "America/Toronto" }), source);
+
+    expect(await service.getMatchesForDate("20260611")).toHaveLength(1);
+    expect(await service.getMatchesForDate("20260612")).toHaveLength(0);
+    service.stop();
+  });
+
+  test("the poller window includes yesterday's board (late matches stay diffable)", async () => {
+    const source = makeSource([]);
+    const { client } = makeClient();
+    const service = startService(makeConfig(dir), source, client);
+
+    await service.pollOnce();
+    const days = source.fetchMatchesForDate.mock.calls.map((c) => c[0]);
+    expect(days).toHaveLength(3);
+    expect(new Set(days).size).toBe(3); // yesterday, today, tomorrow
   });
 
   test("a failing poll records health degradation but commands still work", async () => {

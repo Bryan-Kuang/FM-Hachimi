@@ -52,7 +52,7 @@ const createWorldCupCommand = (
         .setName('schedule')
         .setDescription('查看指定日期的赛程与比分')
         .addStringOption((opt) =>
-          opt.setName('date').setDescription('日期，格式 YYYY-MM-DD（默认今天，UTC 时区）').setRequired(false),
+          opt.setName('date').setDescription('日期，格式 YYYY-MM-DD（默认今天，按北美东部时间）').setRequired(false),
         ),
     )
     .addSubcommand((sub) =>
