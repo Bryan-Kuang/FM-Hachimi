@@ -129,8 +129,9 @@ responding after `WORLD_CUP_END`.
 - **Data source:** ESPN's public scoreboard JSON (`fifa.world`) — no login, no key,
   the same data backing a public site. Wrapped behind `src/world_cup/source.ts` so
   the crawl target is swappable. `src/world_cup/world_cup_service.ts` polls it
-  (adaptive cadence: ~`livePollMs` while a match is live, else `idlePollMs`), diffs
-  successive polls, and posts only the changes.
+  (adaptive cadence: ~`livePollMs` while a match is live or a kickoff is due; when
+  idle it wakes for the next scheduled kickoff, else `idlePollMs`), diffs successive
+  polls, and posts only the changes.
 - **Commands** (`/worldcup`): `subscribe #channel` / `unsubscribe` (Manage Server),
   `today`, `schedule date:YYYY-MM-DD`, `status`. The `today`/`schedule` commands
   fetch **independently of the poller** — they are the reliable manual fallback when
@@ -147,7 +148,7 @@ responding after `WORLD_CUP_END`.
 - **Env:** `WORLD_CUP_ENABLED` (default true), `WORLD_CUP_START` (`2026-06-11`),
   `WORLD_CUP_END` (`2026-07-21`, exclusive — margin past the Jul 19 final),
   `WORLD_CUP_SOURCE_URL`,
-  `WORLD_CUP_LIVE_POLL_MS` (60000), `WORLD_CUP_IDLE_POLL_MS` (600000),
+  `WORLD_CUP_LIVE_POLL_MS` (15000, min 15000), `WORLD_CUP_IDLE_POLL_MS` (600000),
   `WORLD_CUP_REQUEST_TIMEOUT_MS` (10000), `WORLD_CUP_TIMEZONE`, `WORLD_CUP_DATA_DIR`.
 - **Reset:** `rm -rf ~/bilibili-bot/data/world_cup/*` (re-seeds on next poll;
   subscriptions are lost). To disable mid-tournament: set `WORLD_CUP_ENABLED=false`

@@ -56,6 +56,8 @@ class WorldCupService {
   private pollTimer: ReturnType<typeof setTimeout> | null;
   private stopped: boolean;
   private hadAnyLive: boolean;
+  /** Next upcoming kickoff seen in the last poll (ms epoch; 0 = none). */
+  private nextKickoffAt: number;
 
   private health: { lastOkAt: number; lastError: string | null; consecutiveFailures: number };
 
@@ -77,6 +79,7 @@ class WorldCupService {
     this.pollTimer = null;
     this.stopped = false;
     this.hadAnyLive = false;
+    this.nextKickoffAt = 0;
     this.health = { lastOkAt: 0, lastError: null, consecutiveFailures: 0 };
 
     const dayFormat: Intl.DateTimeFormatOptions = { year: 'numeric', month: '2-digit', day: '2-digit' };
@@ -222,7 +225,15 @@ class WorldCupService {
   private _nextDelay(): number {
     if (!this.isActive()) return this.config.idlePollMs;
     if (this.health.consecutiveFailures >= FAILURE_BACKOFF_THRESHOLD) return this.config.idlePollMs;
-    return this.hadAnyLive ? this.config.livePollMs : this.config.idlePollMs;
+    if (this.hadAnyLive) return this.config.livePollMs;
+    // No live match yet: wake at the next kickoff (then live cadence while it's
+    // due-but-not-started) instead of idling a full cycle through it — an idle
+    // cycle is long enough to miss a kickoff and the first goals entirely.
+    if (this.nextKickoffAt > 0) {
+      const untilKickoff = this.nextKickoffAt - Date.now();
+      return Math.min(this.config.idlePollMs, Math.max(this.config.livePollMs, untilKickoff));
+    }
+    return this.config.idlePollMs;
   }
 
   /**
@@ -249,6 +260,7 @@ class WorldCupService {
     }
 
     this.hadAnyLive = matches.some((m) => m.status === 'live');
+    this.nextKickoffAt = this._nextKickoff(matches);
     const { events, changed } = this._diff(matches);
     if (changed) this._saveState();
     if (events.length > 0) await this._broadcast(events);
@@ -338,12 +350,12 @@ class WorldCupService {
     return this._fetchBoards([this._todayKey(-1), this._todayKey(0), this._todayKey(1)]);
   }
 
-  /** Fetch several scoreboard days, concatenated and de-duped by match id. */
+  /** Fetch several scoreboard days in parallel, concatenated and de-duped by match id. */
   private async _fetchBoards(days: string[]): Promise<Match[]> {
+    const boards = await Promise.all(days.map((d) => this.source.fetchMatchesForDate(d)));
     const seen = new Set<string>();
     const all: Match[] = [];
-    for (const d of days) {
-      const ms = await this.source.fetchMatchesForDate(d);
+    for (const ms of boards) {
       for (const m of ms) {
         if (!seen.has(m.id)) {
           seen.add(m.id);
@@ -352,6 +364,23 @@ class WorldCupService {
       }
     }
     return all;
+  }
+
+  /**
+   * Earliest kickoff worth waking up for (ms epoch; 0 = none): the soonest
+   * scheduled match, including ones already due but not flipped to live yet.
+   * Kickoffs more than 2h overdue are treated as postponed and ignored so a
+   * stale fixture can't pin the poller at live cadence all day.
+   */
+  private _nextKickoff(matches: Match[], now: number = Date.now()): number {
+    let next = 0;
+    for (const m of matches) {
+      if (m.status !== 'scheduled') continue;
+      const t = Date.parse(m.utcDate);
+      if (!Number.isFinite(t) || t < now - 2 * 60 * 60 * 1000) continue;
+      if (next === 0 || t < next) next = t;
+    }
+    return next;
   }
 
   /** YYYYMMDD for a timestamp in the configured timezone. */

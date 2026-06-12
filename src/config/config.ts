@@ -330,7 +330,7 @@ const config: BotConfig = {
     endDate: process.env.WORLD_CUP_END || "2026-07-21",
     sourceUrl: process.env.WORLD_CUP_SOURCE_URL
       || "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard",
-    livePollMs: Math.max(15000, parseIntegerEnv(process.env.WORLD_CUP_LIVE_POLL_MS, 60 * 1000)),
+    livePollMs: Math.max(15000, parseIntegerEnv(process.env.WORLD_CUP_LIVE_POLL_MS, 15 * 1000)),
     idlePollMs: Math.max(60000, parseIntegerEnv(process.env.WORLD_CUP_IDLE_POLL_MS, 10 * 60 * 1000)),
     requestTimeoutMs: Math.max(1000, parseIntegerEnv(process.env.WORLD_CUP_REQUEST_TIMEOUT_MS, 10000)),
     dataDir: process.env.WORLD_CUP_DATA_DIR || path.join(process.cwd(), "data", "world_cup"),
