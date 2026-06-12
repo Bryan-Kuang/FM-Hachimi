@@ -516,7 +516,8 @@ class AudioPlayer {
     return this.playCurrentTrack();
   }
 
-  async playCurrentTrack(): Promise<boolean> {
+  async playCurrentTrack(options: { startAtSeconds?: number } = {}): Promise<boolean> {
+    const startAtSeconds = Math.max(0, options.startAtSeconds ?? 0);
     if (!this.currentTrack) {
       logger.warn('No current track to play');
       this._enterIdle();
@@ -576,13 +577,16 @@ class AudioPlayer {
       }
 
       logger.debug('Creating audio resource for playback');
-      const audioResource = await this.createAudioResource(this.currentTrack.audioUrl);
+      const audioResource = await this.createAudioResource(this.currentTrack.audioUrl, startAtSeconds);
       if (!audioResource) {
         throw new Error('Failed to create audio resource - resource is null');
       }
 
       logger.debug('Playing audio resource');
-      this._accumulatedPlayMs = 0;
+      // Seed the progress clock with the seek offset so getCurrentTime() and
+      // the full-track detection in _handleIdle() count the part of the track
+      // that played before the restart.
+      this._accumulatedPlayMs = startAtSeconds * 1000;
       this._currentPlayStartedAt = null;
       this.audioPlayer.play(audioResource);
 
@@ -614,7 +618,7 @@ class AudioPlayer {
 
   // ── FFmpeg audio resource ────────────────────────────────────────────
 
-  async createAudioResource(audioUrl: string): Promise<AudioResource | null> {
+  async createAudioResource(audioUrl: string, startAtSeconds = 0): Promise<AudioResource | null> {
     // Lazy FFmpeg availability check
     if (!this._ffmpegChecked) {
       await checkFFmpegAvailability();
@@ -660,8 +664,14 @@ class AudioPlayer {
           ? ['-af', config.audio.audioFilter]
           : [];
 
+        // Input-side seek (-ss before -i): used when resuming a track mid-way
+        // after a restart. Must precede -i to seek via byte ranges instead of
+        // decoding from the start.
+        const seekArgs = startAtSeconds > 0 ? ['-ss', String(startAtSeconds)] : [];
+
         const ffmpegProcess = spawn('ffmpeg', [
           ...networkInputArgs,
+          ...seekArgs,
           // Reduced from 10M/50M — Bilibili/YouTube serve well-known containers;
           // lower values shave 1-2s off first-byte latency.
           '-analyzeduration', '2000000',
