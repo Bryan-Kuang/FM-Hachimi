@@ -230,21 +230,20 @@ class ResumeService {
       return false;
     }
 
-    // Don't rejoin a channel nobody is listening in. Members may be
-    // unavailable on partial caches — in that case proceed rather than skip.
-    const members = voiceChannel.members;
-    if (members && typeof members.values === 'function') {
-      let humans = 0;
-      for (const member of members.values()) {
-        if (!member?.user?.bot) humans++;
-      }
-      if (humans === 0) {
-        logger.info('Resume skipped: voice channel is empty', {
-          guildId: state.guildId,
-          channelId: state.voiceChannelId,
-        });
-        return false;
-      }
+    // Don't rejoin a channel nobody is listening in. channel.members can't
+    // be trusted here: it only includes occupants whose GuildMember is
+    // cached, and right after startup the member cache holds only the bot
+    // (no GuildMembers intent) — so every human is filtered out and the
+    // channel looks empty. Count voice states instead, excluding ourselves
+    // and treating occupants with no cached member as humans: a rare resume
+    // into a bots-only channel beats never resuming at all.
+    const listeners = this.countListeners(client, voiceChannel);
+    if (listeners === 0) {
+      logger.info('Resume skipped: voice channel is empty', {
+        guildId: state.guildId,
+        channelId: state.voiceChannelId,
+      });
+      return false;
     }
 
     const tracks = (state.tracks || []).map((raw: any) => {
@@ -300,6 +299,26 @@ class ResumeService {
     });
 
     return true;
+  }
+
+  /**
+   * Number of listeners in the voice channel, derived from the guild's voice
+   * state cache (populated by GUILD_CREATE even when member objects aren't).
+   * Returns null when voice states are unavailable — callers should proceed
+   * rather than skip.
+   */
+  private countListeners(client: any, voiceChannel: any): number | null {
+    const voiceStates = voiceChannel.guild?.voiceStates?.cache;
+    if (!voiceStates || typeof voiceStates.values !== 'function') return null;
+
+    let listeners = 0;
+    for (const voiceState of voiceStates.values()) {
+      if (voiceState?.channelId !== voiceChannel.id) continue;
+      if (voiceState.id === client.user?.id) continue; // our own stale pre-restart state
+      if (voiceState.member?.user?.bot) continue;
+      listeners++; // human, or occupant with no cached member — assume human
+    }
+    return listeners;
   }
 
   private async announceResume(client: any, state: GuildResumeState, track: any): Promise<void> {

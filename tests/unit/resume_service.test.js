@@ -53,17 +53,29 @@ function makeSessionManager() {
   };
 }
 
-function makeVoiceChannel({ humans = 1 } = {}) {
-  const members = new Map();
-  members.set('bot-id', { user: { bot: true } });
+function makeVoiceChannel({ humans = 1, membersCached = true, bots = 1 } = {}) {
+  // Mirrors discord.js: occupancy lives in guild.voiceStates.cache, and each
+  // voice state's .member resolves from the guild member cache — which is
+  // empty right after startup (no GuildMembers intent).
+  const voiceStates = new Map();
+  for (let i = 0; i < bots; i++) {
+    voiceStates.set(`bot-${i}`, {
+      id: `bot-${i}`,
+      channelId: 'vc-1',
+      member: membersCached ? { user: { bot: true } } : null,
+    });
+  }
   for (let i = 0; i < humans; i++) {
-    members.set(`user-${i}`, { user: { bot: false } });
+    voiceStates.set(`user-${i}`, {
+      id: `user-${i}`,
+      channelId: 'vc-1',
+      member: membersCached ? { user: { bot: false } } : null,
+    });
   }
   return {
     id: 'vc-1',
     isVoiceBased: () => true,
-    members,
-    guild: { id: 'g1', voiceAdapterCreator: {} },
+    guild: { id: 'g1', voiceAdapterCreator: {}, voiceStates: { cache: voiceStates } },
   };
 }
 
@@ -218,6 +230,7 @@ describe('ResumeService', () => {
       const textChannel = { send: jest.fn().mockResolvedValue(undefined) };
       const client = {
         isReady: () => true,
+        user: { id: 'bot-0' },
         channels: {
           fetch: jest.fn(async (id) => {
             if (id === 'vc-1') return voiceChannel;
@@ -270,6 +283,33 @@ describe('ResumeService', () => {
       expect(result).toEqual({ restored: 0, skipped: 1 });
       expect(player.joinVoiceChannel).not.toHaveBeenCalled();
       expect(player.playCurrentTrack).not.toHaveBeenCalled();
+    });
+
+    test('resumes when occupants exist but their members are not cached yet', async () => {
+      // Right after startup the guild member cache holds only the bot, so
+      // channel.members is empty even though humans are connected. Occupancy
+      // must come from voice states, treating unknown occupants as humans.
+      persistSnapshot();
+      const { deps, player } = makeDeps({
+        voiceChannel: makeVoiceChannel({ humans: 1, membersCached: false }),
+      });
+
+      const result = await service.restore(deps);
+
+      expect(result).toEqual({ restored: 1, skipped: 0 });
+      expect(player.playCurrentTrack).toHaveBeenCalledWith({ startAtSeconds: 42 });
+    });
+
+    test('skips when only the bot itself remains and members are uncached', async () => {
+      persistSnapshot();
+      const { deps, player } = makeDeps({
+        voiceChannel: makeVoiceChannel({ humans: 0, membersCached: false }),
+      });
+
+      const result = await service.restore(deps);
+
+      expect(result).toEqual({ restored: 0, skipped: 1 });
+      expect(player.joinVoiceChannel).not.toHaveBeenCalled();
     });
 
     test('skips when the voice channel no longer exists', async () => {
