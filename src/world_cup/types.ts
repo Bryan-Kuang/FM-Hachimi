@@ -52,6 +52,8 @@ export interface WorldCupServiceConfig {
   idlePollMs: number;
   dataDir: string;
   timezone: string;
+  /** Free live-stream destination linked from messages (empty disables the link). */
+  streamUrl: string;
 }
 
 export interface WorldCupHealth {

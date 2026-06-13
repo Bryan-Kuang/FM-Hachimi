@@ -145,9 +145,13 @@ responding after `WORLD_CUP_END`.
 - **State** lives under the persisted `data/` mount (no new mount): `data/world_cup/`
   with `subscriptions.json` (per-guild channel) and `state.json` (last match scores
   for diffing — reloaded on boot so a restart never re-posts past events).
+- **Links:** message titles and a `📺 Watch live on Rednote` line point to the free
+  stream (`WORLD_CUP_STREAM_URL`, default `https://www.xiaohongshu.com/worldcup26` —
+  Rednote streams all 104 matches free); the ESPN match page stays as the
+  `📊 Match stats` link. Set `WORLD_CUP_STREAM_URL=` (empty) to drop the stream link.
 - **Env:** `WORLD_CUP_ENABLED` (default true), `WORLD_CUP_START` (`2026-06-11`),
   `WORLD_CUP_END` (`2026-07-21`, exclusive — margin past the Jul 19 final),
-  `WORLD_CUP_SOURCE_URL`,
+  `WORLD_CUP_SOURCE_URL`, `WORLD_CUP_STREAM_URL`,
   `WORLD_CUP_LIVE_POLL_MS` (15000, min 15000), `WORLD_CUP_IDLE_POLL_MS` (600000),
   `WORLD_CUP_REQUEST_TIMEOUT_MS` (10000), `WORLD_CUP_TIMEZONE`, `WORLD_CUP_DATA_DIR`.
 - **Reset:** `rm -rf ~/bilibili-bot/data/world_cup/*` (re-seeds on next poll;

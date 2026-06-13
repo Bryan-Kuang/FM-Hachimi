@@ -113,6 +113,8 @@ interface WorldCupConfig {
   endDate: string;
   /** ESPN public scoreboard endpoint (no auth). `?dates=YYYYMMDD` is appended. */
   sourceUrl: string;
+  /** Free live-stream destination linked from messages (empty disables the link). */
+  streamUrl: string;
   /** Poll cadence while any match is live. */
   livePollMs: number;
   /** Poll cadence when no match is live (and the back-off cadence on repeated failure). */
@@ -330,6 +332,10 @@ const config: BotConfig = {
     endDate: process.env.WORLD_CUP_END || "2026-07-21",
     sourceUrl: process.env.WORLD_CUP_SOURCE_URL
       || "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard",
+    // Rednote streams all 104 matches for free; messages link here as the
+    // primary watch-live destination (ESPN match pages serve as stats links).
+    // ?? not ||: setting the env var to "" deliberately disables the link.
+    streamUrl: process.env.WORLD_CUP_STREAM_URL ?? "https://www.xiaohongshu.com/worldcup26",
     livePollMs: Math.max(15000, parseIntegerEnv(process.env.WORLD_CUP_LIVE_POLL_MS, 15 * 1000)),
     idlePollMs: Math.max(60000, parseIntegerEnv(process.env.WORLD_CUP_IDLE_POLL_MS, 10 * 60 * 1000)),
     requestTimeoutMs: Math.max(1000, parseIntegerEnv(process.env.WORLD_CUP_REQUEST_TIMEOUT_MS, 10000)),

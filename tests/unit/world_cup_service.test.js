@@ -36,6 +36,7 @@ function makeConfig(dir, { start, end, timezone } = {}) {
     idlePollMs: 600000,
     dataDir: dir,
     timezone: timezone || "UTC",
+    streamUrl: "https://stream.test/wc",
   };
 }
 
@@ -126,6 +127,21 @@ describe("live-event diffing", () => {
     expect(events.filter((e) => e.kind === "kickoff")).toHaveLength(1);
     expect(events.filter((e) => e.kind === "goal")).toHaveLength(1);
     expect(events.filter((e) => e.kind === "fulltime")).toHaveLength(1);
+  });
+
+  test("broadcasts pass the configured stream URL to the embed builder", async () => {
+    const WcEmbeds = require("../../src/world_cup/embeds"); // the module mock above
+    const source = makeSource();
+    const { client } = makeClient();
+    const service = startService(makeConfig(dir), source, client);
+    service.setSubscription("g1", "c1");
+
+    source.fetchMatchesForDate.mockResolvedValue([mk("scheduled", 0, 0)]);
+    await service.pollOnce(); // seed
+    source.fetchMatchesForDate.mockResolvedValue([mk("live", 0, 0)]);
+    await service.pollOnce(); // kickoff push
+
+    expect(WcEmbeds.buildEventEmbed).toHaveBeenCalledWith(expect.anything(), "kickoff", "https://stream.test/wc");
   });
 
   test("both sides scoring between polls produces two goal messages", async () => {
