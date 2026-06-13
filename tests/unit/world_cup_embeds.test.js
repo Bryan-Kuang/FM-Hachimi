@@ -64,10 +64,18 @@ describe("buildEventEmbed", () => {
     expect(lastTitle()).toContain("World Cup");
   });
 
-  test("links to the live match page (title URL + description link)", () => {
+  test("with a stream URL: title clicks to the stream, description has both links", () => {
+    WcEmbeds.buildEventEmbed(mk(), "goal", "https://stream.test/wc");
+    expect(lastURL()).toBe("https://stream.test/wc");
+    expect(lastDescription()).toContain("[Watch live on Rednote](https://stream.test/wc)");
+    expect(lastDescription()).toContain("[Match stats](https://www.espn.com/soccer/match/_/gameId/m1)");
+  });
+
+  test("without a stream URL: title falls back to the match page link", () => {
     WcEmbeds.buildEventEmbed(mk(), "goal");
     expect(lastURL()).toBe("https://www.espn.com/soccer/match/_/gameId/m1");
     expect(lastDescription()).toContain("(https://www.espn.com/soccer/match/_/gameId/m1)");
+    expect(lastDescription()).not.toContain("Rednote");
   });
 
   test("omits the link gracefully when the match has none", () => {
@@ -91,6 +99,16 @@ describe("buildMatchListEmbed", () => {
     expect(desc).toContain("✅ FT"); // final marker
     expect(desc.split("\n")).toHaveLength(3);
     expect(desc).toContain("](https://www.espn.com/soccer/match/_/gameId/m1)"); // live link per line
+  });
+
+  test("a stream URL adds a watch-live header above the match lines", () => {
+    WcEmbeds.buildMatchListEmbed([mk()], "Today", "https://stream.test/wc");
+    expect(lastDescription()).toMatch(/^📺 \[Watch live on Rednote\]\(https:\/\/stream\.test\/wc\)\n\n/);
+  });
+
+  test("no stream URL → no watch-live header", () => {
+    WcEmbeds.buildMatchListEmbed([mk()], "Today");
+    expect(lastDescription()).not.toContain("Rednote");
   });
 
   test("empty list renders a friendly message", () => {

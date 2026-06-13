@@ -30,7 +30,7 @@ function formatKickoff(utcDate: string): string {
 }
 
 /** A list of fixtures/results for a day (the on-demand / backup path output). */
-function buildMatchListEmbed(matches: Match[], label: string): EmbedBuilder {
+function buildMatchListEmbed(matches: Match[], label: string, streamUrl?: string): EmbedBuilder {
   const embed = new EmbedBuilder().setColor(WC_COLOR).setTitle(`🏆 World Cup — ${label}`);
 
   if (matches.length === 0) {
@@ -38,13 +38,18 @@ function buildMatchListEmbed(matches: Match[], label: string): EmbedBuilder {
     return embed;
   }
 
+  const header = streamUrl ? `📺 [Watch live on Rednote](${streamUrl})\n\n` : '';
   const sorted = [...matches].sort((a, b) => Date.parse(a.utcDate) - Date.parse(b.utcDate));
-  embed.setDescription(sorted.map(matchLine).join('\n').slice(0, 4096));
+  embed.setDescription((header + sorted.map(matchLine).join('\n')).slice(0, 4096));
   return embed;
 }
 
-/** A single live event push (kickoff / goal / full-time). */
-function buildEventEmbed(m: Match, kind: EventKind): EmbedBuilder {
+/**
+ * A single live event push (kickoff / goal / full-time). The title clicks
+ * through to the free stream when one is configured; the ESPN match page is
+ * the labeled stats link.
+ */
+function buildEventEmbed(m: Match, kind: EventKind, streamUrl?: string): EmbedBuilder {
   const score = `${m.home.name} ${m.home.score}–${m.away.score} ${m.away.name}`;
   const group = m.group ? ` (${m.group})` : '';
   let title: string;
@@ -60,11 +65,15 @@ function buildEventEmbed(m: Match, kind: EventKind): EmbedBuilder {
   const embed = new EmbedBuilder()
     .setColor(kind === 'fulltime' ? WC_COLOR : LIVE_COLOR)
     .setTitle(title.slice(0, 256));
-  if (m.link) embed.setURL(m.link);
+  const titleUrl = streamUrl || m.link;
+  if (titleUrl) embed.setURL(titleUrl);
 
   const lines: string[] = [];
   if (kind === 'goal' && m.clock) lines.push(`${m.clock}${group}`);
-  if (m.link) lines.push(`🔗 [Follow live](${m.link})`);
+  const links: string[] = [];
+  if (streamUrl) links.push(`📺 [Watch live on Rednote](${streamUrl})`);
+  if (m.link) links.push(`📊 [Match stats](${m.link})`);
+  if (links.length > 0) lines.push(links.join(' · '));
   if (lines.length > 0) embed.setDescription(lines.join('\n'));
   return embed;
 }

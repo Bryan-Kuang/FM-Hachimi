@@ -162,6 +162,11 @@ class WorldCupService {
     return { startDate: this.config.startDate, endDate: this.config.endDate, active: this.isActive() };
   }
 
+  /** Free live-stream destination for message links (empty = no stream link). */
+  getStreamUrl(): string {
+    return this.config.streamUrl || '';
+  }
+
   getHealth(): WorldCupHealth {
     const active = this.isActive();
     // Tolerate the slow (idle) cadence so status isn't falsely "degraded" between
@@ -310,7 +315,7 @@ class WorldCupService {
       if (!channel) continue;
       for (const ev of events) {
         try {
-          const embed = WcEmbeds.buildEventEmbed(ev.match, ev.kind);
+          const embed = WcEmbeds.buildEventEmbed(ev.match, ev.kind, this.config.streamUrl);
           await channel.send({ embeds: [embed] });
         } catch (err: unknown) {
           logger.error('WorldCup: failed to post live event', {

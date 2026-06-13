@@ -178,7 +178,7 @@ async function handleMatches(
     return;
   }
 
-  await interaction.editReply({ embeds: [WcEmbeds.buildMatchListEmbed(matches, label)] });
+  await interaction.editReply({ embeds: [WcEmbeds.buildMatchListEmbed(matches, label, service.getStreamUrl?.())] });
 }
 
 async function handleStatus(
