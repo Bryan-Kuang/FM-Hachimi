@@ -126,6 +126,14 @@ interface WorldCupConfig {
   timezone: string;
 }
 
+interface ResumeConfig {
+  enabled: boolean;
+  /** Snapshot file (under the persisted data/ mount so it survives redeploys). */
+  dataFile: string;
+  /** Snapshots older than this are discarded instead of resumed. */
+  maxAgeMs: number;
+}
+
 interface TestConfig {
   mode: boolean;
   guildId: string | undefined;
@@ -143,6 +151,7 @@ interface BotConfig {
   radio: RadioConfig;
   dailyHachimi: DailyHachimiConfig;
   worldCup: WorldCupConfig;
+  resume: ResumeConfig;
   test: TestConfig;
 }
 
@@ -341,6 +350,17 @@ const config: BotConfig = {
     requestTimeoutMs: Math.max(1000, parseIntegerEnv(process.env.WORLD_CUP_REQUEST_TIMEOUT_MS, 10000)),
     dataDir: process.env.WORLD_CUP_DATA_DIR || path.join(process.cwd(), "data", "world_cup"),
     timezone: process.env.WORLD_CUP_TIMEZONE || "America/Toronto",
+  },
+  resume: {
+    // Resume interrupted playback after a restart/redeploy. A snapshot of every
+    // actively-playing guild is written on graceful shutdown (SIGTERM from
+    // `docker compose up -d`) and consumed on the next startup.
+    enabled: process.env.RESUME_ENABLED !== "false",
+    dataFile: process.env.RESUME_DATA_FILE
+      || path.join(process.cwd(), "data", "resume_state.json"),
+    // After a long outage the channel has moved on — barging back in mid-song
+    // would be noise. Default covers a normal deploy (~2-5 min) with margin.
+    maxAgeMs: Math.max(0, parseIntegerEnv(process.env.RESUME_MAX_AGE_MS, 15 * 60 * 1000)),
   },
   test: {
     mode: process.env.TEST_MODE === "true",

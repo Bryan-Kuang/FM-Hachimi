@@ -12,6 +12,7 @@ import MediaCache = require('./audio/media_cache');
 import YouTubeCookieRefreshService = require('./youtube/cookie_refresh_service');
 import SessionManager = require('./session/session_manager');
 import AudioManager = require('./session/audio_manager');
+import ResumeService = require('./session/resume_service');
 import InterfaceUpdater = require('./ui/interface_updater');
 import ProgressTracker = require('./ui/progress_tracker');
 import HistoryStore = require('./utils/history_store');
@@ -33,6 +34,7 @@ class BilibiliDiscordBot {
   private metricsServer:  any;
   private youtubeCookieRefreshService: YouTubeCookieRefreshService | null;
   private worldCupService: WorldCupService | null;
+  private resumeService:  ResumeService | null;
   private isRunning:      boolean;
 
   constructor() {
@@ -41,6 +43,7 @@ class BilibiliDiscordBot {
     this.metricsServer  = null;
     this.youtubeCookieRefreshService = null;
     this.worldCupService = null;
+    this.resumeService  = null;
     this.isRunning      = false;
   }
 
@@ -161,6 +164,16 @@ class BilibiliDiscordBot {
       audioManager.prewarmPlaybackTools([youtubeExtractor]);
       Debug.trace('client.initialize.done');
 
+      // Resume playback sessions interrupted by the previous shutdown
+      // (snapshot written in shutdown() below). Best-effort, non-blocking.
+      const resumeService = new ResumeService(config.resume);
+      this.resumeService = resumeService;
+      resumeService.scheduleRestore({
+        client: this.botClient.getClient(),
+        audioManager,
+        sessionManager,
+      });
+
       this.isRunning = true;
       logger.info('Bilibili Discord Bot started successfully');
       Debug.trace('start.success');
@@ -190,6 +203,12 @@ class BilibiliDiscordBot {
     logger.info('Shutting down Bilibili Discord Bot');
 
     try {
+      // Snapshot active playback BEFORE the client/voice connections are torn
+      // down — the snapshot needs each player's live voice channel id.
+      if (this.resumeService && this.sessionManager) {
+        this.resumeService.persist(this.sessionManager);
+      }
+
       if (this.botClient) {
         await this.botClient.shutdown();
       }
