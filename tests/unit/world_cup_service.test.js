@@ -168,7 +168,7 @@ describe("live-event diffing", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  test("a score correction (decrease) updates state silently, no goal message", async () => {
+  test("a single-poll score decrease is held silently (debounced, not yet confirmed)", async () => {
     const source = makeSource();
     const { client, send } = makeClient();
     const service = startService(makeConfig(dir), source, client);
@@ -177,8 +177,67 @@ describe("live-event diffing", () => {
     source.fetchMatchesForDate.mockResolvedValue([mk("live", 2, 0)]);
     await service.pollOnce(); // seed
     source.fetchMatchesForDate.mockResolvedValue([mk("live", 1, 0)]);
-    await service.pollOnce(); // correction
+    await service.pollOnce(); // first sighting of the decrease — wait for confirmation
     expect(send).not.toHaveBeenCalled();
+  });
+
+  test("a confirmed score decrease (VAR) posts exactly one goal-disallowed message", async () => {
+    const source = makeSource();
+    const { client, send } = makeClient();
+    const service = startService(makeConfig(dir), source, client);
+    service.setSubscription("g1", "c1");
+
+    source.fetchMatchesForDate.mockResolvedValue([mk("live", 2, 0)]);
+    await service.pollOnce(); // seed
+    source.fetchMatchesForDate.mockResolvedValue([mk("live", 1, 0)]);
+    await service.pollOnce(); // decrease seen
+    await service.pollOnce(); // decrease confirmed by a second poll → disallowed
+
+    expect(eventsOf(send).filter((e) => e.kind === "goal_disallowed")).toHaveLength(1);
+  });
+
+  test("a transient one-frame score reset reverts without a disallowed message or a re-fired goal", async () => {
+    const source = makeSource();
+    const { client, send } = makeClient();
+    const service = startService(makeConfig(dir), source, client);
+    service.setSubscription("g1", "c1");
+
+    source.fetchMatchesForDate.mockResolvedValue([mk("live", 1, 0)]);
+    await service.pollOnce(); // seed at 1-0
+    source.fetchMatchesForDate.mockResolvedValue([mk("live", 0, 0)]); // garbled frame
+    await service.pollOnce();
+    source.fetchMatchesForDate.mockResolvedValue([mk("live", 1, 0)]); // real data returns
+    await service.pollOnce();
+
+    expect(send).not.toHaveBeenCalled(); // no disallowed, and no re-fired goal
+  });
+
+  test("a status regression (live→scheduled) is rejected and does not re-fire kickoff/goal", async () => {
+    // Reproduces the production bug: a thin source payload flips a live match back
+    // to scheduled with 0-0 scores, then the real data returns. Naively trusting
+    // the regression re-fired both kickoff and goal.
+    const source = makeSource();
+    const { client, send } = makeClient();
+    const service = startService(makeConfig(dir), source, client);
+    service.setSubscription("g1", "c1");
+
+    source.fetchMatchesForDate.mockResolvedValue([mk("scheduled", 0, 0)]);
+    await service.pollOnce(); // seed scheduled
+    source.fetchMatchesForDate.mockResolvedValue([mk("live", 1, 0)]);
+    await service.pollOnce(); // real kickoff + goal
+    expect(eventsOf(send).filter((e) => e.kind === "kickoff")).toHaveLength(1);
+    expect(eventsOf(send).filter((e) => e.kind === "goal")).toHaveLength(1);
+
+    // Garbled frame: live match reported as scheduled 0-0, then back to live 1-0.
+    source.fetchMatchesForDate.mockResolvedValue([mk("scheduled", 0, 0)]);
+    await service.pollOnce();
+    source.fetchMatchesForDate.mockResolvedValue([mk("live", 1, 0)]);
+    await service.pollOnce();
+
+    // Still exactly one of each — no duplicates from the flap.
+    expect(eventsOf(send).filter((e) => e.kind === "kickoff")).toHaveLength(1);
+    expect(eventsOf(send).filter((e) => e.kind === "goal")).toHaveLength(1);
+    expect(eventsOf(send).filter((e) => e.kind === "goal_disallowed")).toHaveLength(0);
   });
 
   test("does not re-post events after a restart (state.json is reloaded)", async () => {

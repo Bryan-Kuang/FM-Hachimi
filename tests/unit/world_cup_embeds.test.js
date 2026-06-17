@@ -59,6 +59,12 @@ describe("buildEventEmbed", () => {
     expect(lastTitle()).toContain("2–1");
   });
 
+  test("goal-disallowed marks the revoked goal and shows the corrected score", () => {
+    WcEmbeds.buildEventEmbed(mk(), "goal_disallowed");
+    expect(lastTitle()).toMatch(/^❌ Goal disallowed/);
+    expect(lastTitle()).toContain("Argentina 2–1 Saudi Arabia");
+  });
+
   test.each(["kickoff", "goal", "fulltime"])("%s title says it's the World Cup", (kind) => {
     WcEmbeds.buildEventEmbed(mk(), kind);
     expect(lastTitle()).toContain("World Cup");

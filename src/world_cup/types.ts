@@ -41,7 +41,7 @@ export interface GuildSubscription {
   channelId: string;
 }
 
-export type EventKind = 'kickoff' | 'goal' | 'fulltime';
+export type EventKind = 'kickoff' | 'goal' | 'goal_disallowed' | 'fulltime';
 
 /** The subset of config the service needs (config.worldCup is a structural superset). */
 export interface WorldCupServiceConfig {

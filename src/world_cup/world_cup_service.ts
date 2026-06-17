@@ -21,6 +21,7 @@ import WcEmbeds = require('./embeds');
 import type WorldCupSource from './source';
 import type {
   Match,
+  MatchStatus,
   MatchSnapshot,
   GuildSubscription,
   EventKind,
@@ -44,6 +45,12 @@ interface DetectedEvent {
 
 const FAILURE_BACKOFF_THRESHOLD = 3;
 
+/** Monotonic ordering of a match lifecycle: scheduled → live → final. */
+const STATUS_RANK: Record<MatchStatus, number> = { scheduled: 0, live: 1, final: 2 };
+function statusRank(status: MatchStatus): number {
+  return STATUS_RANK[status] ?? 0;
+}
+
 class WorldCupService {
   private readonly config: WorldCupServiceConfig;
   private readonly source: WorldCupSource;
@@ -51,6 +58,14 @@ class WorldCupService {
 
   private subscriptions: Record<string, GuildSubscription>;
   private lastState: Map<string, MatchSnapshot>;
+  /**
+   * Score decreases seen but not yet confirmed by a second poll. A genuine VAR
+   * revocation persists across polls; a one-frame garbled source payload reverts
+   * on the next poll. Debouncing here keeps a transient glitch from poisoning
+   * lastState (which would later re-fire kickoff/goal events). Not persisted —
+   * it's transient and re-derives itself after a restart.
+   */
+  private pendingDecrease: Map<string, MatchSnapshot>;
   private readonly cache: ExpiringCache<Match[]>;
 
   private pollTimer: ReturnType<typeof setTimeout> | null;
@@ -74,6 +89,7 @@ class WorldCupService {
 
     this.subscriptions = {};
     this.lastState = new Map();
+    this.pendingDecrease = new Map();
     this.cache = new ExpiringCache<Match[]>(60 * 1000, 8, { label: 'world_cup_dates', cleanupIntervalMs: 5 * 60 * 1000 });
 
     this.pollTimer = null;
@@ -271,35 +287,75 @@ class WorldCupService {
     if (events.length > 0) await this._broadcast(events);
   }
 
-  /** Diff matches against lastState; returns detected events + whether state changed. */
+  /**
+   * Diff matches against lastState; returns detected events + whether state changed.
+   *
+   * Two robustness guards protect against transient/garbled source payloads
+   * (ESPN occasionally returns a thin response that maps a live match back to
+   * scheduled with 0-0 scores; trusting it would replay kickoff/goal events when
+   * the real data returns):
+   *
+   *  - **Status is monotonic** (scheduled < live < final). A backwards status
+   *    transition is physically impossible, so the whole frame is rejected.
+   *  - **Score decreases are debounced.** A real VAR revocation persists across
+   *    polls and is announced as a "goal disallowed" once a second poll confirms
+   *    it; a one-frame glitch reverts and is discarded without touching state.
+   */
   private _diff(matches: Match[]): { events: DetectedEvent[]; changed: boolean } {
     const events: DetectedEvent[] = [];
     let changed = false;
 
     for (const m of matches) {
       const prev = this.lastState.get(m.id);
-      const snap: MatchSnapshot = { status: m.status, homeScore: m.home.score, awayScore: m.away.score };
 
       if (!prev) {
         // First sighting (incl. after a restart for a never-seen match): seed
         // silently so we don't replay historical kickoffs/goals as if live.
-        this.lastState.set(m.id, snap);
+        this.lastState.set(m.id, { status: m.status, homeScore: m.home.score, awayScore: m.away.score });
+        this.pendingDecrease.delete(m.id);
         changed = true;
         continue;
       }
 
+      // Reject impossible status regressions outright (garbled-payload guard):
+      // keep the previous snapshot and ignore this frame entirely.
+      if (statusRank(m.status) < statusRank(prev.status)) continue;
+
+      // Status-forward events fire on the status transition regardless of scores.
       if (prev.status === 'scheduled' && m.status === 'live') {
         events.push({ match: m, kind: 'kickoff' });
       }
-      // One event per scoring side so simultaneous goals each get a push.
-      if (m.home.score > prev.homeScore) events.push({ match: m, kind: 'goal' });
-      if (m.away.score > prev.awayScore) events.push({ match: m, kind: 'goal' });
       if (prev.status !== 'final' && m.status === 'final') {
         events.push({ match: m, kind: 'fulltime' });
       }
 
-      if (prev.status !== snap.status || prev.homeScore !== snap.homeScore || prev.awayScore !== snap.awayScore) {
-        this.lastState.set(m.id, snap);
+      const decreased = m.home.score < prev.homeScore || m.away.score < prev.awayScore;
+      let commit: MatchSnapshot;
+
+      if (decreased) {
+        // Suspect frame: hold scores at prev until a second poll confirms the
+        // same lower scores. Accept only the (already-validated forward) status.
+        const cand: MatchSnapshot = { status: m.status, homeScore: m.home.score, awayScore: m.away.score };
+        const pending = this.pendingDecrease.get(m.id);
+        if (pending && pending.homeScore === cand.homeScore && pending.awayScore === cand.awayScore) {
+          this.pendingDecrease.delete(m.id);
+          events.push({ match: m, kind: 'goal_disallowed' });
+          commit = cand;
+        } else {
+          this.pendingDecrease.set(m.id, cand);
+          commit = { status: m.status, homeScore: prev.homeScore, awayScore: prev.awayScore };
+        }
+      } else {
+        // Confirmed-stable frame: a stale pending decrease (if any) reverted.
+        this.pendingDecrease.delete(m.id);
+        // One event per scoring side so simultaneous goals each get a push.
+        if (m.home.score > prev.homeScore) events.push({ match: m, kind: 'goal' });
+        if (m.away.score > prev.awayScore) events.push({ match: m, kind: 'goal' });
+        commit = { status: m.status, homeScore: m.home.score, awayScore: m.away.score };
+      }
+
+      if (prev.status !== commit.status || prev.homeScore !== commit.homeScore || prev.awayScore !== commit.awayScore) {
+        this.lastState.set(m.id, commit);
         changed = true;
       }
     }
