@@ -9,6 +9,7 @@ import type { Match, EventKind } from './types';
 
 const WC_COLOR = 0x326295; // FIFA blue
 const LIVE_COLOR = 0x1DB954; // green for live events
+const DISALLOWED_COLOR = 0xED4245; // red for a revoked goal / score correction
 
 /** "🔴 67' · [Argentina 2–1 Saudi Arabia](match page) · Group C" */
 function matchLine(m: Match): string {
@@ -58,18 +59,25 @@ function buildEventEmbed(m: Match, kind: EventKind, streamUrl?: string): EmbedBu
     title = `🟢 World Cup kickoff — ${m.home.name} vs ${m.away.name}${group}`;
   } else if (kind === 'goal') {
     title = `⚽ GOAL! ${score} — World Cup`;
+  } else if (kind === 'goal_disallowed') {
+    title = `❌ Goal disallowed (VAR) — ${score}`;
   } else {
     title = `🏁 World Cup full-time — ${score}${group}`;
   }
 
+  let color: number;
+  if (kind === 'fulltime') color = WC_COLOR;
+  else if (kind === 'goal_disallowed') color = DISALLOWED_COLOR;
+  else color = LIVE_COLOR;
+
   const embed = new EmbedBuilder()
-    .setColor(kind === 'fulltime' ? WC_COLOR : LIVE_COLOR)
+    .setColor(color)
     .setTitle(title.slice(0, 256));
   const titleUrl = streamUrl || m.link;
   if (titleUrl) embed.setURL(titleUrl);
 
   const lines: string[] = [];
-  if (kind === 'goal' && m.clock) lines.push(`${m.clock}${group}`);
+  if ((kind === 'goal' || kind === 'goal_disallowed') && m.clock) lines.push(`${m.clock}${group}`);
   const links: string[] = [];
   if (streamUrl) links.push(`📺 [Watch live on Rednote](${streamUrl})`);
   if (m.link) links.push(`📊 [Match stats](${m.link})`);
