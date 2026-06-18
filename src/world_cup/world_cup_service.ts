@@ -183,6 +183,11 @@ class WorldCupService {
     return this.config.streamUrl || '';
   }
 
+  /** Display name paired with the stream link (e.g. "88看球"). */
+  getStreamLabel(): string {
+    return this.config.streamLabel || '88看球';
+  }
+
   getHealth(): WorldCupHealth {
     const active = this.isActive();
     // Tolerate the slow (idle) cadence so status isn't falsely "degraded" between
@@ -371,7 +376,7 @@ class WorldCupService {
       if (!channel) continue;
       for (const ev of events) {
         try {
-          const embed = WcEmbeds.buildEventEmbed(ev.match, ev.kind, this.config.streamUrl);
+          const embed = WcEmbeds.buildEventEmbed(ev.match, ev.kind, this.config.streamUrl, this.config.streamLabel);
           await channel.send({ embeds: [embed] });
         } catch (err: unknown) {
           logger.error('WorldCup: failed to post live event', {

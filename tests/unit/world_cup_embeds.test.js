@@ -73,15 +73,20 @@ describe("buildEventEmbed", () => {
   test("with a stream URL: title clicks to the stream, description has both links", () => {
     WcEmbeds.buildEventEmbed(mk(), "goal", "https://stream.test/wc");
     expect(lastURL()).toBe("https://stream.test/wc");
-    expect(lastDescription()).toContain("[Watch live on Rednote](https://stream.test/wc)");
+    expect(lastDescription()).toContain("[Watch live on 88看球](https://stream.test/wc)");
     expect(lastDescription()).toContain("[Match stats](https://www.espn.com/soccer/match/_/gameId/m1)");
+  });
+
+  test("a custom stream label is used in the watch-live link", () => {
+    WcEmbeds.buildEventEmbed(mk(), "goal", "https://stream.test/wc", "Rednote");
+    expect(lastDescription()).toContain("[Watch live on Rednote](https://stream.test/wc)");
   });
 
   test("without a stream URL: title falls back to the match page link", () => {
     WcEmbeds.buildEventEmbed(mk(), "goal");
     expect(lastURL()).toBe("https://www.espn.com/soccer/match/_/gameId/m1");
     expect(lastDescription()).toContain("(https://www.espn.com/soccer/match/_/gameId/m1)");
-    expect(lastDescription()).not.toContain("Rednote");
+    expect(lastDescription()).not.toContain("Watch live");
   });
 
   test("omits the link gracefully when the match has none", () => {
@@ -109,12 +114,17 @@ describe("buildMatchListEmbed", () => {
 
   test("a stream URL adds a watch-live header above the match lines", () => {
     WcEmbeds.buildMatchListEmbed([mk()], "Today", "https://stream.test/wc");
+    expect(lastDescription()).toMatch(/^📺 \[Watch live on 88看球\]\(https:\/\/stream\.test\/wc\)\n\n/);
+  });
+
+  test("a custom stream label is used in the watch-live header", () => {
+    WcEmbeds.buildMatchListEmbed([mk()], "Today", "https://stream.test/wc", "Rednote");
     expect(lastDescription()).toMatch(/^📺 \[Watch live on Rednote\]\(https:\/\/stream\.test\/wc\)\n\n/);
   });
 
   test("no stream URL → no watch-live header", () => {
     WcEmbeds.buildMatchListEmbed([mk()], "Today");
-    expect(lastDescription()).not.toContain("Rednote");
+    expect(lastDescription()).not.toContain("Watch live");
   });
 
   test("empty list renders a friendly message", () => {

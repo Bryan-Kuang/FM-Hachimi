@@ -37,6 +37,7 @@ function makeConfig(dir, { start, end, timezone } = {}) {
     dataDir: dir,
     timezone: timezone || "UTC",
     streamUrl: "https://stream.test/wc",
+    streamLabel: "88看球",
   };
 }
 
@@ -141,7 +142,7 @@ describe("live-event diffing", () => {
     source.fetchMatchesForDate.mockResolvedValue([mk("live", 0, 0)]);
     await service.pollOnce(); // kickoff push
 
-    expect(WcEmbeds.buildEventEmbed).toHaveBeenCalledWith(expect.anything(), "kickoff", "https://stream.test/wc");
+    expect(WcEmbeds.buildEventEmbed).toHaveBeenCalledWith(expect.anything(), "kickoff", "https://stream.test/wc", "88看球");
   });
 
   test("both sides scoring between polls produces two goal messages", async () => {
