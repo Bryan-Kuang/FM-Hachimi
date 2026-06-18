@@ -54,6 +54,8 @@ export interface WorldCupServiceConfig {
   timezone: string;
   /** Free live-stream destination linked from messages (empty disables the link). */
   streamUrl: string;
+  /** Display name for the watch-live link (e.g. "88看球"). */
+  streamLabel: string;
 }
 
 export interface WorldCupHealth {
