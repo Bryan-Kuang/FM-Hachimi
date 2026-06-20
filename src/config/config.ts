@@ -99,6 +99,8 @@ interface RadioConfig {
   // Periodic "take a break" video injected into radio rotation.
   breakEnabled: boolean;
   breakIntervalMinutes: number;
+  // Shorter interval applied only in the test guild (see TEST_GUILD_ID).
+  breakIntervalMinutesTest: number;
   breakVideoUrl: string;
 }
 
@@ -334,6 +336,8 @@ const config: BotConfig = {
     // video. Set RADIO_BREAK_ENABLED=false to disable.
     breakEnabled: process.env.RADIO_BREAK_ENABLED !== "false",
     breakIntervalMinutes: Math.max(1, parseIntegerEnv(process.env.RADIO_BREAK_INTERVAL_MIN, 30)),
+    // The test guild gets a shorter cadence so the feature is easy to verify.
+    breakIntervalMinutesTest: Math.max(1, parseIntegerEnv(process.env.RADIO_BREAK_INTERVAL_MIN_TEST, 5)),
     breakVideoUrl: process.env.RADIO_BREAK_VIDEO
       || "https://www.bilibili.com/video/BV1a4sFzwE8E",
   },
