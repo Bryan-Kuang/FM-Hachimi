@@ -119,3 +119,44 @@ describe("createNowPlayingEmbed progress bar", () => {
     expect(field.value).not.toMatch(/\d+%/);
   });
 });
+
+describe("createNowPlayingEmbed break card", () => {
+  const breakTrack = {
+    title: "哈气一下 马上回来",
+    url: "https://www.bilibili.com/video/BV1a4sFzwE8E",
+    duration: 90,
+    thumbnail: "https://i.example/cover.jpg",
+  };
+
+  test("isBreak renders a break label and the title only", () => {
+    const embed = EmbedBuilders.createNowPlayingEmbed(breakTrack, {
+      isBreak: true,
+      currentTime: 30,
+      requestedBy: "📻 Radio",
+    });
+    expect(embed.description).toContain("Take a break");
+    expect(embed.description).toContain(breakTrack.title);
+    expect(embed.description).toContain(breakTrack.url);
+  });
+
+  test("break card has no progress bar, duration, or requested-by", () => {
+    const embed = EmbedBuilders.createNowPlayingEmbed(breakTrack, {
+      isBreak: true,
+      currentTime: 30,
+      requestedBy: "📻 Radio",
+    });
+    expect(getProgressField(embed)).toBeUndefined();
+    expect(embed.fields).toHaveLength(0);
+    expect(embed.description).not.toMatch(/Duration:/);
+    expect(embed.description).not.toMatch(/Requested by/);
+  });
+
+  test("a normal (non-break) track still renders the full card", () => {
+    const embed = EmbedBuilders.createNowPlayingEmbed(breakTrack, {
+      currentTime: 30,
+      requestedBy: "tester",
+    });
+    expect(getProgressField(embed)).toBeDefined();
+    expect(embed.description).toMatch(/Requested by/);
+  });
+});

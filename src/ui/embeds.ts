@@ -22,6 +22,7 @@ interface NowPlayingOptions {
   totalQueue?: number;
   loopMode?: string;
   radioMode?: boolean;
+  isBreak?: boolean;
 }
 
 // Options for createQueueEmbed
@@ -74,12 +75,29 @@ class EmbedBuilders {
       queuePosition = 0,
       totalQueue = 0,
       radioMode = false,
+      isBreak = false,
     } = options;
 
     const colors = {
       playing: 0x1DB954, // Spotify green
       paused: 0xFF6B35,  // Orange
+      break: 0x8E7CC3,   // Calm purple — distinct "take a break" state
     };
+
+    // The periodic radio break video gets a deliberately minimal card: a break
+    // label and the title only — no progress bar, duration, requested-by, or
+    // thumbnail, so it reads as a pause from the normal rotation.
+    if (isBreak) {
+      const pageUrl =
+        videoData.url ||
+        (videoData.bvid ? `https://www.bilibili.com/video/${videoData.bvid}` : null) ||
+        (videoData.videoId ? `https://www.bilibili.com/video/${videoData.videoId}` : null);
+      const safeTitle = Formatters.escapeMarkdown(videoData.title || 'Unknown');
+      const titleLine = pageUrl ? `**[${safeTitle}](${pageUrl})**` : `**${safeTitle}**`;
+      return new EmbedBuilder()
+        .setColor(colors.break)
+        .setDescription(`**☕ 休息一下 · Take a break**\n${titleLine}`);
+    }
     const playingLabel = radioMode ? 'Radio · Now Playing' : 'Now Playing';
     const statusText = isPlaying ? playingLabel : 'Paused';
 

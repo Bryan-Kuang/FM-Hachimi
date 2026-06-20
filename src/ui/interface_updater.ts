@@ -112,6 +112,7 @@ class InterfaceUpdater {
           totalQueue: state.queueLength,
           loopMode: state.loopMode,
           radioMode: state.radioMode,
+          isBreak: state.isBreak,
         },
       );
       const components = ButtonBuilders.createPlaybackControls({
@@ -123,7 +124,9 @@ class InterfaceUpdater {
         radioMode: state.radioMode,
       });
       const options = { embeds: [embed], components };
-      const shouldTrackProgress = Boolean(state.currentTrack && !state.isPaused);
+      // The break card is intentionally static (title only) — no per-second
+      // progress edits.
+      const shouldTrackProgress = Boolean(state.currentTrack && !state.isPaused && !state.isBreak);
 
       if (ctx.messageId) {
         try {
@@ -197,6 +200,7 @@ class InterfaceUpdater {
       queueLength: player.queue ? player.queue.length : 0,  // queue.length works on both Queue class and raw array
       loopMode: player.loopMode,
       radioMode: player.radioMode,
+      isBreak: player.radioBreak,
       hasPrevious: player.canGoBack(),
       hasNext: player.canSkip(),
     };

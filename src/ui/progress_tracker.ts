@@ -229,6 +229,9 @@ class ProgressTracker {
       const track = playerState.currentTrack;
       if (!playerState.isPlaying || !track) return;
 
+      // The break card is static (title only); never animate a progress bar on it.
+      if (playerState.isBreak) return;
+
       if (!track.title || track.duration == null) return;
 
       const currentTime = playerState.currentTime;
