@@ -139,6 +139,8 @@ interface ResumeConfig {
   dataFile: string;
   /** Snapshots older than this are discarded instead of resumed. */
   maxAgeMs: number;
+  /** Flush the snapshot this often while playing (0 disables periodic flush). */
+  snapshotIntervalMs: number;
 }
 
 interface TestConfig {
@@ -374,13 +376,17 @@ const config: BotConfig = {
   resume: {
     // Resume interrupted playback after a restart/redeploy. A snapshot of every
     // actively-playing guild is written on graceful shutdown (SIGTERM from
-    // `docker compose up -d`) and consumed on the next startup.
+    // `docker compose up -d`), flushed periodically while playing, and consumed
+    // on the next startup.
     enabled: process.env.RESUME_ENABLED !== "false",
     dataFile: process.env.RESUME_DATA_FILE
       || path.join(process.cwd(), "data", "resume_state.json"),
     // After a long outage the channel has moved on — barging back in mid-song
     // would be noise. Default covers a normal deploy (~2-5 min) with margin.
     maxAgeMs: Math.max(0, parseIntegerEnv(process.env.RESUME_MAX_AGE_MS, 15 * 60 * 1000)),
+    // Periodic flush so a hard kill / crash (not just a graceful SIGTERM) still
+    // leaves a fresh file to resume from. Set to 0 to flush only at shutdown.
+    snapshotIntervalMs: Math.max(0, parseIntegerEnv(process.env.RESUME_SNAPSHOT_INTERVAL_MS, 15 * 1000)),
   },
   test: {
     mode: process.env.TEST_MODE === "true",

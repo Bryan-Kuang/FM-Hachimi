@@ -172,7 +172,11 @@ class BilibiliDiscordBot {
         client: this.botClient.getClient(),
         audioManager,
         sessionManager,
+        radioService,
       });
+      // Keep the snapshot fresh while playing so a hard kill / crash (not just a
+      // graceful SIGTERM) still has something to resume from.
+      resumeService.startAutoSnapshot(sessionManager);
 
       this.isRunning = true;
       logger.info('Bilibili Discord Bot started successfully');
@@ -204,8 +208,10 @@ class BilibiliDiscordBot {
 
     try {
       // Snapshot active playback BEFORE the client/voice connections are torn
-      // down — the snapshot needs each player's live voice channel id.
+      // down — the snapshot needs each player's live voice channel id. Stop the
+      // periodic flush first so it can't race this final write.
       if (this.resumeService && this.sessionManager) {
+        this.resumeService.stopAutoSnapshot();
         this.resumeService.persist(this.sessionManager);
       }
 

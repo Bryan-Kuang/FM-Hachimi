@@ -22,6 +22,7 @@ interface ResumeServiceOptions {
   enabled: boolean;
   dataFile: string;
   maxAgeMs: number;
+  snapshotIntervalMs?: number;
 }
 
 interface GuildResumeState {
@@ -34,6 +35,8 @@ interface GuildResumeState {
   loopMode: string;
   positionSeconds: number;
   isPaused: boolean;
+  /** Whether the guild was in endless radio mode (re-armed on restore). */
+  radioMode: boolean;
   /** Recently-played bvids (radio/Hachimi dedup window). */
   history: string[];
 }
@@ -47,17 +50,57 @@ interface RestoreDeps {
   client: any;          // discord.js Client (ready)
   audioManager: any;    // AudioManager — creates players with extractors wired
   sessionManager: any;  // SessionManager
+  radioService?: any;   // RadioService — re-armed when a snapshot was in radio mode
 }
 
 class ResumeService {
   private readonly enabled: boolean;
   private readonly dataFile: string;
   private readonly maxAgeMs: number;
+  private readonly snapshotIntervalMs: number;
+  private snapshotTimer: NodeJS.Timeout | null;
 
   constructor(options: ResumeServiceOptions) {
     this.enabled = options.enabled;
     this.dataFile = options.dataFile;
     this.maxAgeMs = options.maxAgeMs;
+    this.snapshotIntervalMs = options.snapshotIntervalMs ?? 0;
+    this.snapshotTimer = null;
+  }
+
+  // ── Periodic flush ────────────────────────────────────────────────────
+
+  /**
+   * Flush the snapshot to disk on a fixed interval so a hard kill / crash (not
+   * just a graceful SIGTERM) still leaves a fresh file to resume from.
+   *
+   * The first flush is deferred by one interval, which doubles as a crash-loop
+   * guard: a track that crashes the process before surviving one interval is
+   * never re-persisted (consume() already deleted the file on boot), so the bot
+   * won't endlessly resume into the same poison track.
+   */
+  startAutoSnapshot(sessionManager: any): void {
+    if (!this.enabled || this.snapshotIntervalMs <= 0 || this.snapshotTimer) return;
+
+    this.snapshotTimer = setInterval(() => {
+      try {
+        this.persist(sessionManager);
+      } catch (err: unknown) {
+        logger.warn('Auto-snapshot flush failed', { error: (err as Error).message });
+      }
+    }, this.snapshotIntervalMs);
+
+    // Don't keep the event loop alive just for snapshots.
+    this.snapshotTimer.unref?.();
+
+    logger.info('Playback auto-snapshot started', { intervalMs: this.snapshotIntervalMs });
+  }
+
+  stopAutoSnapshot(): void {
+    if (this.snapshotTimer) {
+      clearInterval(this.snapshotTimer);
+      this.snapshotTimer = null;
+    }
   }
 
   // ── Shutdown side ─────────────────────────────────────────────────────
@@ -87,6 +130,7 @@ class ResumeService {
         loopMode: player.queue.loopMode,
         positionSeconds: Math.max(0, Math.floor(player.getCurrentTime?.() ?? 0)),
         isPaused: !!player.isPaused,
+        radioMode: !!player.radioMode,
         history: [...session.history],
       });
     }
@@ -286,12 +330,27 @@ class ResumeService {
     // re-extract), so a snapshot older than the CDN URL lifetime still plays.
     await player.playCurrentTrack({ startAtSeconds: state.positionSeconds });
 
+    // Re-arm endless radio so rotation continues. Without this the single
+    // restored track plays out and the bot goes idle (radio keeps only the
+    // current track in the visible queue, with loop disabled).
+    if (state.radioMode && deps.radioService) {
+      try {
+        await deps.radioService.resume(state.guildId, state.textChannelId);
+      } catch (err: unknown) {
+        logger.warn('Resume: failed to re-arm radio mode', {
+          guildId: state.guildId,
+          error: (err as Error).message,
+        });
+      }
+    }
+
     logger.info('Resumed playback after restart', {
       guildId: state.guildId,
       track: tracks[index].title,
       positionSeconds: state.positionSeconds,
       queueLength: tracks.length,
       wasPaused: state.isPaused,
+      radioMode: state.radioMode,
     });
 
     this.announceResume(client, state, tracks[index]).catch((err: Error) => {
