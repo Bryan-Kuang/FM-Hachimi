@@ -6,6 +6,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { SlashCommandBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import * as logger from '../../services/logger_service';
+import { RADIO_BREAK_MESSAGE } from '../../playback/radio_controls';
 
 const createSkipCommand = (playbackService: any) => ({
   data: new SlashCommandBuilder()
@@ -21,6 +22,12 @@ const createSkipCommand = (playbackService: any) => ({
 
       if (!member.voice.channel) {
         await interaction.reply({ content: 'Voice channel required', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      // The periodic radio "take a break" video is non-skippable.
+      if (playbackService.getRadioService?.()?.isOnBreak(interaction.guild.id)) {
+        await interaction.reply({ content: RADIO_BREAK_MESSAGE, flags: MessageFlags.Ephemeral });
         return;
       }
 

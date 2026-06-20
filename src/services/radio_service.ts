@@ -52,6 +52,10 @@ interface RadioState {
   onDeck: ExtractedTrackData | null;
   /** In-flight prefetch, so we never fire two concurrent replenishes. */
   onDeckPromise: Promise<ExtractedTrackData | null> | null;
+  /** Epoch ms after which the next break video becomes armed. */
+  nextBreakAt: number;
+  /** True while the non-skippable break video is the current track. */
+  breakPlaying: boolean;
 }
 
 interface RadioStartResult {
@@ -84,10 +88,26 @@ class RadioService {
     return this.states.get(guildId)?.enabled ?? false;
   }
 
+  /** True while the non-skippable break video is the current track. */
+  isOnBreak(guildId: string): boolean {
+    return this.states.get(guildId)?.breakPlaying ?? false;
+  }
+
+  private breakIntervalMs(): number {
+    return Math.max(1, config.radio.breakIntervalMinutes) * 60_000;
+  }
+
   private get(guildId: string): RadioState {
     let state = this.states.get(guildId);
     if (!state) {
-      state = { enabled: false, channelId: null, onDeck: null, onDeckPromise: null };
+      state = {
+        enabled: false,
+        channelId: null,
+        onDeck: null,
+        onDeckPromise: null,
+        nextBreakAt: 0,
+        breakPlaying: false,
+      };
       this.states.set(guildId, state);
     }
     return state;
@@ -135,9 +155,11 @@ class RadioService {
     state.channelId = channelId;
     state.onDeck = null;
     state.onDeckPromise = null;
+    state.breakPlaying = false;
+    state.nextBreakAt = Date.now() + this.breakIntervalMs();
 
     // Take over advancement and disable looping so old tracks are never repeated.
-    player.advanceHook = () => this.handleAdvance(guildId);
+    player.advanceHook = (reason: 'ended' | 'user') => this.handleAdvance(guildId, reason);
     player.radioMode = true;
     player.setLoopMode('none');
 
@@ -170,6 +192,7 @@ class RadioService {
     state.channelId = null;
     state.onDeck = null;
     state.onDeckPromise = null;
+    state.breakPlaying = false;
 
     try {
       const player = this.playerService.getPlayer(guildId);
@@ -190,11 +213,39 @@ class RadioService {
    * Promotes the on-deck track (or fetches one synchronously if prefetch has
    * not landed yet), plays it, and prefetches the next. Returns true if it
    * handled advancement; false lets the player fall back to normal behaviour.
+   *
+   * `reason` distinguishes a natural track end ('ended') from a user-initiated
+   * skip ('user'). The break video only injects on a natural end so it never
+   * cuts off a song the listener is enjoying, and a user skip while the break
+   * is armed simply defers it to the next natural end.
    */
-  async handleAdvance(guildId: string): Promise<boolean> {
+  async handleAdvance(guildId: string, reason: 'ended' | 'user' = 'user'): Promise<boolean> {
     const state = this.states.get(guildId);
     if (!state || !state.enabled) return false;
 
+    // The break video just finished (skip is locked during it, so this is
+    // always a natural end). Resume normal rotation and re-arm the timer.
+    if (state.breakPlaying) {
+      state.breakPlaying = false;
+      state.nextBreakAt = Date.now() + this.breakIntervalMs();
+      return this.advanceNormal(guildId);
+    }
+
+    // Break is due: play the fixed, non-skippable break video next. Keep the
+    // on-deck track so the following random song is still gapless.
+    if (config.radio.breakEnabled && reason === 'ended' && Date.now() >= state.nextBreakAt) {
+      const playedBreak = await this.playBreak(guildId);
+      if (playedBreak) return true;
+      // Extraction failed — fall through to a normal track and re-arm so we
+      // never leave dead air.
+      state.nextBreakAt = Date.now() + this.breakIntervalMs();
+    }
+
+    return this.advanceNormal(guildId);
+  }
+
+  /** Promote the on-deck (or freshly fetched) random track and play it. */
+  private async advanceNormal(guildId: string): Promise<boolean> {
     const next = await this.takeNext(guildId);
     if (!next) {
       logger.warn('Radio could not fetch the next track, ending radio', { guildId });
@@ -212,6 +263,45 @@ class RadioService {
     }
 
     this.prefetch(guildId);
+    return true;
+  }
+
+  /**
+   * Extract and play the fixed break video. Does NOT prefetch (the existing
+   * on-deck random track is preserved for after the break) and does NOT touch
+   * the timer (the caller re-arms it once the break ends). Returns false if the
+   * break video could not be extracted/played so the caller can fall back.
+   */
+  private async playBreak(guildId: string): Promise<boolean> {
+    const state = this.get(guildId);
+    const extractor = this.playerService.getExtractor();
+    if (!extractor) {
+      logger.warn('Radio break: extractor unavailable, skipping break', { guildId });
+      return false;
+    }
+
+    let track: ExtractedTrackData;
+    try {
+      track = await extractor.extractAudio(config.radio.breakVideoUrl);
+    } catch (e: unknown) {
+      logger.warn('Radio break: failed to extract break video', {
+        guildId,
+        error: (e as Error).message,
+      });
+      return false;
+    }
+
+    const player = this.playerService.getPlayer(guildId);
+    player.queue.reset();
+    await this.playerService.addTrack(guildId, track, RADIO_REQUESTED_BY);
+    const played = await this.playerService.play(guildId);
+    if (!played) {
+      logger.warn('Radio break: failed to play break video', { guildId });
+      return false;
+    }
+
+    state.breakPlaying = true;
+    logger.info('Radio break video playing', { guildId });
     return true;
   }
 
