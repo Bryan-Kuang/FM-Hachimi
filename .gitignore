@@ -7,6 +7,9 @@
 # Server config (contains IP address)
 .server.env
 
+# Agent instructions (local only)
+AGENTS.md
+
 # Cookies
 cookies.txt
 youtube_cookies.txt
