@@ -16,6 +16,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as logger from './logger_service';
 import config = require('../config/config');
+import { isTestGuild } from '../bot/testing_access';
 import type { ExtractedTrackData } from './types';
 
 const RADIO_REQUESTED_BY = '📻 Radio';
@@ -93,8 +94,12 @@ class RadioService {
     return this.states.get(guildId)?.breakPlaying ?? false;
   }
 
-  private breakIntervalMs(): number {
-    return Math.max(1, config.radio.breakIntervalMinutes) * 60_000;
+  private breakIntervalMs(guildId: string): number {
+    // The test guild uses a shorter cadence so the feature is easy to verify.
+    const minutes = isTestGuild(guildId)
+      ? config.radio.breakIntervalMinutesTest
+      : config.radio.breakIntervalMinutes;
+    return Math.max(1, minutes) * 60_000;
   }
 
   private get(guildId: string): RadioState {
@@ -156,7 +161,7 @@ class RadioService {
     state.onDeck = null;
     state.onDeckPromise = null;
     state.breakPlaying = false;
-    state.nextBreakAt = Date.now() + this.breakIntervalMs();
+    state.nextBreakAt = Date.now() + this.breakIntervalMs(guildId);
 
     // Take over advancement and disable looping so old tracks are never repeated.
     player.advanceHook = (reason: 'ended' | 'user') => this.handleAdvance(guildId, reason);
@@ -227,7 +232,7 @@ class RadioService {
     // always a natural end). Resume normal rotation and re-arm the timer.
     if (state.breakPlaying) {
       state.breakPlaying = false;
-      state.nextBreakAt = Date.now() + this.breakIntervalMs();
+      state.nextBreakAt = Date.now() + this.breakIntervalMs(guildId);
       return this.advanceNormal(guildId);
     }
 
@@ -238,7 +243,7 @@ class RadioService {
       if (playedBreak) return true;
       // Extraction failed — fall through to a normal track and re-arm so we
       // never leave dead air.
-      state.nextBreakAt = Date.now() + this.breakIntervalMs();
+      state.nextBreakAt = Date.now() + this.breakIntervalMs(guildId);
     }
 
     return this.advanceNormal(guildId);
