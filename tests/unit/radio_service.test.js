@@ -14,8 +14,7 @@ jest.mock("../../src/config/config", () => ({
     enabled: true,
     replenishMaxAttempts: 3,
     breakEnabled: true,
-    breakIntervalMinutes: 30,
-    breakIntervalMinutesTest: 5,
+    breakIntervalMinutes: 5,
     breakVideoUrl: "https://www.bilibili.com/video/BV1a4sFzwE8E",
   },
   test: { guildId: null },
@@ -90,10 +89,11 @@ beforeEach(() => {
   config.radio.enabled = true;
   config.radio.replenishMaxAttempts = 3;
   config.radio.breakEnabled = true;
-  config.radio.breakIntervalMinutes = 30;
-  config.radio.breakIntervalMinutesTest = 5;
+  config.radio.breakIntervalMinutes = 5;
   config.radio.breakVideoUrl = "https://www.bilibili.com/video/BV1a4sFzwE8E";
-  config.test.guildId = null;
+  // The break feature is gated to the test guild; treat g1 as the test guild
+  // by default so the break-behavior tests below exercise the happy path.
+  config.test.guildId = "g1";
 });
 
 afterEach(() => {
@@ -221,7 +221,7 @@ describe("advance hook", () => {
 });
 
 describe("break video", () => {
-  const INTERVAL_MS = 30 * 60_000;
+  const INTERVAL_MS = 5 * 60_000;
   const lastTrack = (w) => {
     const calls = w.playerService.addTrack.mock.calls;
     return calls[calls.length - 1][1];
@@ -326,36 +326,19 @@ describe("break video", () => {
     expect(w.extractor.extractAudio).not.toHaveBeenCalledWith(config.radio.breakVideoUrl);
   });
 
-  test("the test guild uses the shorter break interval", async () => {
-    const TEST_INTERVAL_MS = 5 * 60_000;
-    config.test.guildId = "g1"; // g1 is now the test guild
+  test("never injects the break outside the test guild, even when due", async () => {
+    config.test.guildId = "g-other"; // g1 is NOT the test guild
     const w = makeWorld();
     await startAt(w, 1000);
 
-    // Past the 5-min test interval but well short of the 30-min default.
-    Date.now.mockReturnValue(1000 + TEST_INTERVAL_MS + 1);
-    w.playerService.addTrack.mockClear();
-    const handled = await w.player.advanceHook("ended");
-
-    expect(handled).toBe(true);
-    expect(w.service.isOnBreak("g1")).toBe(true);
-    expect(isBreakTrack(lastTrack(w))).toBe(true);
-  });
-
-  test("a non-test guild ignores the shorter interval", async () => {
-    const TEST_INTERVAL_MS = 5 * 60_000;
-    config.test.guildId = "g-test-only"; // some OTHER guild is the test guild
-    const w = makeWorld();
-    await startAt(w, 1000);
-
-    // Past 5 min but under the 30-min default that applies to g1.
-    Date.now.mockReturnValue(1000 + TEST_INTERVAL_MS + 1);
+    Date.now.mockReturnValue(1000 + INTERVAL_MS + 1);
     w.playerService.addTrack.mockClear();
     const handled = await w.player.advanceHook("ended");
 
     expect(handled).toBe(true);
     expect(w.service.isOnBreak("g1")).toBe(false);
     expect(lastTrack(w).title).toMatch(/^BVsong/);
+    expect(w.extractor.extractAudio).not.toHaveBeenCalledWith(config.radio.breakVideoUrl);
   });
 });
 
