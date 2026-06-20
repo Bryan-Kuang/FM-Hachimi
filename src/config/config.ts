@@ -96,6 +96,10 @@ interface YouTubeCookieRefreshConfig {
 interface RadioConfig {
   enabled: boolean;
   replenishMaxAttempts: number;
+  // Periodic "take a break" video injected into radio rotation.
+  breakEnabled: boolean;
+  breakIntervalMinutes: number;
+  breakVideoUrl: string;
 }
 
 interface DailyHachimiConfig {
@@ -325,6 +329,13 @@ const config: BotConfig = {
     // How many random candidates radio will try to extract before giving up on
     // fetching the next track (each attempt re-rolls a fresh random video).
     replenishMaxAttempts: parseIntegerEnv(process.env.RADIO_REPLENISH_MAX_ATTEMPTS, 3),
+    // Every breakIntervalMinutes of radio uptime, the next track (after the
+    // current one ends naturally) becomes a fixed, non-skippable "take a break"
+    // video. Set RADIO_BREAK_ENABLED=false to disable.
+    breakEnabled: process.env.RADIO_BREAK_ENABLED !== "false",
+    breakIntervalMinutes: Math.max(1, parseIntegerEnv(process.env.RADIO_BREAK_INTERVAL_MIN, 30)),
+    breakVideoUrl: process.env.RADIO_BREAK_VIDEO
+      || "https://www.bilibili.com/video/BV1a4sFzwE8E",
   },
   dailyHachimi: {
     dataFile: process.env.DAILY_HACHIMI_DATA_FILE

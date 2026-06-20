@@ -17,6 +17,7 @@ import SearchSessionStore = require('../../../search/search_session_store');
 import { createInteractionStageReporter } from '../../../playback/stage_feedback';
 import {
   RADIO_ONLY_STOP_MESSAGE,
+  RADIO_BREAK_MESSAGE,
   isRadioBlockedButton,
 } from '../../../playback/radio_controls';
 import * as logger from '../../../services/logger_service';
@@ -61,6 +62,14 @@ function createButtonHandler(playerService: any) {
 
       if (isRadioBlockedButton(customId) && radioMode) {
         return await denyRadioControl(interaction, isControlButton);
+      }
+
+      // The periodic radio "take a break" video is non-skippable (Stop still works).
+      if (customId === 'skip' && radioMode && isRadioOnBreak(interaction, playerService)) {
+        return await interaction.followUp({
+          content: RADIO_BREAK_MESSAGE,
+          flags: MessageFlags.Ephemeral,
+        });
       }
 
       // Check if user is in a voice channel for control buttons.
@@ -221,6 +230,17 @@ function isRadioMode(interaction: any, playerService: any): boolean {
 
   try {
     return Boolean(playerService.getPlayer(guildId)?.radioMode);
+  } catch {
+    return false;
+  }
+}
+
+function isRadioOnBreak(interaction: any, playerService: any): boolean {
+  const guildId = interaction.guild?.id;
+  if (!guildId) return false;
+
+  try {
+    return Boolean(playerService.getRadioService?.()?.isOnBreak(guildId));
   } catch {
     return false;
   }

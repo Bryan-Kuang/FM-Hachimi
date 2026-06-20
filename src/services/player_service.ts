@@ -11,6 +11,8 @@ import * as metrics from '../observability/metrics';
 import {
   RADIO_ONLY_STOP_MESSAGE,
   RADIO_ONLY_STOP_SUGGESTION,
+  RADIO_BREAK_MESSAGE,
+  RADIO_BREAK_SUGGESTION,
   isRadioBlockedButton,
 } from '../playback/radio_controls';
 import type Track from '../models/track';
@@ -41,6 +43,7 @@ interface PreExtractionServiceLike {
 
 interface RadioServiceLike {
   isEnabled(guildId: GuildId): boolean;
+  isOnBreak(guildId: GuildId): boolean;
   stop(guildId: GuildId): Promise<void>;
 }
 
@@ -384,6 +387,15 @@ class PlayerService extends EventEmitter {
         success: false,
         error: RADIO_ONLY_STOP_MESSAGE,
         suggestion: RADIO_ONLY_STOP_SUGGESTION,
+      };
+    }
+
+    // The break video is non-skippable; Stop still works to exit radio.
+    if (customId === 'skip' && this.radioService?.isOnBreak(guildId)) {
+      return {
+        success: false,
+        error: RADIO_BREAK_MESSAGE,
+        suggestion: RADIO_BREAK_SUGGESTION,
       };
     }
 

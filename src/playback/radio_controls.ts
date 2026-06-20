@@ -1,6 +1,11 @@
 export const RADIO_ONLY_STOP_MESSAGE = 'Only Stop and Skip are available in radio mode.';
 export const RADIO_ONLY_STOP_SUGGESTION = 'Use Stop to end radio mode, or Skip to jump to the next radio video.';
 
+// Shown when a user tries to skip the periodic "take a break" video, which is
+// intentionally non-skippable.
+export const RADIO_BREAK_MESSAGE = '休息一下，这一段不能跳过 🧘';
+export const RADIO_BREAK_SUGGESTION = '休息片刻吧，结束后会自动继续播放。';
+
 const blockedRadioButtonIds = new Set([
   'pause_resume',
   'prev',

@@ -10,7 +10,13 @@ jest.mock("../../src/services/logger_service", () => ({
 }));
 
 jest.mock("../../src/config/config", () => ({
-  radio: { enabled: true, replenishMaxAttempts: 3 },
+  radio: {
+    enabled: true,
+    replenishMaxAttempts: 3,
+    breakEnabled: true,
+    breakIntervalMinutes: 30,
+    breakVideoUrl: "https://www.bilibili.com/video/BV1a4sFzwE8E",
+  },
 }));
 
 const config = require("../../src/config/config");
@@ -71,6 +77,13 @@ beforeEach(() => {
   jest.clearAllMocks();
   config.radio.enabled = true;
   config.radio.replenishMaxAttempts = 3;
+  config.radio.breakEnabled = true;
+  config.radio.breakIntervalMinutes = 30;
+  config.radio.breakVideoUrl = "https://www.bilibili.com/video/BV1a4sFzwE8E";
+});
+
+afterEach(() => {
+  if (Date.now.mockRestore) Date.now.mockRestore();
 });
 
 describe("start", () => {
@@ -190,6 +203,113 @@ describe("advance hook", () => {
     const w = makeWorld();
     const handled = await w.service.handleAdvance("g-unknown");
     expect(handled).toBe(false);
+  });
+});
+
+describe("break video", () => {
+  const INTERVAL_MS = 30 * 60_000;
+  const lastTrack = (w) => {
+    const calls = w.playerService.addTrack.mock.calls;
+    return calls[calls.length - 1][1];
+  };
+  // Random tracks are titled BVsong<n>; the break video resolves to BV1a4sFzwE8E.
+  const isBreakTrack = (track) => track.title === "BV1a4sFzwE8E";
+
+  async function startAt(w, nowMs) {
+    jest.spyOn(Date, "now").mockReturnValue(nowMs);
+    await w.service.start("g1", w.voiceChannel, "chan-1");
+    await flush(); // let the on-deck prefetch settle
+  }
+
+  test("isOnBreak is false for a guild that never started radio", () => {
+    const w = makeWorld();
+    expect(w.service.isOnBreak("g-none")).toBe(false);
+  });
+
+  test("plays the break video on a natural end once the interval elapses", async () => {
+    const w = makeWorld();
+    await startAt(w, 1000);
+
+    Date.now.mockReturnValue(1000 + INTERVAL_MS + 1);
+    w.playerService.addTrack.mockClear();
+    const handled = await w.player.advanceHook("ended");
+
+    expect(handled).toBe(true);
+    expect(w.service.isOnBreak("g1")).toBe(true);
+    expect(isBreakTrack(lastTrack(w))).toBe(true);
+    expect(w.extractor.extractAudio).toHaveBeenCalledWith(config.radio.breakVideoUrl);
+  });
+
+  test("a user skip does not trigger the break, even when due", async () => {
+    const w = makeWorld();
+    await startAt(w, 1000);
+
+    Date.now.mockReturnValue(1000 + INTERVAL_MS + 1);
+    w.playerService.addTrack.mockClear();
+    const handled = await w.player.advanceHook("user");
+
+    expect(handled).toBe(true);
+    expect(w.service.isOnBreak("g1")).toBe(false);
+    expect(lastTrack(w).title).toMatch(/^BVsong/);
+    expect(w.extractor.extractAudio).not.toHaveBeenCalledWith(config.radio.breakVideoUrl);
+  });
+
+  test("resumes random rotation and re-arms the timer after the break ends", async () => {
+    const w = makeWorld();
+    await startAt(w, 1000);
+
+    // Trigger the break.
+    Date.now.mockReturnValue(1000 + INTERVAL_MS + 1);
+    await w.player.advanceHook("ended");
+    expect(w.service.isOnBreak("g1")).toBe(true);
+
+    // Break ends naturally -> promote the preserved on-deck random track.
+    Date.now.mockReturnValue(1000 + INTERVAL_MS + 2);
+    w.playerService.addTrack.mockClear();
+    const handled = await w.player.advanceHook("ended");
+    await flush();
+
+    expect(handled).toBe(true);
+    expect(w.service.isOnBreak("g1")).toBe(false);
+    expect(lastTrack(w).title).toMatch(/^BVsong/);
+
+    // Timer is re-armed: another immediate natural end does NOT break again.
+    w.playerService.addTrack.mockClear();
+    await w.player.advanceHook("ended");
+    expect(w.service.isOnBreak("g1")).toBe(false);
+    expect(lastTrack(w).title).toMatch(/^BVsong/);
+  });
+
+  test("falls back to a random track when the break video fails to extract", async () => {
+    const w = makeWorld();
+    w.extractor.extractAudio.mockImplementation(async (url) => {
+      if (url === config.radio.breakVideoUrl) throw new Error("break boom");
+      return extracted(url.split("/").pop());
+    });
+    await startAt(w, 1000);
+
+    Date.now.mockReturnValue(1000 + INTERVAL_MS + 1);
+    w.playerService.addTrack.mockClear();
+    const handled = await w.player.advanceHook("ended");
+
+    expect(handled).toBe(true);
+    expect(w.service.isOnBreak("g1")).toBe(false);
+    expect(lastTrack(w).title).toMatch(/^BVsong/);
+  });
+
+  test("never injects the break when breakEnabled is false", async () => {
+    const w = makeWorld();
+    config.radio.breakEnabled = false;
+    await startAt(w, 1000);
+
+    Date.now.mockReturnValue(1000 + INTERVAL_MS + 1);
+    w.playerService.addTrack.mockClear();
+    const handled = await w.player.advanceHook("ended");
+
+    expect(handled).toBe(true);
+    expect(w.service.isOnBreak("g1")).toBe(false);
+    expect(lastTrack(w).title).toMatch(/^BVsong/);
+    expect(w.extractor.extractAudio).not.toHaveBeenCalledWith(config.radio.breakVideoUrl);
   });
 });
 

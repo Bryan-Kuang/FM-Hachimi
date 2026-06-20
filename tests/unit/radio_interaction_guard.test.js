@@ -179,6 +179,21 @@ describe("radio interaction guard", () => {
     expect(playerService.skip).toHaveBeenCalledWith("guild-1");
   });
 
+  test("blocks the skip button while the non-skippable break video is playing", async () => {
+    const playerService = makePlayerService({ radioMode: true });
+    playerService.getRadioService = jest.fn().mockReturnValue({ isOnBreak: () => true });
+    const handler = createButtonHandler(playerService);
+    const interaction = makeButtonInteraction("skip");
+
+    await handler(interaction);
+
+    expect(interaction.followUp).toHaveBeenCalledWith({
+      content: expect.stringMatching(/休息一下/),
+      flags: 64,
+    });
+    expect(playerService.skip).not.toHaveBeenCalled();
+  });
+
   test("debounces radio skip for five seconds", async () => {
     Lock.shouldDebounce.mockReturnValueOnce(true);
     const playerService = makePlayerService({ radioMode: true });
@@ -258,6 +273,21 @@ describe("radio interaction guard", () => {
 
     expect(result.success).toBe(true);
     expect(player.skip).toHaveBeenCalled();
+  });
+
+  test("player service blocks skip while the break video is playing", async () => {
+    const { service, audioManager } = makeRealPlayerServiceForGuard({ radioMode: true });
+    service.setRadioService({ isEnabled: () => true, isOnBreak: () => true, stop: jest.fn() });
+
+    const result = await service.handleButtonInteraction({
+      customId: "skip",
+      guild: { id: "guild-1" },
+      channelId: "channel-1",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/休息一下/);
+    expect(audioManager.skipTrack).not.toHaveBeenCalled();
   });
 
   test("player service refuses radio option buttons in radio mode", async () => {
