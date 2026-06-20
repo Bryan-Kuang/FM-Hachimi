@@ -182,6 +182,46 @@ class RadioService {
   }
 
   /**
+   * Re-establish radio control over a guild whose interrupted track has already
+   * been restored and is (re)playing — used by ResumeService after a restart.
+   *
+   * Unlike start(), this does NOT reset the queue or fetch a fresh first track:
+   * the snapshot already restored the track that was playing, so we only need to
+   * re-attach the advance hook, flip the player back into radio mode, and arm the
+   * next track on deck. Without this, a resumed radio session plays its single
+   * restored track and then goes idle (no hook → empty queue → auto-disconnect).
+   */
+  async resume(guildId: string, channelId: string | null): Promise<void> {
+    if (!config.radio.enabled) return;
+
+    const player = this.playerService.getPlayer(guildId);
+    if (!player) {
+      logger.warn('Radio resume: player unavailable', { guildId });
+      return;
+    }
+
+    const state = this.get(guildId);
+    state.enabled = true;
+    state.channelId = channelId;
+    state.onDeck = null;
+    state.onDeckPromise = null;
+    state.breakPlaying = false;
+    state.nextBreakAt = Date.now() + this.breakIntervalMs();
+
+    player.advanceHook = (reason: 'ended' | 'user') => this.handleAdvance(guildId, reason);
+    player.radioMode = true;
+    player.radioBreak = false;
+    player.setLoopMode('none');
+
+    if (channelId) this.playerService.setUIContext(guildId, channelId);
+
+    // Arm the next random track so the first post-restart advance is gapless.
+    this.prefetch(guildId);
+
+    logger.info('Radio mode resumed after restart', { guildId, channelId });
+  }
+
+  /**
    * Disable radio mode for a guild. Does NOT stop the current track — that is
    * left to /stop. Detaches the advance hook so the player reverts to normal
    * queue behaviour.

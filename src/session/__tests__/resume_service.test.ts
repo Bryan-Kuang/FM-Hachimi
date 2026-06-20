@@ -1,0 +1,171 @@
+/**
+ * Unit tests for ResumeService — focused on the radio-mode round trip:
+ * a session that was in endless radio mode must be re-armed on restore so it
+ * keeps rotating instead of playing one track and going idle.
+ */
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+jest.mock('../../services/logger_service', () => ({
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  debug: jest.fn(),
+}));
+
+// Track is only used to rehydrate snapshot rows; a thin stand-in is enough.
+jest.mock('../../models/track', () => {
+  return class FakeTrack {
+    [k: string]: any;
+    constructor(raw: any, requestedBy: any) {
+      Object.assign(this, raw);
+      this.requestedBy = requestedBy;
+    }
+  };
+});
+
+import ResumeService = require('../resume_service');
+
+function makePlayer(overrides: any = {}): any {
+  return {
+    radioMode: false,
+    isPlaying: true,
+    isPaused: false,
+    currentTrack: { title: 'Now Playing' },
+    voiceConnection: { joinConfig: { channelId: 'voice-1' } },
+    queue: {
+      items: [{ bvid: 'BV1', title: 'Now Playing', requestedBy: '📻 Radio' }],
+      currentIndex: 0,
+      currentTrack: null,
+      loopMode: 'none',
+      setLoopMode: jest.fn(),
+      reset: jest.fn(),
+    },
+    getCurrentTime: () => 42,
+    audioPlayer: { once: jest.fn() },
+    joinVoiceChannel: jest.fn().mockResolvedValue(true),
+    playCurrentTrack: jest.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
+function makeSessionManager(player: any): any {
+  return {
+    sessions: new Map([['guild-1', { player, uiContext: { channelId: 'text-1' }, history: ['BVx'] }]]),
+    get: () => ({ addHistory: jest.fn() }),
+  };
+}
+
+describe('ResumeService radio mode', () => {
+  let tmpFile: string;
+
+  beforeEach(() => {
+    tmpFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'resume-')), 'state.json');
+  });
+
+  const opts = () => ({ enabled: true, dataFile: tmpFile, maxAgeMs: 60 * 60 * 1000 });
+
+  it('captures radioMode from the player', () => {
+    const svc = new ResumeService(opts());
+
+    const radioSnap = svc.capture(makeSessionManager(makePlayer({ radioMode: true })));
+    expect(radioSnap.guilds[0].radioMode).toBe(true);
+
+    const plainSnap = svc.capture(makeSessionManager(makePlayer({ radioMode: false })));
+    expect(plainSnap.guilds[0].radioMode).toBe(false);
+  });
+
+  it('re-arms radio on restore when the snapshot was in radio mode', async () => {
+    const svc = new ResumeService(opts());
+    // Persist a radio-mode snapshot to disk.
+    svc.persist(makeSessionManager(makePlayer({ radioMode: true })));
+    expect(fs.existsSync(tmpFile)).toBe(true);
+
+    const player = makePlayer({ radioMode: true });
+    const voiceChannel = {
+      id: 'voice-1',
+      isVoiceBased: () => true,
+      guild: { voiceStates: { cache: new Map([['human-1', { channelId: 'voice-1', id: 'human-1' }]]) } },
+    };
+    const client = {
+      user: { id: 'bot-1' },
+      channels: { fetch: jest.fn().mockResolvedValue(voiceChannel) },
+    };
+    const radioService = { resume: jest.fn().mockResolvedValue(undefined) };
+
+    const result = await svc.restore({
+      client,
+      audioManager: { getPlayer: () => player },
+      sessionManager: { get: () => ({ addHistory: jest.fn() }) },
+      radioService,
+    });
+
+    expect(result.restored).toBe(1);
+    expect(radioService.resume).toHaveBeenCalledWith('guild-1', 'text-1');
+  });
+
+  describe('auto-snapshot', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it('flushes periodically, with the first flush deferred one interval (crash-loop guard)', () => {
+      const svc = new ResumeService({ ...opts(), snapshotIntervalMs: 15000 });
+      const sm = makeSessionManager(makePlayer({ radioMode: true }));
+
+      svc.startAutoSnapshot(sm);
+      // Deferred: nothing written before the first interval elapses.
+      expect(fs.existsSync(tmpFile)).toBe(false);
+
+      jest.advanceTimersByTime(15000);
+      expect(fs.existsSync(tmpFile)).toBe(true);
+      const first = JSON.parse(fs.readFileSync(tmpFile, 'utf8'));
+      expect(first.guilds[0].radioMode).toBe(true);
+
+      jest.advanceTimersByTime(15000);
+      expect(fs.existsSync(tmpFile)).toBe(true);
+
+      svc.stopAutoSnapshot();
+      fs.unlinkSync(tmpFile);
+      jest.advanceTimersByTime(60000);
+      // No further writes after stop.
+      expect(fs.existsSync(tmpFile)).toBe(false);
+    });
+
+    it('does not start a timer when the interval is 0', () => {
+      const svc = new ResumeService({ ...opts(), snapshotIntervalMs: 0 });
+      svc.startAutoSnapshot(makeSessionManager(makePlayer()));
+      jest.advanceTimersByTime(120000);
+      expect(fs.existsSync(tmpFile)).toBe(false);
+    });
+  });
+
+  it('does not call radioService.resume for a non-radio snapshot', async () => {
+    const svc = new ResumeService(opts());
+    svc.persist(makeSessionManager(makePlayer({ radioMode: false })));
+
+    const player = makePlayer({ radioMode: false });
+    const voiceChannel = {
+      id: 'voice-1',
+      isVoiceBased: () => true,
+      guild: { voiceStates: { cache: new Map([['human-1', { channelId: 'voice-1', id: 'human-1' }]]) } },
+    };
+    const client = {
+      user: { id: 'bot-1' },
+      channels: { fetch: jest.fn().mockResolvedValue(voiceChannel) },
+    };
+    const radioService = { resume: jest.fn().mockResolvedValue(undefined) };
+
+    await svc.restore({
+      client,
+      audioManager: { getPlayer: () => player },
+      sessionManager: { get: () => ({ addHistory: jest.fn() }) },
+      radioService,
+    });
+
+    expect(radioService.resume).not.toHaveBeenCalled();
+  });
+});
