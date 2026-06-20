@@ -96,11 +96,10 @@ interface YouTubeCookieRefreshConfig {
 interface RadioConfig {
   enabled: boolean;
   replenishMaxAttempts: number;
-  // Periodic "take a break" video injected into radio rotation.
+  // Periodic "take a break" video injected into radio rotation. The feature is
+  // gated to the test guild (see TEST_GUILD_ID); the interval is global.
   breakEnabled: boolean;
   breakIntervalMinutes: number;
-  // Shorter interval applied only in the test guild (see TEST_GUILD_ID).
-  breakIntervalMinutesTest: number;
   breakVideoUrl: string;
 }
 
@@ -333,11 +332,10 @@ const config: BotConfig = {
     replenishMaxAttempts: parseIntegerEnv(process.env.RADIO_REPLENISH_MAX_ATTEMPTS, 3),
     // Every breakIntervalMinutes of radio uptime, the next track (after the
     // current one ends naturally) becomes a fixed, non-skippable "take a break"
-    // video. Set RADIO_BREAK_ENABLED=false to disable.
+    // video. Currently gated to the test guild only (see TEST_GUILD_ID); set
+    // RADIO_BREAK_ENABLED=false to disable entirely.
     breakEnabled: process.env.RADIO_BREAK_ENABLED !== "false",
-    breakIntervalMinutes: Math.max(1, parseIntegerEnv(process.env.RADIO_BREAK_INTERVAL_MIN, 30)),
-    // The test guild gets a shorter cadence so the feature is easy to verify.
-    breakIntervalMinutesTest: Math.max(1, parseIntegerEnv(process.env.RADIO_BREAK_INTERVAL_MIN_TEST, 5)),
+    breakIntervalMinutes: Math.max(1, parseIntegerEnv(process.env.RADIO_BREAK_INTERVAL_MIN, 5)),
     breakVideoUrl: process.env.RADIO_BREAK_VIDEO
       || "https://www.bilibili.com/video/BV1a4sFzwE8E",
   },

@@ -94,12 +94,8 @@ class RadioService {
     return this.states.get(guildId)?.breakPlaying ?? false;
   }
 
-  private breakIntervalMs(guildId: string): number {
-    // The test guild uses a shorter cadence so the feature is easy to verify.
-    const minutes = isTestGuild(guildId)
-      ? config.radio.breakIntervalMinutesTest
-      : config.radio.breakIntervalMinutes;
-    return Math.max(1, minutes) * 60_000;
+  private breakIntervalMs(): number {
+    return Math.max(1, config.radio.breakIntervalMinutes) * 60_000;
   }
 
   private get(guildId: string): RadioState {
@@ -161,7 +157,7 @@ class RadioService {
     state.onDeck = null;
     state.onDeckPromise = null;
     state.breakPlaying = false;
-    state.nextBreakAt = Date.now() + this.breakIntervalMs(guildId);
+    state.nextBreakAt = Date.now() + this.breakIntervalMs();
 
     // Take over advancement and disable looping so old tracks are never repeated.
     player.advanceHook = (reason: 'ended' | 'user') => this.handleAdvance(guildId, reason);
@@ -232,18 +228,24 @@ class RadioService {
     // always a natural end). Resume normal rotation and re-arm the timer.
     if (state.breakPlaying) {
       state.breakPlaying = false;
-      state.nextBreakAt = Date.now() + this.breakIntervalMs(guildId);
+      state.nextBreakAt = Date.now() + this.breakIntervalMs();
       return this.advanceNormal(guildId);
     }
 
     // Break is due: play the fixed, non-skippable break video next. Keep the
-    // on-deck track so the following random song is still gapless.
-    if (config.radio.breakEnabled && reason === 'ended' && Date.now() >= state.nextBreakAt) {
+    // on-deck track so the following random song is still gapless. The feature
+    // is gated to the test guild for now (see TEST_GUILD_ID).
+    if (
+      config.radio.breakEnabled &&
+      isTestGuild(guildId) &&
+      reason === 'ended' &&
+      Date.now() >= state.nextBreakAt
+    ) {
       const playedBreak = await this.playBreak(guildId);
       if (playedBreak) return true;
       // Extraction failed — fall through to a normal track and re-arm so we
       // never leave dead air.
-      state.nextBreakAt = Date.now() + this.breakIntervalMs(guildId);
+      state.nextBreakAt = Date.now() + this.breakIntervalMs();
     }
 
     return this.advanceNormal(guildId);
