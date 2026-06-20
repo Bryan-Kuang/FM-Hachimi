@@ -106,6 +106,9 @@ class AudioPlayer {
   // case AudioPlayer skips its normal queue-advance logic. RadioService owns it.
   advanceHook: ((reason: 'ended' | 'user') => Promise<boolean>) | null;
   radioMode: boolean;
+  // True while the non-skippable radio break video is the current track. Set by
+  // RadioService; drives the minimal "take a break" card.
+  radioBreak: boolean;
 
   constructor(extractor?: ExtractorLike | null, platformExtractors: PlatformExtractors = {}) {
     this.extractor = extractor ?? platformExtractors.bilibili ?? null;
@@ -136,6 +139,7 @@ class AudioPlayer {
 
     this.advanceHook = null;
     this.radioMode = false;
+    this.radioBreak = false;
 
     this.setupAudioPlayerEvents();
   }
@@ -1088,6 +1092,7 @@ class AudioPlayer {
       hasPrevious: this.canGoBack(),
       loopMode: this.loopMode,
       radioMode: this.radioMode,
+      isBreak: this.radioBreak,
       volume: this.volume,
       connected: !!this.voiceConnection,
     };

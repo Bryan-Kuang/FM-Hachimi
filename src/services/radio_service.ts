@@ -162,6 +162,7 @@ class RadioService {
     // Take over advancement and disable looping so old tracks are never repeated.
     player.advanceHook = (reason: 'ended' | 'user') => this.handleAdvance(guildId, reason);
     player.radioMode = true;
+    player.radioBreak = false;
     player.setLoopMode('none');
 
     // Visible queue = current track only. The on-deck track stays hidden.
@@ -200,6 +201,7 @@ class RadioService {
       if (player) {
         player.advanceHook = null;
         player.radioMode = false;
+        player.radioBreak = false;
         player.setLoopMode('queue');
       }
     } catch (e: unknown) {
@@ -228,6 +230,8 @@ class RadioService {
     // always a natural end). Resume normal rotation and re-arm the timer.
     if (state.breakPlaying) {
       state.breakPlaying = false;
+      const player = this.playerService.getPlayer(guildId);
+      if (player) player.radioBreak = false;
       state.nextBreakAt = Date.now() + this.breakIntervalMs();
       return this.advanceNormal(guildId);
     }
@@ -299,10 +303,14 @@ class RadioService {
     }
 
     const player = this.playerService.getPlayer(guildId);
+    // Flag before play() so the emitted state renders the minimal break card
+    // from the first paint (no full-card flash).
+    player.radioBreak = true;
     player.queue.reset();
     await this.playerService.addTrack(guildId, track, RADIO_REQUESTED_BY);
     const played = await this.playerService.play(guildId);
     if (!played) {
+      player.radioBreak = false;
       logger.warn('Radio break: failed to play break video', { guildId });
       return false;
     }
