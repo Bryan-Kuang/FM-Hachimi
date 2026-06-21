@@ -14,19 +14,8 @@ jest.mock("../../src/config/config", () => ({
     enabled: true,
     replenishMaxAttempts: 3,
     breakEnabled: true,
-    breakIntervalMinutes: 5,
+    breakIntervalMinutes: 10,
     breakVideoUrl: "https://www.bilibili.com/video/BV1a4sFzwE8E",
-  },
-  test: { guildId: null },
-}));
-
-// The real module captures TEST_GUILD_ID once at import; mock it to read the
-// (mocked) config dynamically so tests can flip the test guild at runtime.
-jest.mock("../../src/bot/testing_access", () => ({
-  isTestGuild: (guildId) => {
-    // eslint-disable-next-line global-require
-    const cfg = require("../../src/config/config");
-    return Boolean(cfg.test.guildId) && guildId === cfg.test.guildId;
   },
 }));
 
@@ -89,11 +78,8 @@ beforeEach(() => {
   config.radio.enabled = true;
   config.radio.replenishMaxAttempts = 3;
   config.radio.breakEnabled = true;
-  config.radio.breakIntervalMinutes = 5;
+  config.radio.breakIntervalMinutes = 10;
   config.radio.breakVideoUrl = "https://www.bilibili.com/video/BV1a4sFzwE8E";
-  // The break feature is gated to the test guild; treat g1 as the test guild
-  // by default so the break-behavior tests below exercise the happy path.
-  config.test.guildId = "g1";
 });
 
 afterEach(() => {
@@ -221,7 +207,7 @@ describe("advance hook", () => {
 });
 
 describe("break video", () => {
-  const INTERVAL_MS = 5 * 60_000;
+  const INTERVAL_MS = 10 * 60_000;
   const lastTrack = (w) => {
     const calls = w.playerService.addTrack.mock.calls;
     return calls[calls.length - 1][1];
@@ -229,9 +215,9 @@ describe("break video", () => {
   // Random tracks are titled BVsong<n>; the break video resolves to BV1a4sFzwE8E.
   const isBreakTrack = (track) => track.title === "BV1a4sFzwE8E";
 
-  async function startAt(w, nowMs) {
+  async function startAt(w, nowMs, guildId = "g1") {
     jest.spyOn(Date, "now").mockReturnValue(nowMs);
-    await w.service.start("g1", w.voiceChannel, "chan-1");
+    await w.service.start(guildId, w.voiceChannel, "chan-1");
     await flush(); // let the on-deck prefetch settle
   }
 
@@ -326,19 +312,17 @@ describe("break video", () => {
     expect(w.extractor.extractAudio).not.toHaveBeenCalledWith(config.radio.breakVideoUrl);
   });
 
-  test("never injects the break outside the test guild, even when due", async () => {
-    config.test.guildId = "g-other"; // g1 is NOT the test guild
+  test("fires in any guild (feature is global, not test-guild gated)", async () => {
     const w = makeWorld();
-    await startAt(w, 1000);
+    await startAt(w, 1000, "g-public");
 
     Date.now.mockReturnValue(1000 + INTERVAL_MS + 1);
     w.playerService.addTrack.mockClear();
     const handled = await w.player.advanceHook("ended");
 
     expect(handled).toBe(true);
-    expect(w.service.isOnBreak("g1")).toBe(false);
-    expect(lastTrack(w).title).toMatch(/^BVsong/);
-    expect(w.extractor.extractAudio).not.toHaveBeenCalledWith(config.radio.breakVideoUrl);
+    expect(w.service.isOnBreak("g-public")).toBe(true);
+    expect(isBreakTrack(lastTrack(w))).toBe(true);
   });
 });
 
