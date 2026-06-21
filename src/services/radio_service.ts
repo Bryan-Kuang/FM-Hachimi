@@ -16,7 +16,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as logger from './logger_service';
 import config = require('../config/config');
-import { isTestGuild } from '../bot/testing_access';
 import type { ExtractedTrackData } from './types';
 
 const RADIO_REQUESTED_BY = '📻 Radio';
@@ -277,14 +276,8 @@ class RadioService {
     }
 
     // Break is due: play the fixed, non-skippable break video next. Keep the
-    // on-deck track so the following random song is still gapless. The feature
-    // is gated to the test guild for now (see TEST_GUILD_ID).
-    if (
-      config.radio.breakEnabled &&
-      isTestGuild(guildId) &&
-      reason === 'ended' &&
-      Date.now() >= state.nextBreakAt
-    ) {
+    // on-deck track so the following random song is still gapless.
+    if (config.radio.breakEnabled && reason === 'ended' && Date.now() >= state.nextBreakAt) {
       const playedBreak = await this.playBreak(guildId);
       if (playedBreak) return true;
       // Extraction failed — fall through to a normal track and re-arm so we

@@ -334,10 +334,9 @@ const config: BotConfig = {
     replenishMaxAttempts: parseIntegerEnv(process.env.RADIO_REPLENISH_MAX_ATTEMPTS, 3),
     // Every breakIntervalMinutes of radio uptime, the next track (after the
     // current one ends naturally) becomes a fixed, non-skippable "take a break"
-    // video. Currently gated to the test guild only (see TEST_GUILD_ID); set
-    // RADIO_BREAK_ENABLED=false to disable entirely.
+    // video. Active in every guild; set RADIO_BREAK_ENABLED=false to disable.
     breakEnabled: process.env.RADIO_BREAK_ENABLED !== "false",
-    breakIntervalMinutes: Math.max(1, parseIntegerEnv(process.env.RADIO_BREAK_INTERVAL_MIN, 5)),
+    breakIntervalMinutes: Math.max(1, parseIntegerEnv(process.env.RADIO_BREAK_INTERVAL_MIN, 10)),
     breakVideoUrl: process.env.RADIO_BREAK_VIDEO
       || "https://www.bilibili.com/video/BV1a4sFzwE8E",
   },
