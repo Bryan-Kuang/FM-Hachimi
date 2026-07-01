@@ -1007,8 +1007,17 @@ class AudioPlayer {
 
     trackAtStart.incrementRetry();
     if (trackAtStart.retryCount > 2) {
-      logger.error('Max retry attempts reached, skipping track', { title: trackAtStart.title || 'Unknown' });
-      this.handleTrackEnd();
+      // Drop the track from the queue entirely — handleTrackEnd() is not
+      // enough: with loopMode 'queue'/'track' advance() would serve the same
+      // exhausted track again with its retryCount intact, and every idle
+      // event would land right back here with no backoff — an infinite
+      // ~1 req/sec URL-hammering loop (2026-07-01 production incident).
+      logger.error('Max retry attempts reached, dropping unplayable track', {
+        title: trackAtStart.title || 'Unknown',
+        guild: this.currentGuild,
+      });
+      this.queue.dropCurrent();
+      await this.skip('ended');
       return;
     }
 

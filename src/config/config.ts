@@ -303,11 +303,14 @@ const config: BotConfig = {
     preextractEnabled: process.env.YOUTUBE_PREEXTRACT_ENABLED !== "false",
     preextractConcurrency: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_PREEXTRACT_CONCURRENCY, 1)),
     preextractMaxPerCardSet: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_PREEXTRACT_MAX_PER_CARD_SET, 3)),
-    // yt-dlp player_client(s) used for extraction. 'tv,ios' return pre-signed
-    // stream URLs, so yt-dlp skips downloading+executing YouTube's nsig player
-    // JS — the dominant extraction cost. Set to '' to fall back to yt-dlp's
-    // default clients (web + JS decipher) if bot-detection ever requires it.
-    playerClient: (process.env.YOUTUBE_PLAYER_CLIENT ?? "tv,ios").trim(),
+    // yt-dlp player_client(s) used for extraction. Empty (default) lets yt-dlp
+    // pick its own clients — its maintainers track YouTube's rollout of
+    // PO-token enforcement per client, so pinning is a liability: the pinned
+    // 'tv' client started returning 403 stream URLs on 2026-07-01 (no GVS PO
+    // token). Set explicitly (e.g. 'tv,ios') only for experiments; pinned
+    // clients skip the nsig JS solve and extract faster, but break whenever
+    // YouTube tightens that client.
+    playerClient: (process.env.YOUTUBE_PLAYER_CLIENT ?? "").trim(),
     // Persistent on-disk cache of downloaded audio for replayed videos — a hit
     // plays from a local file (instant, no yt-dlp, no signed-URL expiry).
     mediaCacheEnabled: process.env.YOUTUBE_MEDIA_CACHE_ENABLED !== "false",

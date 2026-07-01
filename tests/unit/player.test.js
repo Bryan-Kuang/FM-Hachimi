@@ -99,16 +99,21 @@ describe("AudioPlayer", () => {
       jest.useRealTimers();
     });
 
-    test("skips track after max retries (>2)", async () => {
+    test("drops track from queue after max retries (>2)", async () => {
       const Track = require("../../src/models/track");
-      player.currentTrack = new Track({ title: "Test", normalizedUrl: null, bvid: "BVtest", audioUrl: "url", duration: 180 }, "user");
-      player.currentTrack.retryCount = 2; // set after construction
-      player.handleTrackEnd = jest.fn();
+      const track = new Track({ title: "Test", normalizedUrl: null, bvid: "BVtest", audioUrl: "url", duration: 180 }, "user");
+      track.retryCount = 2; // set after construction
+      player.queue.items = [track];
+      player.queue.currentIndex = 0;
+      player.currentTrack = track;
+      player.playCurrentTrack = jest.fn().mockResolvedValue(true);
 
       await player.retryCurrentTrack();
 
-      // retryCount becomes 3, exceeds max of 2
-      expect(player.handleTrackEnd).toHaveBeenCalled();
+      // retryCount becomes 3, exceeds max of 2 → track removed from queue so
+      // queue-loop cannot resurrect it (2026-07-01 retry storm regression)
+      expect(player.queue.length).toBe(0);
+      expect(player.playCurrentTrack).not.toHaveBeenCalled();
     });
 
     test("refreshes stale YouTube tracks with the YouTube extractor", async () => {

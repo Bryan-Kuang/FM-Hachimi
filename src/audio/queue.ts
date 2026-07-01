@@ -130,6 +130,28 @@ class Queue {
   }
 
   /**
+   * Remove the currently-playing track (used when it is unplayable — e.g.
+   * CDN retries exhausted). Unlike remove(), this targets the current index.
+   * The cursor steps back one slot so a following advance() lands on the
+   * dropped track's successor, and currentTrack is cleared so neither
+   * track-loop nor queue-loop can resurrect it (2026-07-01 retry storm).
+   */
+  dropCurrent(): Track | null {
+    if (this.currentIndex < 0 || this.currentIndex >= this.items.length) return null;
+
+    const [dropped] = this.items.splice(this.currentIndex, 1);
+    this.currentIndex--;
+    this.currentTrack = null;
+
+    logger.info('Dropped unplayable track from queue', {
+      title: dropped?.title || 'Unknown',
+      newQueueLength: this.items.length,
+      newCurrentIndex: this.currentIndex,
+    });
+    return dropped ?? null;
+  }
+
+  /**
    * Shuffle all tracks except the currently-playing one (which moves to
    * index 0). Fisher–Yates on the remainder.
    */

@@ -163,18 +163,22 @@ describe("regression: CDN retry exponential backoff", () => {
       expect(player.handleTrackEnd).not.toHaveBeenCalled();
     });
 
-    test("stops retrying after retryCount > 2 (respects existing max-attempt policy)", async () => {
+    test("drops the track after retryCount > 2 (no queue-loop resurrection)", async () => {
+      // 2026-07-01 storm regression: the exhausted track must be REMOVED,
+      // not handed back to handleTrackEnd where queue-loop revives it.
       const track = {
         title: "t",
         normalizedUrl: "https://bilibili.com/video/BV1",
         retryCount: 2, // next incrementRetry → 3, which exceeds the limit
         incrementRetry() { this.retryCount++; },
       };
+      player.queue.items = [track];
+      player.queue.currentIndex = 0;
       player.currentTrack = track;
 
       await player.retryCurrentTrack();
 
-      expect(player.handleTrackEnd).toHaveBeenCalledTimes(1);
+      expect(player.queue.length).toBe(0);
       expect(player.playCurrentTrack).not.toHaveBeenCalled();
     });
   });
