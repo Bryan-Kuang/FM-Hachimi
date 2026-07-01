@@ -25,7 +25,14 @@ RUN apk add --no-cache \
 # [default] extras include yt-dlp-ejs — the External JavaScript Solver
 # scripts that YouTube's signature challenge requires. Node.js (already in
 # this image) is used as the JS runtime via --js-runtimes node.
-RUN pip3 install --no-cache-dir --break-system-packages --upgrade "yt-dlp[default]" && \
+# bgutil-ytdlp-pot-provider is the yt-dlp plugin half of the PO-token
+# provider: it fetches GVS PO tokens from the pot-provider sidecar
+# (see docker-compose.yml + YTDLP_POT_PROVIDER_URL). YouTube requires PO
+# tokens for a growing set of clients — without one, stream URLs 403
+# (2026-07-01 tv-client incident).
+RUN pip3 install --no-cache-dir --break-system-packages --upgrade \
+        "yt-dlp[default]" \
+        bgutil-ytdlp-pot-provider && \
     mkdir -p /home/node/.config/yt-dlp && \
     echo "--js-runtimes node" > /home/node/.config/yt-dlp/config && \
     chown -R node:node /home/node/.config

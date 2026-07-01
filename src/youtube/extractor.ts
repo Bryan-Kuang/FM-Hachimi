@@ -233,9 +233,22 @@ class YouTubeExtractor {
       '--no-check-certificate',
       '--no-warnings',
       ...this._playerClientArgs(),
+      ...this._potProviderArgs(),
       '--user-agent', this.userAgent,
       ...this._getCookieArgs(),
     ];
+  }
+
+  /**
+   * bgutil PO-token provider selector. When YTDLP_POT_PROVIDER_URL points at
+   * a bgutil-ytdlp-pot-provider sidecar, yt-dlp (with the matching plugin
+   * installed in the image) fetches GVS PO tokens on demand — required by a
+   * growing set of YouTube clients for stream URLs to not 403.
+   */
+  private _potProviderArgs(): string[] {
+    const base = config.youtube.potProviderUrl;
+    if (!base) return [];
+    return ['--extractor-args', `youtubepot-bgutilhttp:base_url=${base}`];
   }
 
   /**

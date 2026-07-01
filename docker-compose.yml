@@ -34,6 +34,10 @@ services:
       METRICS_ENABLED: "true"
       METRICS_HOST: "0.0.0.0"
       METRICS_PORT: "9090"
+      # bgutil PO-token provider sidecar (service below). The yt-dlp plugin in
+      # the bot image fetches GVS PO tokens from it — YouTube requires PO
+      # tokens for a growing set of clients or stream URLs 403.
+      YTDLP_POT_PROVIDER_URL: "http://pot-provider:4416"
 
     # Expose the in-container metrics server to the host's loopback only.
     # The metrics server must also be told to bind on all interfaces inside
@@ -84,5 +88,34 @@ services:
       # Persistent downloaded-audio cache (replayed videos play from local files).
       - ./cache:/app/cache
 
-    # Network mode
-    network_mode: bridge
+    # Shared network with the pot-provider sidecar. Was `network_mode: bridge`
+    # before 2026-07: that put the bot on the default bridge while the
+    # provider sat on a compose network — unreachable, so yt-dlp silently ran
+    # with "PO Token Providers: none" (part of the 2026-07-01 403 incident).
+    networks:
+      - botnet
+
+  # bgutil PO-token provider — generates the "proof of origin" tokens YouTube
+  # demands for stream URLs. The bot image carries the matching yt-dlp plugin
+  # (bgutil-ytdlp-pot-provider) which calls this service on demand; keep the
+  # image and the pip package on compatible versions (both track latest).
+  # No host ports: only reachable from the bot over the compose network.
+  pot-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: fm-hachimi-pot-provider
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    networks:
+      - botnet
+
+networks:
+  botnet:
