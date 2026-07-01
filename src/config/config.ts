@@ -77,6 +77,7 @@ interface YouTubeConfig {
   preextractConcurrency: number;
   preextractMaxPerCardSet: number;
   playerClient: string;
+  potProviderUrl: string;
   mediaCacheEnabled: boolean;
   mediaCacheDir: string;
   mediaCacheMaxEntries: number;
@@ -311,6 +312,11 @@ const config: BotConfig = {
     // clients skip the nsig JS solve and extract faster, but break whenever
     // YouTube tightens that client.
     playerClient: (process.env.YOUTUBE_PLAYER_CLIENT ?? "").trim(),
+    // bgutil PO-token provider (sidecar container). When set, every yt-dlp
+    // invocation carries the bgutil-http extractor arg so stream URLs come
+    // back PO-token'd — YouTube enforces GVS PO tokens per client and
+    // extended them to the tv client on 2026-07-01 (403 storm incident).
+    potProviderUrl: (process.env.YTDLP_POT_PROVIDER_URL ?? "").trim(),
     // Persistent on-disk cache of downloaded audio for replayed videos — a hit
     // plays from a local file (instant, no yt-dlp, no signed-URL expiry).
     mediaCacheEnabled: process.env.YOUTUBE_MEDIA_CACHE_ENABLED !== "false",
