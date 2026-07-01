@@ -9,6 +9,12 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Weekly image rebuild so yt-dlp never drifts far behind YouTube's
+  # cat-and-mouse changes (2026-07-01: month-old yt-dlp + pinned tv client
+  # = every stream URL 403). Mondays 20:00 UTC (~4am CST, low usage).
+  # Scheduled runs rebuild with --no-cache and redeploy the same commit.
+  schedule:
+    - cron: '0 20 * * 1'
   workflow_dispatch:
     inputs:
       environment:
@@ -79,27 +85,31 @@ jobs:
         run: echo "name=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || github.event_name == 'schedule'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build image (push only on push to main)
+      - name: Build image (push on main push + weekly schedule)
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event_name == 'push' }}
+          push: ${{ github.event_name == 'push' || github.event_name == 'schedule' }}
           tags: |
             ${{ steps.img.outputs.name }}:latest
             ${{ steps.img.outputs.name }}:${{ github.sha }}
+          # Scheduled rebuilds exist to pick up a fresh yt-dlp — layer caching
+          # would defeat that (the pip install layer would be a cache hit), so
+          # force a clean build on schedule.
+          no-cache: ${{ github.event_name == 'schedule' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   # ── 3. Deploy the tested image to the VPS (main only) ────────────────────
   deploy:
     needs: image
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
