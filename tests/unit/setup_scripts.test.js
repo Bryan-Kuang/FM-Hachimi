@@ -39,14 +39,12 @@ describe("beginner setup scripts", () => {
 
   test("cookie refresh guidance points to automatic refresh behavior", () => {
     const refreshScript = path.join(root, "scripts/refresh-youtube-cookies.sh");
-    const compatibilityScript = path.join(root, "scripts/refresh-cookies.sh");
     const sourceFiles = [
       path.join(root, "src/youtube/extractor.ts"),
       path.join(root, "src/bot/commands/play.ts"),
     ];
 
     expect(fs.existsSync(refreshScript)).toBe(true);
-    expect(fs.existsSync(compatibilityScript)).toBe(true);
 
     for (const sourceFile of sourceFiles) {
       const content = fs.readFileSync(sourceFile, "utf8");

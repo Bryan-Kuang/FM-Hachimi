@@ -136,3 +136,6 @@ data/*.json
 
 # World Cup runtime state (subscriptions.json, state.json)
 data/world_cup/
+
+# Agent session state (local-only)
+.omo/
