@@ -143,10 +143,10 @@ describe("YouTubeExtractor extraction cache behavior", () => {
     const args = spawn.mock.calls[0][1];
     expect(args[args.indexOf("--format") + 1])
       .toBe("bestaudio[vcodec=none][protocol^=http][acodec!=none]/bestaudio[vcodec=none][acodec!=none]/best[height<=360][protocol^=http][acodec!=none]/best[height<=360][protocol=m3u8_native][acodec!=none]/best[height<=360][acodec!=none]/worst[acodec!=none]");
-    // Default player_client (tv,ios) returns pre-signed URLs, so the fast path
-    // uses --extractor-args instead of executing the nsig JS via --js-runtimes.
-    expect(args[args.indexOf("--extractor-args") + 1]).toBe("youtube:player_client=tv,ios");
-    expect(args).not.toContain("--js-runtimes");
+    // Default player_client is empty: yt-dlp picks its own clients (tracks
+    // YouTube's per-client PO-token enforcement) and solves nsig JS via node.
+    expect(args).not.toContain("--extractor-args");
+    expect(args[args.indexOf("--js-runtimes") + 1]).toBe("node");
   });
 
   test("bot-detection errors refresh cookies once and retry extraction", async () => {

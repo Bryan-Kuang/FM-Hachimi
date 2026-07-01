@@ -239,11 +239,12 @@ class YouTubeExtractor {
   }
 
   /**
-   * Player-client selector. 'tv,ios' return pre-signed stream URLs so yt-dlp
-   * skips downloading + executing YouTube's nsig player JS (the dominant
-   * extraction cost), which is why --js-runtimes is no longer needed on the hot
-   * path. Configurable via YOUTUBE_PLAYER_CLIENT; empty string restores yt-dlp's
-   * default clients (web + JS decipher) for bot-detection fallback.
+   * Player-client selector. Empty spec (the default) lets yt-dlp pick its own
+   * clients and solve the nsig player JS via node — yt-dlp's maintainers track
+   * YouTube's per-client PO-token enforcement, so this stays working across
+   * rollouts. A pinned spec (e.g. 'tv,ios') returns pre-signed stream URLs and
+   * skips the JS solve (faster), but breaks when YouTube tightens that client:
+   * pinned 'tv' began returning 403 stream URLs on 2026-07-01.
    */
   private _playerClientArgs(): string[] {
     const spec = config.youtube.playerClient;
