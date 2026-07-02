@@ -196,18 +196,19 @@ class BilibiliExtractor {
   }
 
   /**
-   * Extract audio stream URL and metadata from Bilibili video
-   * @param {string} url - Bilibili video URL
-   * @param {number} retryCount - Current retry attempt
-   * @param {number} maxRetries - Maximum retry attempts
-   * @returns {Promise<Object>} - Video metadata and audio stream info
+   * Extract audio stream URL and metadata from Bilibili video.
+   * Second arg mirrors YouTubeExtractor: either a starting retry count
+   * (internal/legacy) or an options object — so both platforms satisfy the
+   * shared `AudioExtractorLike` (`extractAudio(url, options?)`) duck-type.
    */
   async extractAudio(
     url: string,
-    retryCount = 0,
+    retryOrOptions: number | ExtractionOptions = 0,
     maxRetries = 2,
-    options: ExtractionOptions = {},
   ): Promise<ExtractedAudio> {
+    const retryCount = typeof retryOrOptions === 'number' ? retryOrOptions : 0;
+    const options: ExtractionOptions =
+      typeof retryOrOptions === 'number' ? {} : retryOrOptions;
     const totalStartedAt = Date.now();
     logger.info("Starting audio extraction", { url, attempt: retryCount + 1 });
 

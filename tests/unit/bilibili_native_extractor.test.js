@@ -170,7 +170,7 @@ describe("Bilibili native extractor", () => {
     extractor._ytdlpChecked = true;
     const stages = [];
 
-    const result = await extractor.extractAudio(VIDEO_URL, 0, 2, {
+    const result = await extractor.extractAudio(VIDEO_URL, {
       onStage: (stage, details) => stages.push({ stage, details }),
     });
 

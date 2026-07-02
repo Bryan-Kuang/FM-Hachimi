@@ -208,7 +208,7 @@ class AudioManager {
         onStage: options.onStage,
         logLabel: 'Bilibili direct playback timing',
         logContext: { guild: guild.name, guildId, user: user.username },
-        extract: (onStage) => (this.extractor as any).extractAudio(url, 0, 2, { onStage }),
+        extract: (onStage) => (this.extractor as any).extractAudio(url, { onStage }),
       });
 
       if (!ej.ok) {

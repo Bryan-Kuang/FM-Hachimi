@@ -1,4 +1,4 @@
-import type { ExtractedTrackData, PlayResult } from '../services/types';
+import type { AudioExtractorLike, ExtractedTrackData, PlayResult } from '../services/types';
 import { emitPlaybackStage, type PlaybackStageReporter } from './stage_feedback';
 import { extractAndJoin } from './extract_join';
 
@@ -33,18 +33,11 @@ interface PlayerLike {
   leaveVoiceChannel?(): void;
 }
 
-interface YouTubeExtractorLike {
-  extractAudio(
-    url: string,
-    options?: { priority?: 'foreground' | 'background'; source?: string; onStage?: PlaybackStageReporter },
-  ): Promise<ExtractedTrackData>;
-}
-
 interface PlayerServiceLike {
   setUIContext(guildId: string, channelId: string): void;
   notifyState(guildId: string): void;
   playBilibiliVideo(interaction: InteractionLike, url: string, options?: { onStage?: PlaybackStageReporter }): Promise<PlayResult>;
-  getYouTubeExtractor(): YouTubeExtractorLike | null;
+  getYouTubeExtractor(): AudioExtractorLike | null;
   getPlayer(guildId: string): PlayerLike;
   addTrack(guildId: string, videoData: ExtractedTrackData, requestedBy: string): Promise<unknown>;
   play(guildId: string): Promise<boolean>;

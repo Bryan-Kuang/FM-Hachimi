@@ -7,6 +7,7 @@
 
 import type Track from '../models/track';
 import type { GuildId, ChannelId, MessageId } from '../types';
+import type { PlaybackStageReporter } from '../playback/stage_feedback';
 
 // ─── AudioPlayer state snapshot (returned by AudioPlayer.getState()) ──────
 
@@ -105,12 +106,29 @@ export interface InterfaceUpdaterLike {
 
 // ─── Extractor duck-type ──────────────────────────────────────────────────
 
-/** Minimal shape an extractor must satisfy for PlayerService. */
+/** Options accepted by both platform extractors' extractAudio. */
+export interface ExtractAudioOptions {
+  priority?: 'foreground' | 'background';
+  source?: string;
+  onStage?: PlaybackStageReporter;
+}
+
+/**
+ * Canonical extractor shape (Bilibili and YouTube both satisfy it).
+ * Consumers that need less use the narrow Pick<> aliases below so test
+ * mocks never have to implement methods they don't call.
+ */
 export interface ExtractorLike {
-  extractAudio(url: string): Promise<ExtractedTrackData>;
+  extractAudio(url: string, options?: ExtractAudioOptions): Promise<ExtractedTrackData>;
   searchVideos(keyword: string, limit?: number): Promise<SearchResultResponse>;
   getAudioStreamUrl(normalizedUrl: string): Promise<string>;
 }
+
+/** For consumers that only refresh stale stream URLs (e.g. AudioPlayer). */
+export type StreamUrlExtractorLike = Pick<ExtractorLike, 'getAudioStreamUrl'>;
+
+/** For consumers that only extract (e.g. pre-extraction, coordinator). */
+export type AudioExtractorLike = Pick<ExtractorLike, 'extractAudio'>;
 
 /** Data returned by the extractor — superset of what Track needs. */
 export interface ExtractedTrackData {

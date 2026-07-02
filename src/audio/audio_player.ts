@@ -26,6 +26,7 @@ import config = require('../config/config');
 import Queue from './queue';
 import type Track from '../models/track';
 import * as cdnRetry from './cdn_retry';
+import type { StreamUrlExtractorLike } from '../services/types';
 
 /** Minimal voice-channel shape — avoids importing discord.js types here. */
 interface VoiceChannelLike {
@@ -34,13 +35,8 @@ interface VoiceChannelLike {
   guild: { id: string; voiceAdapterCreator: any };
 }
 
-/** Extractor duck-type: only the methods AudioPlayer calls. */
-interface ExtractorLike {
-  getAudioStreamUrl(normalizedUrl: string): Promise<string>;
-}
-
 type TrackPlatform = 'bilibili' | 'youtube';
-type PlatformExtractors = Partial<Record<TrackPlatform, ExtractorLike | null>>;
+type PlatformExtractors = Partial<Record<TrackPlatform, StreamUrlExtractorLike | null>>;
 
 let ffmpegAvailabilityPromise: Promise<void> | null = null;
 
@@ -69,7 +65,7 @@ function checkFFmpegAvailability(): Promise<void> {
 
 class AudioPlayer {
   // ── Dependencies ─────────────────────────────────────────────────────
-  extractor: ExtractorLike | null;
+  extractor: StreamUrlExtractorLike | null;
   private extractorsByPlatform: PlatformExtractors;
 
   // ── Queue (delegated) ────────────────────────────────────────────────
@@ -110,7 +106,7 @@ class AudioPlayer {
   // RadioService; drives the minimal "take a break" card.
   radioBreak: boolean;
 
-  constructor(extractor?: ExtractorLike | null, platformExtractors: PlatformExtractors = {}) {
+  constructor(extractor?: StreamUrlExtractorLike | null, platformExtractors: PlatformExtractors = {}) {
     this.extractor = extractor ?? platformExtractors.bilibili ?? null;
     this.extractorsByPlatform = {
       bilibili: this.extractor,
@@ -148,7 +144,7 @@ class AudioPlayer {
     return checkFFmpegAvailability();
   }
 
-  setExtractorForPlatform(platform: TrackPlatform, extractor: ExtractorLike | null): void {
+  setExtractorForPlatform(platform: TrackPlatform, extractor: StreamUrlExtractorLike | null): void {
     this.extractorsByPlatform[platform] = extractor;
     if (platform === 'bilibili') {
       this.extractor = extractor;
@@ -178,7 +174,7 @@ class AudioPlayer {
     return null;
   }
 
-  private getRefreshExtractor(track: Track | null): ExtractorLike | null {
+  private getRefreshExtractor(track: Track | null): StreamUrlExtractorLike | null {
     const platform = this.inferTrackPlatform(track);
     if (platform && this.extractorsByPlatform[platform]) {
       return this.extractorsByPlatform[platform] ?? null;

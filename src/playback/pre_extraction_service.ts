@@ -2,16 +2,9 @@ import * as logger from '../services/logger_service';
 import UrlValidator = require('../bilibili/validator');
 import YouTubeValidator = require('../youtube/validator');
 import config = require('../config/config');
+import type { AudioExtractorLike } from '../services/types';
 
 type PreExtractionSource = 'play_search' | 'search_command' | 'daily_recommendation';
-
-interface BilibiliExtractorLike {
-  extractAudio(url: string): Promise<unknown>;
-}
-
-interface YouTubeExtractorLike {
-  extractAudio(url: string, options?: { priority?: 'foreground' | 'background'; source?: string }): Promise<unknown>;
-}
 
 interface PreExtractionContext {
   source: PreExtractionSource;
@@ -20,8 +13,8 @@ interface PreExtractionContext {
 }
 
 interface PreExtractionServiceOptions {
-  bilibiliExtractor: BilibiliExtractorLike;
-  youtubeExtractor?: YouTubeExtractorLike | null;
+  bilibiliExtractor: AudioExtractorLike;
+  youtubeExtractor?: AudioExtractorLike | null;
   enabled?: boolean;
   concurrency?: number;
   maxPerCardSet?: number;
@@ -41,8 +34,8 @@ interface PreExtractionSummary {
 }
 
 class PreExtractionService {
-  private bilibiliExtractor: BilibiliExtractorLike;
-  private youtubeExtractor: YouTubeExtractorLike | null;
+  private bilibiliExtractor: AudioExtractorLike;
+  private youtubeExtractor: AudioExtractorLike | null;
   private enabled: boolean;
   private concurrency: number;
   private maxPerCardSet: number;
