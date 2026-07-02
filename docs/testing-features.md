@@ -37,10 +37,11 @@ Default public command deployment remains stable-only:
 npm run deploy:commands
 ```
 
-For manual local/dev recovery only, deploy all commands to `GUILD_ID` with:
+If a guild ends up with duplicate commands (global + guild-scoped), clear the
+guild-scoped set:
 
 ```bash
-DEPLOY_LEGACY_GUILD_COMMANDS=true npm run deploy:commands
+CLEAR_GUILD_COMMANDS=true GUILD_ID=<guild-id> npm run deploy:commands
 ```
 
 ## Adding Testing Buttons Or Select Menus

@@ -14,7 +14,6 @@
     "docker:dev": "docker compose -f docker-compose.dev.yml up --build",
     "docker:build": "docker build .",
     "bench:extractors": "node scripts/bench-extractors.js",
-    "deploy": "bash scripts/deploy/deploy.sh",
     "deploy:commands": "node scripts/deploy-commands.js",
     "deploy:commands:test": "DEPLOY_TEST_COMMANDS=true node scripts/deploy-commands.js",
     "lint": "eslint src/",

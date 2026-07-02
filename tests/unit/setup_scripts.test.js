@@ -38,29 +38,15 @@ describe("beginner setup scripts", () => {
   });
 
   test("cookie refresh guidance points to automatic refresh behavior", () => {
-    const refreshScript = path.join(root, "scripts/refresh-youtube-cookies.sh");
     const sourceFiles = [
       path.join(root, "src/youtube/extractor.ts"),
       path.join(root, "src/bot/commands/play.ts"),
     ];
 
-    expect(fs.existsSync(refreshScript)).toBe(true);
-
     for (const sourceFile of sourceFiles) {
       const content = fs.readFileSync(sourceFile, "utf8");
       expect(content).toContain("automatic cookie refresh");
     }
-  });
-
-  test("YouTube cookie refresh avoids playback extraction during export", () => {
-    const refreshScript = fs.readFileSync(path.join(root, "scripts/refresh-youtube-cookies.sh"), "utf8");
-
-    expect(refreshScript).toContain("UPLOAD_ONLY");
-    expect(refreshScript).toContain("https://www.youtube.com/");
-    expect(refreshScript).toContain("youtubetab:skip=authcheck");
-    expect(refreshScript).toContain("--flat-playlist");
-    expect(refreshScript).toContain("--playlist-items 0");
-    expect(refreshScript).not.toContain("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
   });
 
   test("Docker mounts YouTube cookies through secrets directory and browser profile read-only", () => {
@@ -71,13 +57,12 @@ describe("beginner setup scripts", () => {
     expect(prodCompose).not.toContain("./youtube_cookies.txt:/app/youtube_cookies.txt");
   });
 
-  test("deploy migrates old root cookie files into secrets and removes root duplicates", () => {
+  test("deploy ensures secrets-mounted cookie files exist with restricted perms", () => {
     const deployScript = fs.readFileSync(path.join(root, "scripts/deploy/remote-deploy.sh"), "utf8");
 
     expect(deployScript).toContain("mkdir -p data logs secrets");
-    expect(deployScript).toContain("secrets/youtube_cookies.txt");
-    expect(deployScript).toContain("rm -f youtube_cookies.txt");
-    expect(deployScript).toContain("rm -f cookies.txt");
+    expect(deployScript).toContain("touch -a secrets/bilibili_cookies.txt secrets/youtube_cookies.txt");
+    expect(deployScript).toContain("chmod 600 secrets/bilibili_cookies.txt secrets/youtube_cookies.txt");
   });
 
   test("private cookie and browser-profile runtime paths stay ignored", () => {

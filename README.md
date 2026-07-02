@@ -54,11 +54,11 @@ TEST_GUILD_ID=<your-test-guild-id> npm run deploy:commands:test
 Commands or components marked as testing are also runtime-blocked outside the
 test server. See `docs/testing-features.md` before adding experimental features.
 
-Legacy all-commands guild deploy is still available for local/dev recovery, but
-it must be explicit:
+If a guild ever ends up with duplicate commands (global + guild-scoped), clear
+the guild-scoped set:
 
 ```bash
-DEPLOY_LEGACY_GUILD_COMMANDS=true npm run deploy:commands
+CLEAR_GUILD_COMMANDS=true GUILD_ID=<guild-id> npm run deploy:commands
 ```
 
 ## YouTube Cookies
@@ -67,11 +67,8 @@ YouTube playback often needs browser cookies on cloud servers. In Docker, the bo
 
 The Docker compose file mounts `secrets/` as a directory, not `youtube_cookies.txt` as a single file, so refreshed cookie contents are visible to the running container without a restart.
 
-For emergency/manual recovery only:
-
-```bash
-bash scripts/refresh-youtube-cookies.sh
-```
+If the automatic refresh fails, recovery happens on the VPS — see the cookie
+decision tree in `OPERATIONS.md`.
 
 Never commit cookie files or the dedicated browser profile.
 

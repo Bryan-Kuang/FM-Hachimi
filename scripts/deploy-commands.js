@@ -19,12 +19,7 @@ function toCommandData(commands) {
 
 function createDeploymentPlan(env = process.env) {
   const deployTesting = env.DEPLOY_TEST_COMMANDS === "true";
-  const deployLegacyGuild = env.DEPLOY_LEGACY_GUILD_COMMANDS === "true";
   const clear = env.CLEAR_GUILD_COMMANDS === "true";
-
-  if (deployTesting && deployLegacyGuild) {
-    throw new Error("DEPLOY_TEST_COMMANDS and DEPLOY_LEGACY_GUILD_COMMANDS cannot both be true");
-  }
 
   if (deployTesting) {
     if (!TestingAccess.TEST_GUILD_ID) {
@@ -41,21 +36,19 @@ function createDeploymentPlan(env = process.env) {
     };
   }
 
-  if (deployLegacyGuild) {
-    if (!config.discord.guildId) {
-      throw new Error("GUILD_ID is required when DEPLOY_LEGACY_GUILD_COMMANDS=true");
-    }
-    const commands = clear ? [] : CommandRegistry.createCommands(null, null);
-    return {
-      scope: "legacy_guild",
-      guildId: config.discord.guildId,
-      clear,
-      commandData: toCommandData(commands),
-    };
-  }
-
+  // Guild-scoped *deploys* were removed on purpose: they duplicate the global
+  // command set inside one guild. Clearing stays — it is the remediation tool
+  // for exactly that duplicate mess.
   if (clear) {
-    throw new Error("CLEAR_GUILD_COMMANDS requires DEPLOY_TEST_COMMANDS=true or DEPLOY_LEGACY_GUILD_COMMANDS=true");
+    if (!config.discord.guildId) {
+      throw new Error("GUILD_ID is required when CLEAR_GUILD_COMMANDS=true");
+    }
+    return {
+      scope: "guild_clear",
+      guildId: config.discord.guildId,
+      clear: true,
+      commandData: [],
+    };
   }
 
   return {

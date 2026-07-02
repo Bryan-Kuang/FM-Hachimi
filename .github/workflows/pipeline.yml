@@ -18,17 +18,16 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Manual command deploy: global=stable everywhere (~1h); test=stage:testing -> test guild (instant, no dups); guild=ALL -> one guild (can duplicate global); clear_guild=remove guild-scoped cmds'
+        description: 'Manual command deploy: global=stable everywhere (~1h); test=stage:testing -> test guild (instant, no dups); clear_guild=remove guild-scoped cmds (fixes duplicates)'
         required: false
         default: 'global'
         type: choice
         options:
           - global
           - test
-          - guild
           - clear_guild
       guild_id:
-        description: 'Guild ID for guild / clear_guild. Empty = GUILD_ID secret. (test uses TEST_GUILD_ID.)'
+        description: 'Guild ID for clear_guild. Empty = GUILD_ID secret. (test uses TEST_GUILD_ID.)'
         required: false
 
 # Cancel superseded PR runs; serialize main-branch pipelines (never cancel a
@@ -183,7 +182,6 @@ jobs:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           TEST_GUILD_ID: ${{ secrets.TEST_GUILD_ID }}
-          GUILD_ID: ${{ (inputs.environment == 'guild' || inputs.environment == 'clear_guild') && (inputs.guild_id || secrets.GUILD_ID) || '' }}
+          GUILD_ID: ${{ inputs.environment == 'clear_guild' && (inputs.guild_id || secrets.GUILD_ID) || '' }}
           DEPLOY_TEST_COMMANDS: ${{ inputs.environment == 'test' && 'true' || '' }}
-          DEPLOY_LEGACY_GUILD_COMMANDS: ${{ (inputs.environment == 'guild' || inputs.environment == 'clear_guild') && 'true' || '' }}
           CLEAR_GUILD_COMMANDS: ${{ inputs.environment == 'clear_guild' && 'true' || '' }}

@@ -93,13 +93,14 @@ describe("deploy command payload selection", () => {
     expect(plan.commandData).toEqual([]);
   });
 
-  test("legacy guild deploy uses GUILD_ID and includes all commands only when explicit", () => {
+  test("clear mode without test flag clears the configured guild and deploys nothing", () => {
     const { createDeploymentPlan } = loadDeployCommands();
 
-    const plan = createDeploymentPlan({ DEPLOY_LEGACY_GUILD_COMMANDS: "true" });
+    const plan = createDeploymentPlan({ CLEAR_GUILD_COMMANDS: "true" });
 
-    expect(plan.scope).toBe("legacy_guild");
+    expect(plan.scope).toBe("guild_clear");
     expect(plan.guildId).toBe("legacy-guild");
-    expect(plan.commandData.map((command) => command.name)).toEqual(["play", "experiment"]);
+    expect(plan.clear).toBe(true);
+    expect(plan.commandData).toEqual([]);
   });
 });

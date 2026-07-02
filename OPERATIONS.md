@@ -11,7 +11,8 @@ Runbook for deploying and operating F.M. Hachimi on the VPS.
   - `data/` — `daily_hachimi.json` (must survive rebuilds); `resume_state.json`
     (playback snapshot written on shutdown so active sessions resume after a deploy —
     consumed on startup, discarded if older than `RESUME_MAX_AGE_MS`, default 15 min)
-  - `logs/`
+  - `logs/` — unused in prod: `LOG_TO_FILE=false` since 2026-07 (the app's date-stamped
+    files never rotated); read logs with `docker compose logs` (json-file driver, 10m/3 rotation)
   - `~/.fm-hachimi-youtube/profile` → mounted read-only at `/app/youtube-browser-profile`
 
 > `data/`/`logs/` must be writable by the container's `HOST_UID:HOST_GID` (set in `.env`).
@@ -53,16 +54,24 @@ Workflow options:
 |---|---|---|
 | `global` | stable cmds, everywhere | **production default** |
 | `test` | `stage:'testing'` cmds → `TEST_GUILD_ID` | try a feature in the test server (no dups) |
-| `guild` | **all** cmds → one guild (legacy) | instant testing; **duplicates global — avoid in prod** |
-| `clear_guild` | clear a guild's scoped cmds | remove duplicates left by `guild` |
+| `clear_guild` | clear a guild's scoped cmds | remove duplicate commands from a guild |
 
-**Duplicates** = a command registered both globally and guild-scoped. Use `global` + `test`
-(non-overlapping → never duplicates); reserve `guild` for deliberate cases and clean up with
-`clear_guild`. Note: `stage:'testing'` is currently unused — tag a command with it to route it
-through the `test` flow. Authoring and graduation rules for testing features live in
-[`docs/testing-features.md`](docs/testing-features.md).
+**Duplicates** = a command registered both globally and guild-scoped. `global` + `test` are
+non-overlapping, so they never duplicate. The legacy `guild` all-commands deploy mode was
+removed 2026-07 (it was the only way duplicates got created); `clear_guild` stays as the
+remediation tool. Note: `stage:'testing'` is currently unused — tag a command with it to
+route it through the `test` flow. Authoring and graduation rules for testing features live
+in [`docs/testing-features.md`](docs/testing-features.md).
 
-## YouTube cookies — two tiers
+## YouTube cookies — decision tree
+
+When cookies go stale, work down this list; each step is the fallback for the one above:
+
+1. **In-app auto-refresh** (automatic, tier 1 below) — normally nothing to do.
+2. **Automated login repair**: `bash scripts/ops/youtube-cookie-login-repair.sh` on the VPS
+   (uses stored credentials; fails closed on CAPTCHA/2FA).
+3. **Manual VNC login** (tier 2 below) — the last resort when the automated repair hits
+   a CAPTCHA.
 
 **Tier 1 — in-app auto-refresh (automatic).** `src/youtube/cookie_refresh_service.ts` runs at
 startup, every 6h, and on auth-failure. It exports cookies from the mounted Chrome profile
@@ -88,11 +97,10 @@ ssh -L 5907:127.0.0.1:5907 ubuntu@<vps>
 ~/.fm-hachimi-youtube/bin/stop-youtube-browser.sh
 ```
 
-`scripts/ops/youtube-cookie-login-repair.sh` attempts an automated login using
+`scripts/ops/youtube-cookie-login-repair.sh` (step 2 above) attempts an automated login using
 `~/.fm-hachimi-youtube/credentials.env` (mode 600, **VPS-only, never in git**) but fails closed
 on CAPTCHA/2FA. It needs `xdotool` and `xclip` on the VPS so credentials are pasted without
-appearing as process arguments. `scripts/refresh-youtube-cookies.sh` is the
-export-from-local-Chrome fallback.
+appearing as process arguments.
 
 Bilibili cookies (`bilibili_cookies.txt`) are static — refresh manually when they expire:
 
