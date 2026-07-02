@@ -33,188 +33,154 @@ interface PreExtractionSummary {
   skipped: number;
 }
 
+/**
+ * One background pre-fetch lane per platform. Lanes are fully independent —
+ * the same URL queued on both platforms is never cross-deduped.
+ */
+interface PlatformLane {
+  label: 'Bilibili' | 'YouTube';
+  extractor: AudioExtractorLike | null;
+  enabled: boolean;
+  concurrency: number;
+  maxPerCardSet: number;
+  queue: PreExtractionQueueItem[];
+  queuedOrRunning: Set<string>;
+  activeCount: number;
+  normalize(rawUrl: string): string | null;
+  /** Platform-specific extract call (YouTube passes background priority). */
+  invoke(url: string, context: PreExtractionContext): Promise<unknown>;
+}
+
+function normalizeBilibiliUrl(rawUrl: string): string | null {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  const trimmed = rawUrl.trim();
+  if (!UrlValidator.isValidBilibiliUrl(trimmed)) return null;
+  return UrlValidator.normalizeUrl(trimmed) || trimmed;
+}
+
+function normalizeYouTubeUrl(rawUrl: string): string | null {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  const trimmed = rawUrl.trim();
+  if (!YouTubeValidator.isValidYouTubeUrl(trimmed)) return null;
+  return YouTubeValidator.normalizeUrl(trimmed) || trimmed;
+}
+
 class PreExtractionService {
-  private bilibiliExtractor: AudioExtractorLike;
-  private youtubeExtractor: AudioExtractorLike | null;
-  private enabled: boolean;
-  private concurrency: number;
-  private maxPerCardSet: number;
-  private queue: PreExtractionQueueItem[];
-  private queuedOrRunning: Set<string>;
-  private activeCount: number;
-  private youtubeEnabled: boolean;
-  private youtubeConcurrency: number;
-  private youtubeMaxPerCardSet: number;
-  private youtubeQueue: PreExtractionQueueItem[];
-  private youtubeQueuedOrRunning: Set<string>;
-  private youtubeActiveCount: number;
+  private bilibili: PlatformLane;
+  private youtube: PlatformLane;
 
   constructor(options: PreExtractionServiceOptions) {
-    this.bilibiliExtractor = options.bilibiliExtractor;
-    this.youtubeExtractor = options.youtubeExtractor ?? null;
-    this.enabled = options.enabled ?? config.bilibili.preextractEnabled;
-    this.concurrency = Math.max(1, options.concurrency ?? config.bilibili.preextractConcurrency);
-    this.maxPerCardSet = Math.max(1, options.maxPerCardSet ?? config.bilibili.preextractMaxPerCardSet);
-    this.queue = [];
-    this.queuedOrRunning = new Set();
-    this.activeCount = 0;
-    this.youtubeEnabled = options.youtubeEnabled ?? config.youtube.preextractEnabled;
-    this.youtubeConcurrency = Math.max(1, options.youtubeConcurrency ?? config.youtube.preextractConcurrency);
-    this.youtubeMaxPerCardSet = Math.max(1, options.youtubeMaxPerCardSet ?? config.youtube.preextractMaxPerCardSet);
-    this.youtubeQueue = [];
-    this.youtubeQueuedOrRunning = new Set();
-    this.youtubeActiveCount = 0;
-  }
-
-  prewarmBilibiliUrls(urls: string[], context: PreExtractionContext): PreExtractionSummary {
-    if (!this.enabled) {
-      return { queued: 0, skipped: Array.isArray(urls) ? urls.length : 0 };
-    }
-
-    const input = Array.isArray(urls) ? urls : [];
-    const selected: string[] = [];
-    const seenInBatch = new Set<string>();
-    let skipped = 0;
-
-    for (const rawUrl of input) {
-      const normalizedUrl = this.normalizeBilibiliUrl(rawUrl);
-      if (!normalizedUrl) {
-        skipped++;
-        continue;
-      }
-
-      if (seenInBatch.has(normalizedUrl)) {
-        skipped++;
-        continue;
-      }
-      seenInBatch.add(normalizedUrl);
-
-      if (selected.length >= this.maxPerCardSet) {
-        skipped++;
-        continue;
-      }
-
-      selected.push(normalizedUrl);
-    }
-
-    let queued = 0;
-    for (const url of selected) {
-      if (this.queuedOrRunning.has(url)) {
-        skipped++;
-        continue;
-      }
-
-      this.queue.push({ url, context });
-      this.queuedOrRunning.add(url);
-      queued++;
-    }
-
-    if (queued > 0) {
-      logger.info('Bilibili pre-extraction queued', {
-        queued,
-        skipped,
-        source: context.source,
-        guildId: context.guildId,
-        keyword: context.keyword,
-      });
-      this.pump();
-    }
-
-    return { queued, skipped };
-  }
-
-  private normalizeBilibiliUrl(rawUrl: string): string | null {
-    if (!rawUrl || typeof rawUrl !== 'string') return null;
-    const trimmed = rawUrl.trim();
-    if (!UrlValidator.isValidBilibiliUrl(trimmed)) return null;
-    return UrlValidator.normalizeUrl(trimmed) || trimmed;
-  }
-
-  prewarmYouTubeUrls(urls: string[], context: PreExtractionContext): PreExtractionSummary {
-    const input = Array.isArray(urls) ? urls : [];
+    this.bilibili = {
+      label: 'Bilibili',
+      extractor: options.bilibiliExtractor,
+      enabled: options.enabled ?? config.bilibili.preextractEnabled,
+      concurrency: Math.max(1, options.concurrency ?? config.bilibili.preextractConcurrency),
+      maxPerCardSet: Math.max(1, options.maxPerCardSet ?? config.bilibili.preextractMaxPerCardSet),
+      queue: [],
+      queuedOrRunning: new Set(),
+      activeCount: 0,
+      normalize: normalizeBilibiliUrl,
+      invoke: (url) => options.bilibiliExtractor.extractAudio(url),
+    };
     // Previously gated to the test guild during rollout — that made pre-extraction
     // a silent no-op in every real server, so playback always paid the full cold
     // yt-dlp cost. Now runs anywhere YouTube pre-extraction is enabled, matching
-    // prewarmBilibiliUrls. Disable per-deployment via YOUTUBE_PREEXTRACT_ENABLED=false.
-    if (!this.youtubeEnabled || !this.youtubeExtractor) {
+    // the Bilibili lane. Disable per-deployment via YOUTUBE_PREEXTRACT_ENABLED=false.
+    const youtubeExtractor = options.youtubeExtractor ?? null;
+    this.youtube = {
+      label: 'YouTube',
+      extractor: youtubeExtractor,
+      enabled: (options.youtubeEnabled ?? config.youtube.preextractEnabled) && youtubeExtractor !== null,
+      concurrency: Math.max(1, options.youtubeConcurrency ?? config.youtube.preextractConcurrency),
+      maxPerCardSet: Math.max(1, options.youtubeMaxPerCardSet ?? config.youtube.preextractMaxPerCardSet),
+      queue: [],
+      queuedOrRunning: new Set(),
+      activeCount: 0,
+      normalize: normalizeYouTubeUrl,
+      invoke: (url, context) => youtubeExtractor!.extractAudio(url, {
+        priority: 'background',
+        source: context.source,
+      }),
+    };
+  }
+
+  prewarmBilibiliUrls(urls: string[], context: PreExtractionContext): PreExtractionSummary {
+    return this.prewarm(this.bilibili, urls, context);
+  }
+
+  prewarmYouTubeUrls(urls: string[], context: PreExtractionContext): PreExtractionSummary {
+    return this.prewarm(this.youtube, urls, context);
+  }
+
+  private prewarm(
+    lane: PlatformLane,
+    urls: string[],
+    context: PreExtractionContext,
+  ): PreExtractionSummary {
+    const input = Array.isArray(urls) ? urls : [];
+    if (!lane.enabled) {
       return { queued: 0, skipped: input.length };
     }
 
+    // normalize → per-batch dedupe → cap per card set
     const selected: string[] = [];
     const seenInBatch = new Set<string>();
     let skipped = 0;
 
     for (const rawUrl of input) {
-      const normalizedUrl = this.normalizeYouTubeUrl(rawUrl);
-      if (!normalizedUrl) {
+      const normalizedUrl = lane.normalize(rawUrl);
+      if (!normalizedUrl || seenInBatch.has(normalizedUrl) || selected.length >= lane.maxPerCardSet) {
         skipped++;
-        continue;
-      }
-
-      if (seenInBatch.has(normalizedUrl)) {
-        skipped++;
+        if (normalizedUrl) seenInBatch.add(normalizedUrl);
         continue;
       }
       seenInBatch.add(normalizedUrl);
-
-      if (selected.length >= this.youtubeMaxPerCardSet) {
-        skipped++;
-        continue;
-      }
-
       selected.push(normalizedUrl);
     }
 
+    // queue-level dedupe against in-flight/queued work
     let queued = 0;
     for (const url of selected) {
-      if (this.youtubeQueuedOrRunning.has(url)) {
+      if (lane.queuedOrRunning.has(url)) {
         skipped++;
         continue;
       }
-
-      this.youtubeQueue.push({ url, context });
-      this.youtubeQueuedOrRunning.add(url);
+      lane.queue.push({ url, context });
+      lane.queuedOrRunning.add(url);
       queued++;
     }
 
     if (queued > 0) {
-      logger.info('YouTube pre-extraction queued', {
+      logger.info(`${lane.label} pre-extraction queued`, {
         queued,
         skipped,
         source: context.source,
         guildId: context.guildId,
         keyword: context.keyword,
       });
-      this.pumpYouTube();
+      this.pump(lane);
     }
 
     return { queued, skipped };
   }
 
-  private normalizeYouTubeUrl(rawUrl: string): string | null {
-    if (!rawUrl || typeof rawUrl !== 'string') return null;
-    const trimmed = rawUrl.trim();
-    if (!YouTubeValidator.isValidYouTubeUrl(trimmed)) return null;
-    return YouTubeValidator.normalizeUrl(trimmed) || trimmed;
-  }
-
-  private pump(): void {
-    while (this.activeCount < this.concurrency && this.queue.length > 0) {
-      const item = this.queue.shift();
+  private pump(lane: PlatformLane): void {
+    while (lane.activeCount < lane.concurrency && lane.queue.length > 0) {
+      const item = lane.queue.shift();
       if (!item) return;
 
-      this.activeCount++;
+      lane.activeCount++;
       void Promise.resolve()
-        .then(() => this.bilibiliExtractor.extractAudio(item.url))
+        .then(() => lane.invoke(item.url, item.context))
         .then(() => {
-          logger.info('Bilibili pre-extraction completed', {
+          logger.info(`${lane.label} pre-extraction completed`, {
             source: item.context.source,
             guildId: item.context.guildId,
             keyword: item.context.keyword,
           });
         })
         .catch((error: unknown) => {
-          logger.warn('Bilibili pre-extraction failed', {
+          logger.warn(`${lane.label} pre-extraction failed`, {
             source: item.context.source,
             guildId: item.context.guildId,
             keyword: item.context.keyword,
@@ -222,43 +188,9 @@ class PreExtractionService {
           });
         })
         .finally(() => {
-          this.activeCount--;
-          this.queuedOrRunning.delete(item.url);
-          this.pump();
-        });
-    }
-  }
-
-  private pumpYouTube(): void {
-    while (this.youtubeActiveCount < this.youtubeConcurrency && this.youtubeQueue.length > 0) {
-      const item = this.youtubeQueue.shift();
-      if (!item || !this.youtubeExtractor) return;
-
-      this.youtubeActiveCount++;
-      void Promise.resolve()
-        .then(() => this.youtubeExtractor!.extractAudio(item.url, {
-          priority: 'background',
-          source: item.context.source,
-        }))
-        .then(() => {
-          logger.info('YouTube pre-extraction completed', {
-            source: item.context.source,
-            guildId: item.context.guildId,
-            keyword: item.context.keyword,
-          });
-        })
-        .catch((error: unknown) => {
-          logger.warn('YouTube pre-extraction failed', {
-            source: item.context.source,
-            guildId: item.context.guildId,
-            keyword: item.context.keyword,
-            error: (error as Error).message,
-          });
-        })
-        .finally(() => {
-          this.youtubeActiveCount--;
-          this.youtubeQueuedOrRunning.delete(item.url);
-          this.pumpYouTube();
+          lane.activeCount--;
+          lane.queuedOrRunning.delete(item.url);
+          this.pump(lane);
         });
     }
   }

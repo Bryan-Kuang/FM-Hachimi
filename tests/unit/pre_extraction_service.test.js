@@ -157,4 +157,45 @@ describe("PreExtractionService", () => {
 
     expect(youtubeExtractor.extractAudio).not.toHaveBeenCalled();
   });
+
+  test("platform lanes are independent — no cross-platform dedupe or interference", async () => {
+    const bilibiliExtractor = {
+      extractAudio: jest.fn().mockResolvedValue({}),
+    };
+    const youtubeExtractor = {
+      extractAudio: jest.fn().mockResolvedValue({}),
+    };
+    const service = new PreExtractionService({
+      bilibiliExtractor,
+      youtubeExtractor,
+      enabled: true,
+      concurrency: 1,
+      maxPerCardSet: 3,
+      youtubeEnabled: true,
+      youtubeConcurrency: 1,
+      youtubeMaxPerCardSet: 3,
+    });
+
+    const biliSummary = service.prewarmBilibiliUrls(
+      ["https://www.bilibili.com/video/BV1one"],
+      { source: "play_search", guildId: "guild-1" },
+    );
+    const ytSummary = service.prewarmYouTubeUrls(
+      ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+      { source: "play_search", guildId: "guild-1" },
+    );
+
+    expect(biliSummary).toMatchObject({ queued: 1, skipped: 0 });
+    expect(ytSummary).toMatchObject({ queued: 1, skipped: 0 });
+    await flushPromises();
+    await flushPromises();
+
+    expect(bilibiliExtractor.extractAudio).toHaveBeenCalledTimes(1);
+    expect(bilibiliExtractor.extractAudio).toHaveBeenCalledWith("https://www.bilibili.com/video/BV1one");
+    expect(youtubeExtractor.extractAudio).toHaveBeenCalledTimes(1);
+    expect(youtubeExtractor.extractAudio).toHaveBeenCalledWith(
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      expect.objectContaining({ priority: "background", source: "play_search" }),
+    );
+  });
 });
