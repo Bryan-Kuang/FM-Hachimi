@@ -189,6 +189,11 @@ class BotClient {
         if (player) {
           // Capture current track before tearing down — sendDisconnectMessage uses it
           currentTrack = player.currentTrack as TrackInfo | null;
+          // Radio mode must be flagged off before teardown, otherwise the next
+          // /radio toggles the stale "enabled" state off instead of starting.
+          playerService.getRadioService?.()?.stop(oldState.guild.id)?.catch((err: Error) => {
+            logger.warn('Failed to stop radio mode on voice disconnect', { error: err.message });
+          });
           // Use leaveVoiceChannel (not stop) so voiceConnection is cleared immediately
           player.leaveVoiceChannel();
           playerService.clearUIContext(oldState.guild.id);
