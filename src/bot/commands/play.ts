@@ -61,7 +61,7 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         }
 
         const stageReporter = createInteractionStageReporter(interaction, 'YouTube');
-        const result = await PlaybackCoordinator.playYouTubeUrl({
+        const result = await PlaybackCoordinator.playUrl('youtube', {
           interaction,
           playerService: playbackService,
           url:           route.normalizedUrl || route.raw,
@@ -105,7 +105,7 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
       if (route.platform === 'bilibili' && route.isUrl) {
         const url = route.normalizedUrl || route.raw;
         const stageReporter = createInteractionStageReporter(interaction, 'Bilibili');
-        const result = await PlaybackCoordinator.playBilibiliUrl({
+        const result = await PlaybackCoordinator.playUrl('bilibili', {
           interaction,
           playerService: playbackService,
           url,

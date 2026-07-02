@@ -59,12 +59,15 @@ interface PlayUrlOptions {
   onStage?: PlaybackStageReporter;
 }
 
-function getGuildId(interaction: InteractionLike): string | null {
-  return interaction.guild?.id ?? null;
-}
+type PlayUrlPlatform = 'bilibili' | 'youtube';
 
-function getChannelId(interaction: InteractionLike): string | null {
-  return interaction.channelId ?? null;
+/** Shared prologue: both paths need a guild + channel to do anything. */
+function getPlaybackContext(
+  interaction: InteractionLike,
+): { guildId: string; channelId: string } | null {
+  const guildId = interaction.guild?.id ?? null;
+  const channelId = interaction.channelId ?? null;
+  return guildId && channelId ? { guildId, channelId } : null;
 }
 
 function getRequestedBy(interaction: InteractionLike, requestedBy?: string): string {
@@ -78,11 +81,11 @@ async function playBilibiliUrl({
   url,
   onStage,
 }: PlayUrlOptions): Promise<CoordinatorResult> {
-  const guildId = getGuildId(interaction);
-  const channelId = getChannelId(interaction);
-  if (!guildId || !channelId) {
+  const ctx = getPlaybackContext(interaction);
+  if (!ctx) {
     return { success: false, error: 'Missing guild or channel context' };
   }
+  const { guildId, channelId } = ctx;
 
   playerService.setUIContext(guildId, channelId);
   const result = onStage
@@ -103,13 +106,13 @@ async function playYouTubeUrl({
   requestedBy,
   onStage,
 }: PlayUrlOptions): Promise<CoordinatorResult> {
-  const guildId = getGuildId(interaction);
-  const channelId = getChannelId(interaction);
+  const ctx = getPlaybackContext(interaction);
   const voiceChannel = interaction.member?.voice?.channel;
 
-  if (!guildId || !channelId) {
+  if (!ctx) {
     return { success: false, error: 'Missing guild or channel context' };
   }
+  const { guildId, channelId } = ctx;
   if (!voiceChannel) {
     return { success: false, error: 'Voice channel required' };
   }
@@ -190,7 +193,21 @@ async function playYouTubeUrl({
   }
 }
 
+/**
+ * Single entry point: dispatches to the platform path. Prefer this over the
+ * per-platform functions (kept exported for existing tests/back-compat).
+ * Full convergence of the two paths onto extractAndJoin is the deferred
+ * playback-core consolidation (TASKS.md Phase 2) — not done here.
+ */
+function playUrl(
+  platform: PlayUrlPlatform,
+  options: PlayUrlOptions,
+): Promise<CoordinatorResult> {
+  return platform === 'youtube' ? playYouTubeUrl(options) : playBilibiliUrl(options);
+}
+
 export = {
+  playUrl,
   playBilibiliUrl,
   playYouTubeUrl,
 };

@@ -323,7 +323,7 @@ async function playBilibiliSelection(
   titleHint?: string,
 ): Promise<boolean> {
   const stageReporter = createInteractionStageReporter(interaction, 'Bilibili');
-  const addResult = await PlaybackCoordinator.playBilibiliUrl({
+  const addResult = await PlaybackCoordinator.playUrl('bilibili', {
     interaction,
     playerService,
     url: videoUrl,
@@ -357,7 +357,7 @@ async function playYouTubeSelection(
   titleHint?: string,
 ): Promise<boolean> {
   const stageReporter = createInteractionStageReporter(interaction, 'YouTube');
-  const addResult = await PlaybackCoordinator.playYouTubeUrl({
+  const addResult = await PlaybackCoordinator.playUrl('youtube', {
     interaction,
     playerService,
     url: videoUrl,

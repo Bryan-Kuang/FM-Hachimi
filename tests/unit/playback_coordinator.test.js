@@ -197,4 +197,35 @@ describe("PlaybackCoordinator", () => {
       expect.objectContaining({ onStage: expect.any(Function) }),
     );
   });
+
+  test("playUrl dispatches 'bilibili' to the Bilibili path", async () => {
+    const coordinator = PlaybackCoordinator();
+    const playerService = makePlayerService();
+    const interaction = makeInteraction();
+
+    const result = await coordinator.playUrl("bilibili", {
+      interaction,
+      playerService,
+      url: "https://bili/video",
+    });
+
+    expect(result.success).toBe(true);
+    expect(playerService.playBilibiliVideo).toHaveBeenCalledWith(interaction, "https://bili/video");
+    expect(playerService.addTrack).not.toHaveBeenCalled();
+  });
+
+  test("playUrl dispatches 'youtube' to the YouTube path", async () => {
+    const coordinator = PlaybackCoordinator();
+    const playerService = makePlayerService();
+
+    const result = await coordinator.playUrl("youtube", {
+      interaction: makeInteraction(),
+      playerService,
+      url: "https://youtube.com/watch?v=abc",
+    });
+
+    expect(result.success).toBe(true);
+    expect(playerService._youtubeExtractor.extractAudio).toHaveBeenCalled();
+    expect(playerService.playBilibiliVideo).not.toHaveBeenCalled();
+  });
 });
