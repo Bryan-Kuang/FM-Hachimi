@@ -197,12 +197,13 @@ const config: BotConfig = {
     enableUnlimitedLength: process.env.ENABLE_UNLIMITED_LENGTH !== "false", // 默认启用无限长度播放
     urlRefreshThreshold: parseInt(process.env.URL_REFRESH_THRESHOLD!) || 20 * 60 * 1000, // Bilibili CDN URL 刷新阈值（默认20分钟）
     // FFmpeg -af filter. dynaudnorm levels loudness across/within tracks (low
-    // latency); the trailing volume=0.25 (-12 dB) then sets where that leveled
-    // loudness sits — background music level (dynaudnorm alone peak-normalizes,
-    // and the earlier -6 dB was still foreground-loud). Tune via AUDIO_FILTER —
-    // raise volume for louder (e.g. 0.5), lower for quieter; set
-    // AUDIO_FILTER="" to disable entirely.
-    audioFilter: (process.env.AUDIO_FILTER ?? "dynaudnorm=f=250:g=15,volume=0.25").trim(),
+    // latency); the trailing volume=0.15 (~-16.5 dB) then sets where that leveled
+    // loudness sits — background music level (dynaudnorm alone peak-normalizes;
+    // -12 dB still felt foreground-loud in listening tests, and 60% of that
+    // level, matched by ear via Discord's user volume slider, sounded right:
+    // 0.25 * 0.6 = 0.15). Tune via AUDIO_FILTER — raise volume for louder
+    // (e.g. 0.25), lower for quieter; set AUDIO_FILTER="" to disable entirely.
+    audioFilter: (process.env.AUDIO_FILTER ?? "dynaudnorm=f=250:g=15,volume=0.15").trim(),
     // 播放判定阈值 — 用于 Idle 事件到达时判断是否视作"完整播放结束"
     fullTrackThresholdMs: parseInt(process.env.AUDIO_FULL_TRACK_THRESHOLD_MS!) || 15000, // 未知时长(duration=0)时，超过 15s 视为完整播放
     shortPlaybackRetryThresholdMs: parseInt(process.env.AUDIO_SHORT_PLAYBACK_RETRY_THRESHOLD_MS!) || 3000, // 播放时间 <3s 且未达结尾则视作异常，触发重试
