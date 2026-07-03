@@ -191,7 +191,7 @@ describe('ResumeService radio mode', () => {
       expect(annoyingService.enable).toHaveBeenCalledWith('guild-1');
     });
 
-    it('reconstructGuild restores in-process without the redeploy announcement', async () => {
+    it('reconstructGuild restores in-process and announces the resurrection', async () => {
       const svc = new ResumeService(opts());
       const state = svc.captureGuild(makeSessionManager(makePlayer()), 'guild-1')!;
 
@@ -201,9 +201,14 @@ describe('ResumeService radio mode', () => {
         isVoiceBased: () => true,
         guild: { voiceStates: { cache: new Map([['human-1', { channelId: 'voice-1', id: 'human-1' }]]) } },
       };
+      const textChannel = { id: 'text-1', send: jest.fn().mockResolvedValue({}) };
       const client = {
         user: { id: 'bot-1' },
-        channels: { fetch: jest.fn().mockResolvedValue(voiceChannel) },
+        channels: {
+          fetch: jest.fn((id: string) =>
+            Promise.resolve(id === 'text-1' ? textChannel : voiceChannel),
+          ),
+        },
       };
 
       const restored = await svc.reconstructGuild(
@@ -218,8 +223,9 @@ describe('ResumeService radio mode', () => {
       expect(restored).toBe(true);
       expect(player.joinVoiceChannel).toHaveBeenCalled();
       expect(player.playCurrentTrack).toHaveBeenCalledWith({ startAtSeconds: 42 });
-      // Only the voice channel is fetched — no announcement to the text channel.
-      expect(client.channels.fetch).toHaveBeenCalledTimes(1);
+      // The same "基米永不灭～" announcement as restart resume.
+      await new Promise((resolve) => setImmediate(resolve)); // flush the fire-and-forget announceResume
+      expect(textChannel.send).toHaveBeenCalledWith(expect.stringContaining('基米永不灭'));
     });
   });
 

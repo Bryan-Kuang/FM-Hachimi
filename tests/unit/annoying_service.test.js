@@ -145,7 +145,7 @@ describe('AnnoyingService', () => {
       expect(deps.resumeService.reconstructGuild).not.toHaveBeenCalled();
     });
 
-    test('reconstructs after a hostile disconnect and taunts the culprit', async () => {
+    test('reconstructs after a hostile disconnect', async () => {
       AuditLog.findRecentAuditExecutor.mockResolvedValue({ id: '42', username: 'attacker' });
       const player = makePlayer({ lastSelfDisconnectAt: 12345 }); // stale marker
       const { deps, channel } = makeDeps({ player, capturedState: capturedState() });
@@ -172,7 +172,9 @@ describe('AnnoyingService', () => {
         }),
         expect.objectContaining({ guildId: 'guild-1' }),
       );
-      expect(channel.send).toHaveBeenCalledWith(expect.stringContaining('attacker'));
+      // No extra message from the service — the "基米永不灭～" announcement
+      // is sent by reconstructGuild (mocked here) itself.
+      expect(channel.send).not.toHaveBeenCalled();
       // Marker cleared so the attacker's NEXT kick isn't mistaken for a self-leave.
       expect(player.lastSelfDisconnectAt).toBe(0);
     });

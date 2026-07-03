@@ -295,20 +295,14 @@ class ResumeService {
   /**
    * Rebuild a guild's session from a captured state while the process is still
    * running — the /annoying anti-disconnect rejoin. Same machinery as restart
-   * resume, minus the "redeploy complete" announcement (the caller sends its
-   * own message).
+   * resume, including the "基米永不灭～" announcement.
    */
   async reconstructGuild(deps: RestoreDeps, state: GuildResumeState): Promise<boolean> {
-    return this.restoreGuild(deps, state, { announce: false });
+    return this.restoreGuild(deps, state);
   }
 
-  private async restoreGuild(
-    deps: RestoreDeps,
-    state: GuildResumeState,
-    opts: { announce?: boolean } = {},
-  ): Promise<boolean> {
+  private async restoreGuild(deps: RestoreDeps, state: GuildResumeState): Promise<boolean> {
     const { client, audioManager, sessionManager } = deps;
-    const announce = opts.announce !== false;
 
     const voiceChannel = await client.channels.fetch(state.voiceChannelId).catch(() => null);
     if (!voiceChannel || typeof voiceChannel.isVoiceBased !== 'function' || !voiceChannel.isVoiceBased()) {
@@ -405,11 +399,9 @@ class ResumeService {
       annoyingMode: !!state.annoyingMode,
     });
 
-    if (announce) {
-      this.announceResume(client, state, tracks[index]).catch((err: Error) => {
-        logger.debug('Failed to send resume announcement', { error: err.message });
-      });
-    }
+    this.announceResume(client, state, tracks[index]).catch((err: Error) => {
+      logger.debug('Failed to send resume announcement', { error: err.message });
+    });
 
     return true;
   }

@@ -3,8 +3,9 @@
  *
  * While enabled for a guild, the bot refuses to be removed from its voice
  * channel: a forced disconnect triggers a full session reconstruction (the
- * ResumeService restore path — rejoin, re-seek, re-pause, re-arm radio) a
- * moment later, and a forced channel move is countered by moving back. The one
+ * ResumeService restore path — rejoin, re-seek, re-pause, re-arm radio,
+ * announced with the same "基米永不灭～" message as restart resume) a moment
+ * later, and a forced channel move is countered by moving back. The one
  * exception is the exempt user (config.annoying.exemptUser, injected via the
  * ANNOYING_EXEMPT_USER secret), whose disconnects/moves are respected.
  *
@@ -98,7 +99,7 @@ class AnnoyingService {
    *
    * Returns what the caller should do: 'ignore'/'exempt' → proceed exactly as
    * today (teardown + murder message); 'reconstructing' → still tear down, but
-   * skip the murder message (we rejoin and send our own taunt).
+   * skip the murder message (we rejoin and announce the resurrection).
    */
   async handleBotDisconnect(oldState: any): Promise<DisconnectOutcome> {
     const deps = this.deps;
@@ -240,10 +241,12 @@ class AnnoyingService {
     const player = deps.sessionManager.sessions?.get(state.guildId)?.player;
     if (player) player.lastSelfDisconnectAt = 0;
 
-    await this.sendTaunt(
-      state.textChannelId,
-      `😾 **${culpritName}** 妄图谋害基米？没用的喵～ 基米回来了，继续唱！`,
-    );
+    // No extra message here — reconstructGuild already announced the
+    // "基米永不灭～" resurrection to the text channel.
+    logger.info('Annoying mode: session reconstructed after hostile disconnect', {
+      guildId: state.guildId,
+      culprit: culpritName,
+    });
   }
 
   private async sendTaunt(channelId: string | null, message: string): Promise<void> {
