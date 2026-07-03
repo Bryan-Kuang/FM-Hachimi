@@ -216,7 +216,7 @@ describe('Disconnect Message Feature', () => {
         expect.stringContaining('未知凶手')
       );
       expect(logger.debug).toHaveBeenCalledWith(
-        'Failed to fetch audit logs for disconnect',
+        'Failed to fetch audit logs for culprit lookup',
         expect.any(Object)
       );
     });

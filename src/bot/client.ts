@@ -19,6 +19,7 @@ import * as logger from '../services/logger_service';
 import config = require('../config/config');
 import Debug = require('../utils/debug');
 import CommandRegistry = require('./commands');
+import AuditLog = require('../utils/audit_log');
 import * as TestingAccess from './testing_access';
 
 // Augment discord.js Client with bot-specific properties
@@ -160,7 +161,7 @@ class BotClient {
     });
 
     // Voice state update event — handle disconnects and debug logging
-    this.client.on('voiceStateUpdate', (oldState: VoiceState, newState: VoiceState) => {
+    this.client.on('voiceStateUpdate', async (oldState: VoiceState, newState: VoiceState) => {
       logger.debug('Voice state update', {
         userId:     newState.id,
         oldChannel: oldState.channelId,
@@ -171,6 +172,21 @@ class BotClient {
         oldChannel: oldState.channelId,
         newChannel: newState.channelId,
       });
+
+      const annoyingService = playerService.getAnnoyingService?.();
+
+      // Bot was dragged to another voice channel — annoying mode moves it back.
+      if (
+        oldState.member?.id === this.client.user?.id &&
+        oldState.channel &&
+        newState.channel &&
+        oldState.channelId !== newState.channelId
+      ) {
+        annoyingService?.handleBotMove(oldState, newState)?.catch((err: Error) => {
+          logger.warn('Annoying mode: move handling failed', { error: err.message });
+        });
+        return;
+      }
 
       // Check if bot was disconnected from a voice channel
       if (
@@ -183,6 +199,20 @@ class BotClient {
           channel: oldState.channel.name,
         });
 
+        // Annoying mode decides BEFORE teardown — it snapshots the live queue
+        // that leaveVoiceChannel() below is about to wipe. 'reconstructing'
+        // means it will rejoin shortly and send its own message.
+        let annoyingOutcome: string = 'ignore';
+        if (annoyingService) {
+          try {
+            annoyingOutcome = await annoyingService.handleBotDisconnect(oldState);
+          } catch (err: unknown) {
+            logger.warn('Annoying mode: disconnect handling failed', {
+              error: (err as Error).message,
+            });
+          }
+        }
+
         const player = playerService.getPlayer(oldState.guild.id);
         let currentTrack: TrackInfo | null = null;
 
@@ -191,6 +221,7 @@ class BotClient {
           currentTrack = player.currentTrack as TrackInfo | null;
           // Radio mode must be flagged off before teardown, otherwise the next
           // /radio toggles the stale "enabled" state off instead of starting.
+          // (The annoying-mode restore re-arms it from the snapshot.)
           playerService.getRadioService?.()?.stop(oldState.guild.id)?.catch((err: Error) => {
             logger.warn('Failed to stop radio mode on voice disconnect', { error: err.message });
           });
@@ -203,9 +234,11 @@ class BotClient {
           });
         }
 
-        this.sendDisconnectMessage(oldState.guild, currentTrack).catch((err: Error) => {
-          logger.warn('Failed to send disconnect message', { error: err.message });
-        });
+        if (annoyingOutcome !== 'reconstructing') {
+          this.sendDisconnectMessage(oldState.guild, currentTrack).catch((err: Error) => {
+            logger.warn('Failed to send disconnect message', { error: err.message });
+          });
+        }
       }
     });
 
@@ -313,33 +346,12 @@ class BotClient {
       }
 
       // Try to find who disconnected the bot from audit logs
-      let culprit = '未知凶手';
-      try {
-        const auditLogs: any = await guild.fetchAuditLogs({
-          type:  AuditLogEvent.MemberDisconnect,
-          limit: 5,
-        });
-
-        const matchingLogs = auditLogs.entries.filter((entry: any) => {
-          return (
-            entry.target?.id === this.client.user?.id &&
-            Date.now() - entry.createdTimestamp < 5000
-          );
-        });
-
-        if (matchingLogs.size > 0) {
-          const mostRecent = Array.from(matchingLogs.values() as Iterable<any>).reduce(
-            (prev: any, current: any) =>
-              current.createdTimestamp > prev.createdTimestamp ? current : prev,
-          );
-          culprit = mostRecent.executor?.displayName || mostRecent.executor?.username;
-        }
-      } catch (auditError: unknown) {
-        logger.debug('Failed to fetch audit logs for disconnect', {
-          error: (auditError as Error).message,
-        });
-        // Continue with unknown culprit
-      }
+      const executor = await AuditLog.findRecentAuditExecutor(
+        guild,
+        AuditLogEvent.MemberDisconnect,
+        { targetId: this.client.user?.id },
+      );
+      const culprit = executor?.displayName || executor?.username || '未知凶手';
 
       // Build the message
       const guildMember = (guild as any).members?.me;

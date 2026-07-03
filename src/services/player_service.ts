@@ -47,6 +47,13 @@ interface RadioServiceLike {
   stop(guildId: GuildId): Promise<void>;
 }
 
+interface AnnoyingServiceLike {
+  isEnabled(guildId: GuildId): boolean;
+  toggle(guildId: GuildId): boolean;
+  handleBotDisconnect(oldState: unknown): Promise<string>;
+  handleBotMove(oldState: unknown, newState: unknown): Promise<void>;
+}
+
 interface PlayerServiceDeps {
   audioManager: AudioManagerLike;
   interfaceUpdater: InterfaceUpdaterLike;
@@ -67,6 +74,8 @@ class PlayerService extends EventEmitter {
   private _hachimiControllers: Map<GuildId, AbortController>;
   /** Endless radio controller, attached post-construction by the composition root. */
   private radioService: RadioServiceLike | null;
+  /** /annoying anti-disconnect mode, attached post-construction by the composition root. */
+  private annoyingService: AnnoyingServiceLike | null;
 
   constructor({
     audioManager,
@@ -85,6 +94,7 @@ class PlayerService extends EventEmitter {
     this.preExtractionService = preExtractionService || null;
     this._hachimiControllers = new Map();
     this.radioService = null;
+    this.annoyingService = null;
   }
 
   setRadioService(radioService: RadioServiceLike): void {
@@ -93,6 +103,14 @@ class PlayerService extends EventEmitter {
 
   getRadioService(): RadioServiceLike | null {
     return this.radioService;
+  }
+
+  setAnnoyingService(annoyingService: AnnoyingServiceLike): void {
+    this.annoyingService = annoyingService;
+  }
+
+  getAnnoyingService(): AnnoyingServiceLike | null {
+    return this.annoyingService;
   }
 
   _setHachimiController(guildId: GuildId, controller: AbortController): void {

@@ -119,11 +119,12 @@ jobs:
           GHCR_USER: ${{ github.repository_owner }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           TEST_GUILD_ID: ${{ secrets.TEST_GUILD_ID }}
+          ANNOYING_EXEMPT_USER: ${{ secrets.ANNOYING_EXEMPT_USER }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN,TEST_GUILD_ID
+          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN,TEST_GUILD_ID,ANNOYING_EXEMPT_USER
           timeout: 30s
           command_timeout: 15m
           script: |
@@ -144,6 +145,16 @@ jobs:
               touch .env
               grep -v '^TEST_GUILD_ID=' .env > .env.tmp 2>/dev/null || true
               echo "TEST_GUILD_ID=${TEST_GUILD_ID}" >> .env.tmp
+              mv .env.tmp .env
+            fi
+
+            # /annoying exempt user (private Discord user ID) — lives only in
+            # the ANNOYING_EXEMPT_USER repo secret and this .env, never in git.
+            if [ -n "${ANNOYING_EXEMPT_USER:-}" ]; then
+              echo "[deploy] syncing ANNOYING_EXEMPT_USER into .env..."
+              touch .env
+              grep -v '^ANNOYING_EXEMPT_USER=' .env > .env.tmp 2>/dev/null || true
+              echo "ANNOYING_EXEMPT_USER=${ANNOYING_EXEMPT_USER}" >> .env.tmp
               mv .env.tmp .env
             fi
 
