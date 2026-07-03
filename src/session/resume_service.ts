@@ -399,7 +399,7 @@ class ResumeService {
       annoyingMode: !!state.annoyingMode,
     });
 
-    this.announceResume(client, state, tracks[index]).catch((err: Error) => {
+    this.announceResume(client, state.textChannelId, tracks[index]).catch((err: Error) => {
       logger.debug('Failed to send resume announcement', { error: err.message });
     });
 
@@ -426,9 +426,13 @@ class ResumeService {
     return listeners;
   }
 
-  private async announceResume(client: any, state: GuildResumeState, track: any): Promise<void> {
-    if (!state.textChannelId) return;
-    const channel = await client.channels.fetch(state.textChannelId).catch(() => null);
+  /**
+   * The "基米永不灭～" revival announcement — shared by restart resume,
+   * /annoying reconstruction (via restoreGuild), and the /annoying move-back.
+   */
+  async announceResume(client: any, textChannelId: string | null, track: any): Promise<void> {
+    if (!textChannelId) return;
+    const channel = await client.channels.fetch(textChannelId).catch(() => null);
     if (!channel || typeof channel.send !== 'function') return;
     await channel.send(`基米永不灭～ 重新部署完成，继续播放：**${track.title}**`);
   }

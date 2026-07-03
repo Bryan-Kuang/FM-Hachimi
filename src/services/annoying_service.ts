@@ -203,10 +203,15 @@ class AnnoyingService {
           channelId: targetChannel.id,
           culprit: culpritName,
         });
-        await this.sendTaunt(
-          session?.uiContext?.channelId ?? null,
-          `🐱 **${culpritName}** 想把基米拖走？基米自己走回来了喵～`,
-        );
+        // Same "基米永不灭～" announcement as the reconstruction path. A move
+        // never interrupts playback, so skip it when nothing is playing.
+        if (player.currentTrack?.title) {
+          await deps.resumeService.announceResume(
+            deps.client,
+            session?.uiContext?.channelId ?? null,
+            player.currentTrack,
+          );
+        }
       })()
         .catch((err: Error) => {
           logger.error('Annoying mode: move-back failed', { guildId, error: err.message });
@@ -247,21 +252,6 @@ class AnnoyingService {
       guildId: state.guildId,
       culprit: culpritName,
     });
-  }
-
-  private async sendTaunt(channelId: string | null, message: string): Promise<void> {
-    if (!channelId) return;
-    const deps = this.deps;
-    if (!deps) return;
-    try {
-      const channel: any = await deps.client.channels.fetch(channelId).catch(() => null);
-      if (!channel || typeof channel.send !== 'function') return;
-      await channel.send(message);
-    } catch (err: unknown) {
-      logger.debug('Annoying mode: failed to send taunt', {
-        error: (err as Error).message,
-      });
-    }
   }
 }
 

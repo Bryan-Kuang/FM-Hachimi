@@ -23,6 +23,7 @@ function makePlayer(overrides = {}) {
     lastSelfDisconnectAt: 0,
     lastSelfJoinAt: 0,
     lastSelfJoinChannelId: null,
+    currentTrack: { title: '哈基米之歌' },
     joinVoiceChannel: jest.fn().mockResolvedValue(true),
     ...overrides,
   };
@@ -40,6 +41,7 @@ function makeDeps({ player, capturedState } = {}) {
     resumeService: {
       captureGuild: jest.fn().mockReturnValue(capturedState ?? null),
       reconstructGuild: jest.fn().mockResolvedValue(true),
+      announceResume: jest.fn().mockResolvedValue(undefined),
     },
   };
   return { deps, channel };
@@ -250,10 +252,10 @@ describe('AnnoyingService', () => {
       expect(player.joinVoiceChannel).not.toHaveBeenCalled();
     });
 
-    test('moves back after a hostile drag and taunts', async () => {
+    test('moves back after a hostile drag and announces the revival', async () => {
       AuditLog.findRecentAuditExecutor.mockResolvedValue({ id: '42', username: 'dragger' });
       const player = makePlayer();
-      const { deps, channel } = makeDeps({ player });
+      const { deps } = makeDeps({ player });
       const svc = makeService(deps);
       svc.enable('guild-1');
 
@@ -265,7 +267,26 @@ describe('AnnoyingService', () => {
       expect(player.joinVoiceChannel).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'vc-1' }),
       );
-      expect(channel.send).toHaveBeenCalledWith(expect.stringContaining('dragger'));
+      // Same "基米永不灭～" message as the other fight-back paths.
+      expect(deps.resumeService.announceResume).toHaveBeenCalledWith(
+        deps.client,
+        'text-1',
+        player.currentTrack,
+      );
+    });
+
+    test('skips the announcement when nothing is playing', async () => {
+      AuditLog.findRecentAuditExecutor.mockResolvedValue(null);
+      const player = makePlayer({ currentTrack: null });
+      const { deps } = makeDeps({ player });
+      const svc = makeService(deps);
+      svc.enable('guild-1');
+
+      await svc.handleBotMove(oldState(), movedState);
+      await jest.advanceTimersByTimeAsync(1500);
+
+      expect(player.joinVoiceChannel).toHaveBeenCalled();
+      expect(deps.resumeService.announceResume).not.toHaveBeenCalled();
     });
 
     test('does nothing when the mode is off', async () => {
