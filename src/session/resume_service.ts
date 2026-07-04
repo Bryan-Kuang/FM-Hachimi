@@ -37,6 +37,8 @@ interface GuildResumeState {
   isPaused: boolean;
   /** Whether the guild was in endless radio mode (re-armed on restore). */
   radioMode: boolean;
+  /** Whether /annoying anti-disconnect mode was on (re-armed on restore). */
+  annoyingMode?: boolean;
   /** Recently-played bvids (radio/Hachimi dedup window). */
   history: string[];
 }
@@ -59,6 +61,7 @@ class ResumeService {
   private readonly maxAgeMs: number;
   private readonly snapshotIntervalMs: number;
   private snapshotTimer: NodeJS.Timeout | null;
+  private annoyingService: any | null;
 
   constructor(options: ResumeServiceOptions) {
     this.enabled = options.enabled;
@@ -66,6 +69,15 @@ class ResumeService {
     this.maxAgeMs = options.maxAgeMs;
     this.snapshotIntervalMs = options.snapshotIntervalMs ?? 0;
     this.snapshotTimer = null;
+    this.annoyingService = null;
+  }
+
+  /**
+   * Lets snapshots carry the per-guild /annoying flag across redeploys.
+   * Guilds not captured (nothing playing) lose the flag — acceptable.
+   */
+  setAnnoyingService(annoyingService: any): void {
+    this.annoyingService = annoyingService;
   }
 
   // ── Periodic flush ────────────────────────────────────────────────────
@@ -113,29 +125,47 @@ class ResumeService {
   capture(sessionManager: any): ResumeSnapshot {
     const guilds: GuildResumeState[] = [];
 
-    for (const [guildId, session] of sessionManager.sessions) {
-      const player = session.player;
-      if (!player || !player.voiceConnection || !player.currentTrack) continue;
-      if (!player.isPlaying && !player.isPaused) continue;
-
-      const voiceChannelId = player.voiceConnection.joinConfig?.channelId;
-      if (!voiceChannelId) continue;
-
-      guilds.push({
-        guildId,
-        voiceChannelId,
-        textChannelId: session.uiContext?.channelId ?? null,
-        tracks: player.queue.items.map((track: any) => ({ ...track })),
-        currentIndex: player.queue.currentIndex,
-        loopMode: player.queue.loopMode,
-        positionSeconds: Math.max(0, Math.floor(player.getCurrentTime?.() ?? 0)),
-        isPaused: !!player.isPaused,
-        radioMode: !!player.radioMode,
-        history: [...session.history],
-      });
+    for (const [guildId] of sessionManager.sessions) {
+      const state = this.captureGuild(sessionManager, guildId);
+      if (state) guilds.push(state);
     }
 
     return { savedAt: new Date().toISOString(), guilds };
+  }
+
+  /**
+   * Snapshot a single guild's live playback state, or null when there is
+   * nothing worth resuming. `voiceChannelIdOverride` covers the forced-
+   * disconnect path, where Discord may have already cleared the connection's
+   * join config by the time the voiceStateUpdate event is handled.
+   */
+  captureGuild(
+    sessionManager: any,
+    guildId: string,
+    voiceChannelIdOverride?: string,
+  ): GuildResumeState | null {
+    const session = sessionManager.sessions.get(guildId);
+    const player = session?.player;
+    if (!player || !player.voiceConnection || !player.currentTrack) return null;
+    if (!player.isPlaying && !player.isPaused) return null;
+
+    const voiceChannelId =
+      voiceChannelIdOverride ?? player.voiceConnection.joinConfig?.channelId;
+    if (!voiceChannelId) return null;
+
+    return {
+      guildId,
+      voiceChannelId,
+      textChannelId: session.uiContext?.channelId ?? null,
+      tracks: player.queue.items.map((track: any) => ({ ...track })),
+      currentIndex: player.queue.currentIndex,
+      loopMode: player.queue.loopMode,
+      positionSeconds: Math.max(0, Math.floor(player.getCurrentTime?.() ?? 0)),
+      isPaused: !!player.isPaused,
+      radioMode: !!player.radioMode,
+      annoyingMode: !!this.annoyingService?.isEnabled?.(guildId),
+      history: [...session.history],
+    };
   }
 
   /**
@@ -262,6 +292,15 @@ class ResumeService {
     return { restored, skipped };
   }
 
+  /**
+   * Rebuild a guild's session from a captured state while the process is still
+   * running — the /annoying anti-disconnect rejoin. Same machinery as restart
+   * resume, including the "基米永不灭～" announcement.
+   */
+  async reconstructGuild(deps: RestoreDeps, state: GuildResumeState): Promise<boolean> {
+    return this.restoreGuild(deps, state);
+  }
+
   private async restoreGuild(deps: RestoreDeps, state: GuildResumeState): Promise<boolean> {
     const { client, audioManager, sessionManager } = deps;
 
@@ -344,6 +383,12 @@ class ResumeService {
       }
     }
 
+    // Re-arm /annoying anti-disconnect mode so a redeploy doesn't drop the
+    // guard (idempotent when the flag is already set on an in-process rejoin).
+    if (state.annoyingMode) {
+      this.annoyingService?.enable?.(state.guildId);
+    }
+
     logger.info('Resumed playback after restart', {
       guildId: state.guildId,
       track: tracks[index].title,
@@ -351,9 +396,10 @@ class ResumeService {
       queueLength: tracks.length,
       wasPaused: state.isPaused,
       radioMode: state.radioMode,
+      annoyingMode: !!state.annoyingMode,
     });
 
-    this.announceResume(client, state, tracks[index]).catch((err: Error) => {
+    this.announceResume(client, state.textChannelId, tracks[index]).catch((err: Error) => {
       logger.debug('Failed to send resume announcement', { error: err.message });
     });
 
@@ -380,9 +426,13 @@ class ResumeService {
     return listeners;
   }
 
-  private async announceResume(client: any, state: GuildResumeState, track: any): Promise<void> {
-    if (!state.textChannelId) return;
-    const channel = await client.channels.fetch(state.textChannelId).catch(() => null);
+  /**
+   * The "基米永不灭～" revival announcement — shared by restart resume,
+   * /annoying reconstruction (via restoreGuild), and the /annoying move-back.
+   */
+  async announceResume(client: any, textChannelId: string | null, track: any): Promise<void> {
+    if (!textChannelId) return;
+    const channel = await client.channels.fetch(textChannelId).catch(() => null);
     if (!channel || typeof channel.send !== 'function') return;
     await channel.send(`基米永不灭～ 重新部署完成，继续播放：**${track.title}**`);
   }

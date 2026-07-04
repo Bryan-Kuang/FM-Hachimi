@@ -97,6 +97,17 @@ class AudioPlayer {
   _trackEndInProgress: boolean;
   _inactivityTimer: ReturnType<typeof setTimeout> | null;
 
+  // Self-initiated voice action markers (epoch ms, 0 = never). AnnoyingService
+  // uses these to tell the bot's own leaves/moves apart from hostile
+  // disconnects/drags in voiceStateUpdate — without them the idle
+  // auto-disconnect (or /play moving the bot) would trigger a rejoin loop.
+  lastSelfDisconnectAt: number;
+  lastSelfJoinAt: number;
+  // Channel the last self-initiated join targeted. A move event landing in a
+  // DIFFERENT channel is hostile even inside the self-join window (e.g. the
+  // attacker drags the bot right after it moved back).
+  lastSelfJoinChannelId: string | null;
+
   // Radio mode: when set, this hook decides advancement on track end / skip.
   // It returns true if it took over (loaded + played the next track), in which
   // case AudioPlayer skips its normal queue-advance logic. RadioService owns it.
@@ -132,6 +143,10 @@ class AudioPlayer {
     this._manualNavigating = false;
     this._trackEndInProgress = false;
     this._inactivityTimer = null;
+
+    this.lastSelfDisconnectAt = 0;
+    this.lastSelfJoinAt = 0;
+    this.lastSelfJoinChannelId = null;
 
     this.advanceHook = null;
     this.radioMode = false;
@@ -332,6 +347,8 @@ class AudioPlayer {
 
   async joinVoiceChannel(voiceChannel: VoiceChannelLike, retryCount = 0): Promise<boolean> {
     const maxRetries = 3;
+    this.lastSelfJoinAt = Date.now();
+    this.lastSelfJoinChannelId = voiceChannel.id;
 
     try {
       logger.info('Attempting to join voice channel', {
@@ -925,6 +942,7 @@ class AudioPlayer {
 
   _doDisconnect(): void {
     this._cancelInactivityTimer();
+    this.lastSelfDisconnectAt = Date.now();
     if (this.voiceConnection) {
       try {
         this.voiceConnection.destroy();

@@ -71,6 +71,7 @@ describe("command registry", () => {
       "search",
       "hachimi",
       "radio",
+      "annoying",
       "daily-hachimi",
       "worldcup",
     ]);
@@ -120,6 +121,7 @@ describe("command registry", () => {
       "search",
       "hachimi",
       "radio",
+      "annoying",
       "daily-hachimi",
       "worldcup",
     ]);
@@ -136,6 +138,7 @@ describe("command registry", () => {
       "search",
       "hachimi",
       "radio",
+      "annoying",
       "daily-hachimi",
       "worldcup",
     ]);

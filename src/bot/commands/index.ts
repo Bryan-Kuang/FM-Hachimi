@@ -11,6 +11,7 @@ import help = require('./help');
 import search = require('./search');
 import hachimi = require('./hachimi');
 import radio = require('./radio');
+import annoying = require('./annoying');
 import dailyHachimi = require('./daily_hachimi');
 import worldCup = require('./world_cup');
 
@@ -42,6 +43,7 @@ const commandFactories: CommandFactory[] = [
   search,
   hachimi,
   radio,
+  annoying,
   dailyHachimi,
   worldCup,
 ];

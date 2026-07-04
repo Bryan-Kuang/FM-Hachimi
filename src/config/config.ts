@@ -134,6 +134,17 @@ interface WorldCupConfig {
   timezone: string;
 }
 
+interface AnnoyingConfig {
+  /**
+   * Discord user (numeric ID or username) allowed to disconnect/move the bot
+   * while annoying mode is on. Kept out of the repo — populated from the
+   * ANNOYING_EXEMPT_USER GitHub Actions secret on deploy. Empty ⇒ nobody exempt.
+   */
+  exemptUser: string;
+  /** Delay before the bot rejoins after a hostile disconnect/move. */
+  rejoinDelayMs: number;
+}
+
 interface ResumeConfig {
   enabled: boolean;
   /** Snapshot file (under the persisted data/ mount so it survives redeploys). */
@@ -161,6 +172,7 @@ interface BotConfig {
   radio: RadioConfig;
   dailyHachimi: DailyHachimiConfig;
   worldCup: WorldCupConfig;
+  annoying: AnnoyingConfig;
   resume: ResumeConfig;
   test: TestConfig;
 }
@@ -382,6 +394,16 @@ const config: BotConfig = {
     requestTimeoutMs: Math.max(1000, parseIntegerEnv(process.env.WORLD_CUP_REQUEST_TIMEOUT_MS, 10000)),
     dataDir: process.env.WORLD_CUP_DATA_DIR || path.join(process.cwd(), "data", "world_cup"),
     timezone: process.env.WORLD_CUP_TIMEZONE || "America/Toronto",
+  },
+  annoying: {
+    // /annoying anti-disconnect mode. The exempt user may still disconnect/move
+    // the bot normally; everyone else gets fought. The value is a numeric
+    // Discord user ID (preferred) or username, injected via the
+    // ANNOYING_EXEMPT_USER secret at deploy time — never committed.
+    exemptUser: (process.env.ANNOYING_EXEMPT_USER ?? "").trim(),
+    // Small delay before rejoining — avoids racing Discord's own state
+    // propagation and doubles as the rate limiter for spam-disconnects.
+    rejoinDelayMs: Math.max(0, parseIntegerEnv(process.env.ANNOYING_REJOIN_DELAY_MS, 1500)),
   },
   resume: {
     // Resume interrupted playback after a restart/redeploy. A snapshot of every

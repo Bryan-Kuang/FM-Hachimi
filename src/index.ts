@@ -18,6 +18,7 @@ import ProgressTracker = require('./ui/progress_tracker');
 import HistoryStore = require('./utils/history_store');
 import PlayerService = require('./services/player_service');
 import RadioService = require('./services/radio_service');
+import AnnoyingService = require('./services/annoying_service');
 import DailyHachimiService = require('./services/daily_hachimi_service');
 import WorldCupSource = require('./world_cup/source');
 import WorldCupService = require('./world_cup/world_cup_service');
@@ -168,6 +169,22 @@ class BilibiliDiscordBot {
       // (snapshot written in shutdown() below). Best-effort, non-blocking.
       const resumeService = new ResumeService(config.resume);
       this.resumeService = resumeService;
+
+      // /annoying anti-disconnect mode: fights hostile disconnects/moves by
+      // reconstructing the session via the resume machinery. Attached to
+      // playerService so the command and voiceStateUpdate handler can reach it.
+      const annoyingService = new AnnoyingService(config.annoying);
+      annoyingService.initialize({
+        client: this.botClient.getClient(),
+        audioManager,
+        sessionManager,
+        radioService,
+        resumeService,
+      });
+      playerService.setAnnoyingService(annoyingService as any);
+      // Lets snapshots carry the /annoying flag across redeploys.
+      resumeService.setAnnoyingService(annoyingService);
+
       resumeService.scheduleRestore({
         client: this.botClient.getClient(),
         audioManager,
