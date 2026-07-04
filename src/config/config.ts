@@ -208,14 +208,22 @@ const config: BotConfig = {
     ffmpegInactiveKillThreshold: parseInt(process.env.FFMPEG_INACTIVE_KILL_THRESHOLD!) || 60000, // 60秒
     enableUnlimitedLength: process.env.ENABLE_UNLIMITED_LENGTH !== "false", // 默认启用无限长度播放
     urlRefreshThreshold: parseInt(process.env.URL_REFRESH_THRESHOLD!) || 20 * 60 * 1000, // Bilibili CDN URL 刷新阈值（默认20分钟）
-    // FFmpeg -af filter. dynaudnorm levels loudness across/within tracks (low
-    // latency); the trailing volume=0.15 (~-16.5 dB) then sets where that leveled
-    // loudness sits — background music level (dynaudnorm alone peak-normalizes;
-    // -12 dB still felt foreground-loud in listening tests, and 60% of that
-    // level, matched by ear via Discord's user volume slider, sounded right:
-    // 0.25 * 0.6 = 0.15). Tune via AUDIO_FILTER — raise volume for louder
-    // (e.g. 0.25), lower for quieter; set AUDIO_FILTER="" to disable entirely.
-    audioFilter: (process.env.AUDIO_FILTER ?? "dynaudnorm=f=250:g=15,volume=0.15").trim(),
+    // FFmpeg -af filter chain:
+    //  1. loudnorm targets a fixed -16 LUFS integrated loudness, which is what
+    //     actually equalizes perceived volume ACROSS different videos — unlike
+    //     dynaudnorm, it measures against an absolute reference instead of only
+    //     the track's own local window, so two videos mastered at different
+    //     loudness now land at the same level instead of one still sounding
+    //     louder than the other. Single-pass (no pre-analysis) since input is a
+    //     live piped stream; TP/LRA keep it from clipping or over-flattening.
+    //  2. dynaudnorm (low latency) smooths loudness swings WITHIN a track on
+    //     top of that.
+    //  3. volume=0.15 (~-16.5 dB) is the fixed trim that brings the leveled
+    //     signal down to background-music level (tuned by ear against Discord's
+    //     volume slider: -12 dB still felt foreground-loud, 60% of that sounded
+    //     right — 0.25 * 0.6 = 0.15).
+    // Tune via AUDIO_FILTER; set AUDIO_FILTER="" to disable entirely.
+    audioFilter: (process.env.AUDIO_FILTER ?? "loudnorm=I=-16:TP=-1.5:LRA=11,dynaudnorm=f=250:g=15,volume=0.15").trim(),
     // 播放判定阈值 — 用于 Idle 事件到达时判断是否视作"完整播放结束"
     fullTrackThresholdMs: parseInt(process.env.AUDIO_FULL_TRACK_THRESHOLD_MS!) || 15000, // 未知时长(duration=0)时，超过 15s 视为完整播放
     shortPlaybackRetryThresholdMs: parseInt(process.env.AUDIO_SHORT_PLAYBACK_RETRY_THRESHOLD_MS!) || 3000, // 播放时间 <3s 且未达结尾则视作异常，触发重试
