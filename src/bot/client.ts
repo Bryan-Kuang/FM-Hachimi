@@ -163,6 +163,20 @@ class BotClient {
 
       const annoyingService = playerService.getAnnoyingService?.();
 
+      // Bot was server-muted/deafened — annoying mode clears it. No early
+      // return: a combined event (muted while being dragged) must still fall
+      // through to the move branch below.
+      if (
+        oldState.member?.id === this.client.user?.id &&
+        newState.channel &&
+        ((!oldState.serverMute && newState.serverMute) ||
+          (!oldState.serverDeaf && newState.serverDeaf))
+      ) {
+        annoyingService?.handleBotMuteDeafen(oldState, newState)?.catch((err: Error) => {
+          logger.warn('Annoying mode: mute/deafen handling failed', { error: err.message });
+        });
+      }
+
       // Bot was dragged to another voice channel — annoying mode moves it back.
       if (
         oldState.member?.id === this.client.user?.id &&

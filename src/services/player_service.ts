@@ -52,6 +52,7 @@ interface AnnoyingServiceLike {
   toggle(guildId: GuildId): boolean;
   handleBotDisconnect(oldState: unknown): Promise<string>;
   handleBotMove(oldState: unknown, newState: unknown): Promise<void>;
+  handleBotMuteDeafen(oldState: unknown, newState: unknown): Promise<void>;
 }
 
 interface PlayerServiceDeps {

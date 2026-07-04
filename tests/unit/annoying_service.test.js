@@ -32,7 +32,10 @@ function makePlayer(overrides = {}) {
 function makeDeps({ player, capturedState } = {}) {
   const channel = { send: jest.fn().mockResolvedValue({}) };
   const deps = {
-    client: { channels: { fetch: jest.fn().mockResolvedValue(channel) } },
+    client: {
+      user: { id: 'bot-1' },
+      channels: { fetch: jest.fn().mockResolvedValue(channel) },
+    },
     audioManager: {},
     sessionManager: {
       sessions: new Map([['guild-1', { player, uiContext: { channelId: 'text-1' } }]]),
@@ -298,6 +301,119 @@ describe('AnnoyingService', () => {
       jest.advanceTimersByTime(10000);
 
       expect(player.joinVoiceChannel).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('handleBotMuteDeafen', () => {
+    function makeVoiceStates({ mute = false, deaf = false } = {}) {
+      const voice = {
+        setMute: jest.fn().mockResolvedValue(undefined),
+        setDeaf: jest.fn().mockResolvedValue(undefined),
+      };
+      const base = { guild: { id: 'guild-1' }, channel: { id: 'vc-1' }, channelId: 'vc-1' };
+      return {
+        voice,
+        oldVoiceState: { ...base, serverMute: false, serverDeaf: false },
+        newVoiceState: { ...base, serverMute: mute, serverDeaf: deaf, member: { voice } },
+      };
+    }
+
+    test('does nothing when the mode is off', async () => {
+      const { voice, oldVoiceState, newVoiceState } = makeVoiceStates({ mute: true });
+      const svc = makeService(makeDeps({ player: makePlayer() }).deps);
+
+      await svc.handleBotMuteDeafen(oldVoiceState, newVoiceState);
+      jest.advanceTimersByTime(10000);
+
+      expect(voice.setMute).not.toHaveBeenCalled();
+    });
+
+    test('ignores events that did not flip the server mute/deaf flags', async () => {
+      const { voice, oldVoiceState, newVoiceState } = makeVoiceStates(); // no change
+      const svc = makeService(makeDeps({ player: makePlayer() }).deps);
+      svc.enable('guild-1');
+
+      await svc.handleBotMuteDeafen(oldVoiceState, newVoiceState);
+      jest.advanceTimersByTime(10000);
+
+      expect(voice.setMute).not.toHaveBeenCalled();
+      expect(AuditLog.findRecentAuditExecutor).not.toHaveBeenCalled();
+    });
+
+    test('stays silenced when the exempt user did it', async () => {
+      AuditLog.findRecentAuditExecutor.mockResolvedValue({ id: 'bk233', username: 'whoever' });
+      const { voice, oldVoiceState, newVoiceState } = makeVoiceStates({ mute: true });
+      const svc = makeService(makeDeps({ player: makePlayer() }).deps);
+      svc.enable('guild-1');
+
+      await svc.handleBotMuteDeafen(oldVoiceState, newVoiceState);
+      jest.advanceTimersByTime(10000);
+
+      expect(voice.setMute).not.toHaveBeenCalled();
+    });
+
+    test('clears a hostile server mute and announces the revival', async () => {
+      AuditLog.findRecentAuditExecutor.mockResolvedValue({ id: '42', username: 'silencer' });
+      const player = makePlayer();
+      const { deps } = makeDeps({ player });
+      const { voice, oldVoiceState, newVoiceState } = makeVoiceStates({ mute: true });
+      const svc = makeService(deps);
+      svc.enable('guild-1');
+
+      await svc.handleBotMuteDeafen(oldVoiceState, newVoiceState);
+      expect(voice.setMute).not.toHaveBeenCalled(); // delayed
+
+      // Only audit entries that flipped OUR mute/deaf flags count.
+      const { entryFilter } = AuditLog.findRecentAuditExecutor.mock.calls[0][2];
+      expect(entryFilter({ target: { id: 'bot-1' }, changes: [{ key: 'mute' }] })).toBe(true);
+      expect(entryFilter({ target: { id: 'bot-1' }, changes: [{ key: 'nick' }] })).toBe(false);
+      expect(entryFilter({ target: { id: 'someone' }, changes: [{ key: 'mute' }] })).toBe(false);
+
+      await jest.advanceTimersByTimeAsync(1500);
+
+      expect(voice.setMute).toHaveBeenCalledWith(false);
+      expect(voice.setDeaf).not.toHaveBeenCalled();
+      expect(deps.resumeService.announceResume).toHaveBeenCalledWith(
+        deps.client,
+        'text-1',
+        player.currentTrack,
+      );
+    });
+
+    test('clears mute and deafen together, silently when nothing is playing', async () => {
+      AuditLog.findRecentAuditExecutor.mockResolvedValue(null); // unknown ⇒ hostile
+      const player = makePlayer({ currentTrack: null });
+      const { deps } = makeDeps({ player });
+      const { voice, oldVoiceState, newVoiceState } = makeVoiceStates({ mute: true, deaf: true });
+      const svc = makeService(deps);
+      svc.enable('guild-1');
+
+      await svc.handleBotMuteDeafen(oldVoiceState, newVoiceState);
+      await jest.advanceTimersByTimeAsync(1500);
+
+      expect(voice.setMute).toHaveBeenCalledWith(false);
+      expect(voice.setDeaf).toHaveBeenCalledWith(false);
+      expect(deps.resumeService.announceResume).not.toHaveBeenCalled();
+    });
+
+    test('survives a missing Mute Members permission', async () => {
+      AuditLog.findRecentAuditExecutor.mockResolvedValue(null);
+      const { deps } = makeDeps({ player: makePlayer() });
+      const { voice, oldVoiceState, newVoiceState } = makeVoiceStates({ mute: true });
+      voice.setMute.mockRejectedValue(new Error('Missing Permissions'));
+      const svc = makeService(deps);
+      svc.enable('guild-1');
+
+      await svc.handleBotMuteDeafen(oldVoiceState, newVoiceState);
+      await jest.advanceTimersByTimeAsync(1500);
+
+      expect(voice.setMute).toHaveBeenCalled();
+      expect(deps.resumeService.announceResume).not.toHaveBeenCalled();
+
+      // The in-flight guard is released, so the next hostile mute is fought.
+      await svc.handleBotMuteDeafen(oldVoiceState, newVoiceState);
+      await jest.advanceTimersByTimeAsync(1500);
+      expect(voice.setMute).toHaveBeenCalledTimes(2);
     });
   });
 });
