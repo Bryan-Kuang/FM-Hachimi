@@ -11,15 +11,12 @@ import {
   ActivityType,
   MessageFlags,
   ChatInputCommandInteraction,
-  Guild,
-  AuditLogEvent,
   VoiceState,
 } from 'discord.js';
 import * as logger from '../services/logger_service';
 import config = require('../config/config');
 import Debug = require('../utils/debug');
 import CommandRegistry = require('./commands');
-import AuditLog = require('../utils/audit_log');
 import * as TestingAccess from './testing_access';
 
 // Augment discord.js Client with bot-specific properties
@@ -37,15 +34,6 @@ interface CommandDef {
   cooldown?: number;
   stage?: 'stable' | 'testing';
   featureName?: string;
-}
-
-interface TrackInfo {
-  title?: string;
-  url?:   string;
-}
-
-interface GuildContext {
-  channelId: string;
 }
 
 interface BotStats {
@@ -200,12 +188,11 @@ class BotClient {
         });
 
         // Annoying mode decides BEFORE teardown — it snapshots the live queue
-        // that leaveVoiceChannel() below is about to wipe. 'reconstructing'
-        // means it will rejoin shortly and send its own message.
-        let annoyingOutcome: string = 'ignore';
+        // that leaveVoiceChannel() below is about to wipe, and schedules the
+        // rejoin when the disconnect is hostile.
         if (annoyingService) {
           try {
-            annoyingOutcome = await annoyingService.handleBotDisconnect(oldState);
+            await annoyingService.handleBotDisconnect(oldState);
           } catch (err: unknown) {
             logger.warn('Annoying mode: disconnect handling failed', {
               error: (err as Error).message,
@@ -214,11 +201,8 @@ class BotClient {
         }
 
         const player = playerService.getPlayer(oldState.guild.id);
-        let currentTrack: TrackInfo | null = null;
 
         if (player) {
-          // Capture current track before tearing down — sendDisconnectMessage uses it
-          currentTrack = player.currentTrack as TrackInfo | null;
           // Radio mode must be flagged off before teardown, otherwise the next
           // /radio toggles the stale "enabled" state off instead of starting.
           // (The annoying-mode restore re-arms it from the snapshot.)
@@ -231,12 +215,6 @@ class BotClient {
 
           logger.info('Player torn down due to voice disconnect', {
             guild: oldState.guild.name,
-          });
-        }
-
-        if (annoyingOutcome !== 'reconstructing') {
-          this.sendDisconnectMessage(oldState.guild, currentTrack).catch((err: Error) => {
-            logger.warn('Failed to send disconnect message', { error: err.message });
           });
         }
       }
@@ -326,54 +304,6 @@ class BotClient {
       logger.warn('Discord client warning', { warning });
       Debug.trace('client.event.warn', { warning });
     });
-  }
-
-  /**
-   * Send a humorous message when bot is manually disconnected
-   */
-  async sendDisconnectMessage(guild: Guild, currentTrack: TrackInfo | null): Promise<void> {
-    try {
-      const context = this.playerService.getUIContext(guild.id) as GuildContext | null;
-      if (!context || !context.channelId) {
-        logger.debug('No text channel context for disconnect message');
-        return;
-      }
-
-      const channel = await this.client.channels.fetch(context.channelId).catch(() => null) as any;
-      if (!channel) {
-        logger.debug('Failed to fetch text channel for disconnect message');
-        return;
-      }
-
-      // Try to find who disconnected the bot from audit logs
-      const executor = await AuditLog.findRecentAuditExecutor(
-        guild,
-        AuditLogEvent.MemberDisconnect,
-        { targetId: this.client.user?.id },
-      );
-      const culprit = executor?.displayName || executor?.username || '未知凶手';
-
-      // Build the message
-      const guildMember = (guild as any).members?.me;
-      const botName     = guildMember?.displayName || this.client.user?.username;
-      let message       = `饿啊～\n**${botName}** 被谋害了，凶手是 **${culprit}**`;
-
-      if (currentTrack && currentTrack.title) {
-        message += `\n遗言是：**${currentTrack.title}**`;
-      }
-
-      await channel.send(message);
-
-      logger.info('Sent disconnect message', {
-        guild:    guild.name,
-        culprit,
-        hadTrack: !!currentTrack,
-      });
-    } catch (error: unknown) {
-      logger.error('Error sending disconnect message', {
-        error: (error as Error).message,
-      });
-    }
   }
 
   /**

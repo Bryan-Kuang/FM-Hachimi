@@ -97,9 +97,9 @@ class AnnoyingService {
    * voiceStateUpdate handler BEFORE teardown, because teardown
    * (leaveVoiceChannel) wipes the queue this captures.
    *
-   * Returns what the caller should do: 'ignore'/'exempt' → proceed exactly as
-   * today (teardown + murder message); 'reconstructing' → still tear down, but
-   * skip the murder message (we rejoin and announce the resurrection).
+   * Returns the decision: 'ignore'/'exempt' → the caller's teardown is the end
+   * of it; 'reconstructing' → still tear down, but we rejoin shortly and
+   * announce the resurrection.
    */
   async handleBotDisconnect(oldState: any): Promise<DisconnectOutcome> {
     const deps = this.deps;
