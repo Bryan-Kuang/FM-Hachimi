@@ -1,13 +1,15 @@
 /**
  * AnnoyingService — /annoying 反谋害模式 (anti-disconnect mode)
  *
- * While enabled for a guild, the bot refuses to be removed from its voice
- * channel: a forced disconnect triggers a full session reconstruction (the
- * ResumeService restore path — rejoin, re-seek, re-pause, re-arm radio,
- * announced with the same "基米永不灭～" message as restart resume) a moment
- * later, and a forced channel move is countered by moving back. The one
- * exception is the exempt user (config.annoying.exemptUser, injected via the
- * ANNOYING_EXEMPT_USER secret), whose disconnects/moves are respected.
+ * While enabled for a guild, the bot refuses to be silenced or removed from
+ * its voice channel: a forced disconnect triggers a full session
+ * reconstruction (the ResumeService restore path — rejoin, re-seek, re-pause,
+ * re-arm radio, announced with the same "基米永不灭～" message as restart
+ * resume) a moment later, a forced channel move is countered by moving back,
+ * and a server mute/deafen is cleared (this one needs the Mute Members /
+ * Deafen Members permission). The one exception is the exempt user
+ * (config.annoying.exemptUser, injected via the ANNOYING_EXEMPT_USER secret),
+ * whose actions are respected.
  *
  * Self-initiated leaves and moves (idle auto-disconnect, /stop, /play joining
  * another channel, our own counter-move) are recognized via the AudioPlayer's
@@ -49,14 +51,17 @@ class AnnoyingService {
   private readonly options: AnnoyingOptions;
   private deps: AnnoyingDeps | null;
   private readonly enabledGuilds: Set<string>;
-  /** Guilds with a fight-back in flight — guards double reconstruction. */
+  /** Guilds with a rejoin/move-back in flight — guards double reconstruction. */
   private readonly busyGuilds: Set<string>;
+  /** Guilds with an un-mute/un-deafen in flight (independent of busyGuilds). */
+  private readonly unmutingGuilds: Set<string>;
 
   constructor(options: AnnoyingOptions) {
     this.options = options;
     this.deps = null;
     this.enabledGuilds = new Set();
     this.busyGuilds = new Set();
+    this.unmutingGuilds = new Set();
   }
 
   initialize(deps: AnnoyingDeps): void {
@@ -97,9 +102,9 @@ class AnnoyingService {
    * voiceStateUpdate handler BEFORE teardown, because teardown
    * (leaveVoiceChannel) wipes the queue this captures.
    *
-   * Returns what the caller should do: 'ignore'/'exempt' → proceed exactly as
-   * today (teardown + murder message); 'reconstructing' → still tear down, but
-   * skip the murder message (we rejoin and announce the resurrection).
+   * Returns the decision: 'ignore'/'exempt' → the caller's teardown is the end
+   * of it; 'reconstructing' → still tear down, but we rejoin shortly and
+   * announce the resurrection.
    */
   async handleBotDisconnect(oldState: any): Promise<DisconnectOutcome> {
     const deps = this.deps;
@@ -217,6 +222,78 @@ class AnnoyingService {
           logger.error('Annoying mode: move-back failed', { guildId, error: err.message });
         })
         .finally(() => this.busyGuilds.delete(guildId));
+    }, this.options.rejoinDelayMs);
+  }
+
+  /**
+   * Bot was server-muted and/or server-deafened. Clearing a SERVER mute/deafen
+   * on yourself is a moderation action, so this needs the Mute Members /
+   * Deafen Members permission — without it the API call fails and we give up
+   * with a warning.
+   */
+  async handleBotMuteDeafen(oldState: any, newState: any): Promise<void> {
+    const deps = this.deps;
+    const guildId: string | undefined = oldState?.guild?.id;
+    if (!deps || !guildId || !this.isEnabled(guildId)) return;
+
+    const muted = !oldState.serverMute && !!newState.serverMute;
+    const deafened = !oldState.serverDeaf && !!newState.serverDeaf;
+    if (!muted && !deafened) return;
+
+    // MemberUpdate is noisy (nicknames, timeouts, …) — only consider entries
+    // that actually flipped OUR mute/deaf flags.
+    const botId = deps.client.user?.id;
+    const culprit = await AuditLog.findRecentAuditExecutor(
+      oldState.guild,
+      AuditLogEvent.MemberUpdate,
+      {
+        entryFilter: (entry: any) =>
+          entry.target?.id === botId &&
+          (entry.changes ?? []).some((change: any) => change.key === 'mute' || change.key === 'deaf'),
+      },
+    );
+    if (this.isExemptUser(culprit)) {
+      logger.info('Annoying mode: mute/deafen by exempt user, staying silenced', {
+        guildId,
+        culprit: culprit?.username,
+      });
+      return;
+    }
+    if (this.unmutingGuilds.has(guildId)) return;
+
+    const culpritName = culprit?.displayName || culprit?.username || '未知黑手';
+    this.unmutingGuilds.add(guildId);
+    setTimeout(() => {
+      (async () => {
+        const voice = newState.member?.voice ?? newState.guild?.members?.me?.voice;
+        if (!voice) return;
+        if (muted) await voice.setMute(false);
+        if (deafened) await voice.setDeaf(false);
+        logger.info('Annoying mode: cleared server mute/deafen', {
+          guildId,
+          muted,
+          deafened,
+          culprit: culpritName,
+        });
+        // Same "基米永不灭～" announcement as the other counters; a mute never
+        // stops playback, so skip it when nothing is playing.
+        const session = deps.sessionManager.sessions?.get(guildId);
+        const track = session?.player?.currentTrack;
+        if (track?.title) {
+          await deps.resumeService.announceResume(
+            deps.client,
+            session?.uiContext?.channelId ?? null,
+            track,
+          );
+        }
+      })()
+        .catch((err: Error) => {
+          logger.warn(
+            'Annoying mode: failed to clear server mute/deafen (needs Mute Members / Deafen Members permission)',
+            { guildId, error: err.message },
+          );
+        })
+        .finally(() => this.unmutingGuilds.delete(guildId));
     }, this.options.rejoinDelayMs);
   }
 

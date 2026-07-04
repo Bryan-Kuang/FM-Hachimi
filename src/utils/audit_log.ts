@@ -11,8 +11,12 @@ import * as logger from '../services/logger_service';
 interface FindExecutorOptions {
   /** Ignore entries older than this (ms). */
   maxAgeMs?: number;
-  /** When set, only entries targeting this user id are considered. */
-  targetId?: string;
+  /**
+   * Only entries passing this predicate are considered. Needed for noisy
+   * event types (e.g. MemberUpdate covers nickname edits, timeouts, and
+   * mute/deafen alike) where the type alone doesn't identify the action.
+   */
+  entryFilter?: (entry: any) => boolean;
 }
 
 async function findRecentAuditExecutor(
@@ -28,7 +32,7 @@ async function findRecentAuditExecutor(
     let mostRecent: any = null;
     for (const entry of auditLogs.entries.values()) {
       if (Date.now() - entry.createdTimestamp > maxAgeMs) continue;
-      if (options.targetId && entry.target?.id !== options.targetId) continue;
+      if (options.entryFilter && !options.entryFilter(entry)) continue;
       if (!mostRecent || entry.createdTimestamp > mostRecent.createdTimestamp) {
         mostRecent = entry;
       }

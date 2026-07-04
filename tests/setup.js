@@ -69,6 +69,7 @@ jest.mock("discord.js", () => ({
     Ephemeral: 64,
   },
   AuditLogEvent: {
+    MemberUpdate: 24,
     MemberMove: 26,
     MemberDisconnect: 27,
   },
