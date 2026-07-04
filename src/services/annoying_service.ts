@@ -301,23 +301,14 @@ class AnnoyingService {
         if (!voice) return;
         if (flags.mute) await voice.setMute(false);
         if (flags.deaf) await voice.setDeaf(false);
+        // Deliberately no channel announcement — the cleared flag is visible
+        // on its own, and mute/deafen never interrupts playback.
         logger.info('Annoying mode: cleared server mute/deafen', {
           guildId,
           muted: flags.mute,
           deafened: flags.deaf,
           culprit: culpritName,
         });
-        // Same "基米永不灭～" announcement as the other counters; a mute never
-        // stops playback, so skip it when nothing is playing.
-        const session = deps.sessionManager.sessions?.get(guildId);
-        const track = session?.player?.currentTrack;
-        if (track?.title) {
-          await deps.resumeService.announceResume(
-            deps.client,
-            session?.uiContext?.channelId ?? null,
-            track,
-          );
-        }
       })().catch((err: Error) => {
         logger.warn(
           'Annoying mode: failed to clear server mute/deafen (needs Mute Members / Deafen Members permission)',

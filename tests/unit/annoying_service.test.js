@@ -352,7 +352,7 @@ describe('AnnoyingService', () => {
       expect(voice.setMute).not.toHaveBeenCalled();
     });
 
-    test('clears a hostile server mute and announces the revival', async () => {
+    test('clears a hostile server mute silently (no announcement)', async () => {
       AuditLog.findRecentAuditExecutor.mockResolvedValue({ id: '42', username: 'silencer' });
       const player = makePlayer();
       const { deps } = makeDeps({ player });
@@ -373,14 +373,10 @@ describe('AnnoyingService', () => {
 
       expect(voice.setMute).toHaveBeenCalledWith(false);
       expect(voice.setDeaf).not.toHaveBeenCalled();
-      expect(deps.resumeService.announceResume).toHaveBeenCalledWith(
-        deps.client,
-        'text-1',
-        player.currentTrack,
-      );
+      expect(deps.resumeService.announceResume).not.toHaveBeenCalled();
     });
 
-    test('clears mute and deafen together, silently when nothing is playing', async () => {
+    test('clears mute and deafen together from a single event', async () => {
       AuditLog.findRecentAuditExecutor.mockResolvedValue(null); // unknown ⇒ hostile
       const player = makePlayer({ currentTrack: null });
       const { deps } = makeDeps({ player });
