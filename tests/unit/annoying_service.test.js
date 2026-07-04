@@ -396,6 +396,33 @@ describe('AnnoyingService', () => {
       expect(deps.resumeService.announceResume).not.toHaveBeenCalled();
     });
 
+    test('a rapid deafen-then-mute combo clears BOTH flags', async () => {
+      // Discord sends mute and deafen as separate gateway events even when
+      // toggled together; the second must merge into the scheduled clear,
+      // not be dropped (regression: the bot stayed muted forever).
+      AuditLog.findRecentAuditExecutor.mockResolvedValue(null);
+      const player = makePlayer({ currentTrack: null });
+      const { deps } = makeDeps({ player });
+      const { voice, oldVoiceState, newVoiceState } = makeVoiceStates({ deaf: true });
+      const svc = makeService(deps);
+      svc.enable('guild-1');
+
+      // t=0: server deafen
+      await svc.handleBotMuteDeafen(oldVoiceState, newVoiceState);
+      jest.advanceTimersByTime(500);
+
+      // t=500ms (inside the 1500ms window): server mute lands on top
+      await svc.handleBotMuteDeafen(
+        { ...oldVoiceState, serverDeaf: true },
+        { ...newVoiceState, serverMute: true, serverDeaf: true },
+      );
+
+      await jest.advanceTimersByTimeAsync(1500);
+
+      expect(voice.setDeaf).toHaveBeenCalledWith(false);
+      expect(voice.setMute).toHaveBeenCalledWith(false);
+    });
+
     test('survives a missing Mute Members permission', async () => {
       AuditLog.findRecentAuditExecutor.mockResolvedValue(null);
       const { deps } = makeDeps({ player: makePlayer() });
