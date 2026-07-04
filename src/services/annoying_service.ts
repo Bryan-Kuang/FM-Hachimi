@@ -53,15 +53,22 @@ class AnnoyingService {
   private readonly enabledGuilds: Set<string>;
   /** Guilds with a rejoin/move-back in flight — guards double reconstruction. */
   private readonly busyGuilds: Set<string>;
-  /** Guilds with an un-mute/un-deafen in flight (independent of busyGuilds). */
-  private readonly unmutingGuilds: Set<string>;
+  /**
+   * Per-guild server-mute/deafen flags waiting to be cleared. Discord sends
+   * mute and deafen as SEPARATE gateway events even when toggled together, so
+   * a second event landing inside the delay window must merge into the
+   * scheduled clear instead of being dropped — dropping it left the bot
+   * permanently muted when it was deafened first (deafen scheduled the clear,
+   * mute hit the in-flight guard and vanished).
+   */
+  private readonly pendingUnmute: Map<string, { mute: boolean; deaf: boolean }>;
 
   constructor(options: AnnoyingOptions) {
     this.options = options;
     this.deps = null;
     this.enabledGuilds = new Set();
     this.busyGuilds = new Set();
-    this.unmutingGuilds = new Set();
+    this.pendingUnmute = new Map();
   }
 
   initialize(deps: AnnoyingDeps): void {
@@ -259,20 +266,45 @@ class AnnoyingService {
       });
       return;
     }
-    if (this.unmutingGuilds.has(guildId)) return;
-
     const culpritName = culprit?.displayName || culprit?.username || '未知黑手';
-    this.unmutingGuilds.add(guildId);
+
+    // Merge into an already-scheduled clear (mute and deafen arrive as
+    // separate gateway events even when toggled together).
+    const pending = this.pendingUnmute.get(guildId);
+    if (pending) {
+      pending.mute = pending.mute || muted;
+      pending.deaf = pending.deaf || deafened;
+      logger.info('Annoying mode: merged mute/deafen into scheduled clear', {
+        guildId,
+        pending,
+        culprit: culpritName,
+      });
+      return;
+    }
+    this.pendingUnmute.set(guildId, { mute: muted, deaf: deafened });
+
+    logger.info('Annoying mode: hostile server mute/deafen, clear scheduled', {
+      guildId,
+      muted,
+      deafened,
+      culprit: culpritName,
+      delayMs: this.options.rejoinDelayMs,
+    });
     setTimeout(() => {
+      // Delete-before-act: a failure must not leave a stale record that would
+      // swallow the next event's clear.
+      const flags = this.pendingUnmute.get(guildId);
+      this.pendingUnmute.delete(guildId);
       (async () => {
+        if (!flags) return;
         const voice = newState.member?.voice ?? newState.guild?.members?.me?.voice;
         if (!voice) return;
-        if (muted) await voice.setMute(false);
-        if (deafened) await voice.setDeaf(false);
+        if (flags.mute) await voice.setMute(false);
+        if (flags.deaf) await voice.setDeaf(false);
         logger.info('Annoying mode: cleared server mute/deafen', {
           guildId,
-          muted,
-          deafened,
+          muted: flags.mute,
+          deafened: flags.deaf,
           culprit: culpritName,
         });
         // Same "基米永不灭～" announcement as the other counters; a mute never
@@ -286,14 +318,12 @@ class AnnoyingService {
             track,
           );
         }
-      })()
-        .catch((err: Error) => {
-          logger.warn(
-            'Annoying mode: failed to clear server mute/deafen (needs Mute Members / Deafen Members permission)',
-            { guildId, error: err.message },
-          );
-        })
-        .finally(() => this.unmutingGuilds.delete(guildId));
+      })().catch((err: Error) => {
+        logger.warn(
+          'Annoying mode: failed to clear server mute/deafen (needs Mute Members / Deafen Members permission)',
+          { guildId, error: err.message },
+        );
+      });
     }, this.options.rejoinDelayMs);
   }
 
