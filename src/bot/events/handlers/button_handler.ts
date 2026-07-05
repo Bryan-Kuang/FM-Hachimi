@@ -207,6 +207,14 @@ async function handleDailyPlay(interaction: any, customId: string, playerService
 
   const videoUrl = `https://www.bilibili.com/video/${bvid}`;
 
+  // In radio mode the rotation owns the queue, so a normal play request would
+  // be discarded on the next advance. Interject the recommendation into the
+  // rotation instead: it plays now, and the radio resumes when it ends.
+  const radio = playerService.getRadioService?.();
+  if (radio?.isEnabled(interaction.guild.id)) {
+    return await handleDailyPlayDuringRadio(interaction, videoUrl, playerService, radio);
+  }
+
   playerService.setUIContext(interaction.guild.id, interaction.channelId);
   const stageReporter = createInteractionStageReporter(interaction, 'Bilibili');
   const result = await playerService.playBilibiliVideo(interaction, videoUrl, {
@@ -222,6 +230,36 @@ async function handleDailyPlay(interaction: any, customId: string, playerService
 
   await interaction.editReply({ content: '[✓] 已加入队列！' });
   playerService.notifyState(interaction.guild.id);
+}
+
+async function handleDailyPlayDuringRadio(
+  interaction: any,
+  videoUrl: string,
+  playerService: any,
+  radio: any,
+): Promise<void> {
+  const player = playerService.getPlayer(interaction.guild.id);
+  const botChannelId = player?.voiceConnection?.joinConfig?.channelId;
+  if (botChannelId && interaction.member.voice.channel.id !== botChannelId) {
+    return await interaction.editReply({ content: '\u{1F507} 请先加入电台所在的语音频道再点击聆听。' });
+  }
+
+  await interaction.editReply({ content: '📻 电台模式运行中，正在为你插播这首推荐…' });
+
+  playerService.setUIContext(interaction.guild.id, interaction.channelId);
+  const result = await radio.playNow(
+    interaction.guild.id,
+    videoUrl,
+    `<@${interaction.user.id}>`,
+  );
+
+  if (!result.success) {
+    return await interaction.editReply({
+      content: `[✗] 无法播放视频：${result.error || '未知错误'}`,
+    });
+  }
+
+  await interaction.editReply({ content: '[✓] 正在插播今日推荐，播放结束后自动回到电台模式。' });
 }
 
 function isRadioMode(interaction: any, playerService: any): boolean {
