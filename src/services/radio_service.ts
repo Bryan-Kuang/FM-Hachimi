@@ -16,6 +16,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as logger from './logger_service';
 import config = require('../config/config');
+import { RADIO_BREAK_MESSAGE } from '../playback/radio_controls';
 import type { ExtractedTrackData } from './types';
 
 const RADIO_REQUESTED_BY = '📻 Radio';
@@ -45,6 +46,11 @@ interface BilibiliApiLike {
   recordHachimiHistory?(guildId: string, bvid: string): void;
 }
 
+interface RadioInterlude {
+  track: ExtractedTrackData;
+  requestedBy: string;
+}
+
 interface RadioState {
   enabled: boolean;
   channelId: string | null;
@@ -56,6 +62,11 @@ interface RadioState {
   nextBreakAt: number;
   /** True while the non-skippable break video is the current track. */
   breakPlaying: boolean;
+  /**
+   * A specific track (e.g. a daily recommendation) requested to play NOW,
+   * consumed by the next advance. The rotation resumes after it ends.
+   */
+  interlude: RadioInterlude | null;
 }
 
 interface RadioStartResult {
@@ -107,6 +118,7 @@ class RadioService {
         onDeckPromise: null,
         nextBreakAt: 0,
         breakPlaying: false,
+        interlude: null,
       };
       this.states.set(guildId, state);
     }
@@ -156,6 +168,7 @@ class RadioService {
     state.onDeck = null;
     state.onDeckPromise = null;
     state.breakPlaying = false;
+    state.interlude = null;
     state.nextBreakAt = Date.now() + this.breakIntervalMs();
 
     // Take over advancement and disable looping so old tracks are never repeated.
@@ -205,6 +218,7 @@ class RadioService {
     state.onDeck = null;
     state.onDeckPromise = null;
     state.breakPlaying = false;
+    state.interlude = null;
     state.nextBreakAt = Date.now() + this.breakIntervalMs();
 
     player.advanceHook = (reason: 'ended' | 'user') => this.handleAdvance(guildId, reason);
@@ -234,6 +248,7 @@ class RadioService {
     state.onDeck = null;
     state.onDeckPromise = null;
     state.breakPlaying = false;
+    state.interlude = null;
 
     try {
       const player = this.playerService.getPlayer(guildId);
@@ -251,6 +266,68 @@ class RadioService {
   }
 
   /**
+   * Interject a specific video (e.g. a daily recommendation) into the running
+   * rotation: it becomes the current radio track immediately, and when it ends
+   * (or is skipped) the endless rotation resumes via the normal advance flow.
+   * The hidden on-deck track is preserved, so the return is still gapless.
+   */
+  async playNow(guildId: string, url: string, requestedBy: string): Promise<RadioStartResult> {
+    const state = this.states.get(guildId);
+    if (!state || !state.enabled) {
+      return { success: false, error: 'Radio mode is not active.' };
+    }
+    if (state.breakPlaying) {
+      return { success: false, error: RADIO_BREAK_MESSAGE };
+    }
+
+    const extractor = this.playerService.getExtractor();
+    if (!extractor) {
+      return { success: false, error: 'Audio extractor is not available.' };
+    }
+
+    let track: ExtractedTrackData;
+    try {
+      track = await extractor.extractAudio(url);
+    } catch (e: unknown) {
+      logger.warn('Radio interlude: failed to extract requested video', {
+        guildId,
+        url,
+        error: (e as Error).message,
+      });
+      return { success: false, error: 'Could not load the requested video. Please try again.' };
+    }
+
+    // Radio may have been turned off while the extraction was running.
+    if (!state.enabled) {
+      return { success: false, error: 'Radio mode is no longer active.' };
+    }
+
+    const player = this.playerService.getPlayer(guildId);
+    if (!player) {
+      return { success: false, error: 'Audio player is not available.' };
+    }
+
+    // Count it as played so the random rotation skips it for a while.
+    const bvid = extractBvid({ url });
+    if (bvid && typeof this.bilibiliApi.recordHachimiHistory === 'function') {
+      this.bilibiliApi.recordHachimiHistory(guildId, bvid);
+    }
+
+    // Route through the player's skip machinery (not a bare play) so the
+    // current resource is torn down without firing a double advance; the
+    // advance hook then finds the pending interlude and plays it.
+    state.interlude = { track, requestedBy };
+    const played = await player.skip('user');
+    if (!played || state.interlude) {
+      state.interlude = null;
+      return { success: false, error: 'Failed to play the requested video.' };
+    }
+
+    logger.info('Radio interlude playing', { guildId, url, requestedBy });
+    return { success: true };
+  }
+
+  /**
    * Called by AudioPlayer.advanceHook when a radio track ends or is skipped.
    * Promotes the on-deck track (or fetches one synchronously if prefetch has
    * not landed yet), plays it, and prefetches the next. Returns true if it
@@ -264,6 +341,17 @@ class RadioService {
   async handleAdvance(guildId: string, reason: 'ended' | 'user' = 'user'): Promise<boolean> {
     const state = this.states.get(guildId);
     if (!state || !state.enabled) return false;
+
+    // A specific video was requested mid-rotation (playNow): play it before
+    // anything else. The on-deck random track stays untouched, so when the
+    // interlude ends the rotation resumes gaplessly through the paths below.
+    if (state.interlude) {
+      const { track, requestedBy } = state.interlude;
+      state.interlude = null;
+      const played = await this.playQueuedTrack(guildId, track, requestedBy);
+      if (played) return true;
+      logger.warn('Radio interlude failed to play, resuming rotation', { guildId });
+    }
 
     // The break video just finished (skip is locked during it, so this is
     // always a natural end). Resume normal rotation and re-arm the timer.
@@ -288,6 +376,18 @@ class RadioService {
     return this.advanceNormal(guildId);
   }
 
+  /** Reset the visible queue to just `track` and start playing it. */
+  private async playQueuedTrack(
+    guildId: string,
+    track: ExtractedTrackData,
+    requestedBy: string,
+  ): Promise<boolean> {
+    const player = this.playerService.getPlayer(guildId);
+    player.queue.reset();
+    await this.playerService.addTrack(guildId, track, requestedBy);
+    return this.playerService.play(guildId);
+  }
+
   /** Promote the on-deck (or freshly fetched) random track and play it. */
   private async advanceNormal(guildId: string): Promise<boolean> {
     const next = await this.takeNext(guildId);
@@ -297,10 +397,7 @@ class RadioService {
       return false;
     }
 
-    const player = this.playerService.getPlayer(guildId);
-    player.queue.reset();
-    await this.playerService.addTrack(guildId, next, RADIO_REQUESTED_BY);
-    const played = await this.playerService.play(guildId);
+    const played = await this.playQueuedTrack(guildId, next, RADIO_REQUESTED_BY);
     if (!played) {
       await this.stop(guildId);
       return false;
@@ -339,9 +436,7 @@ class RadioService {
     // Flag before play() so the emitted state renders the minimal break card
     // from the first paint (no full-card flash).
     player.radioBreak = true;
-    player.queue.reset();
-    await this.playerService.addTrack(guildId, track, RADIO_REQUESTED_BY);
-    const played = await this.playerService.play(guildId);
+    const played = await this.playQueuedTrack(guildId, track, RADIO_REQUESTED_BY);
     if (!played) {
       player.radioBreak = false;
       logger.warn('Radio break: failed to play break video', { guildId });

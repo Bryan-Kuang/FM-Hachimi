@@ -45,6 +45,11 @@ interface RadioServiceLike {
   isEnabled(guildId: GuildId): boolean;
   isOnBreak(guildId: GuildId): boolean;
   stop(guildId: GuildId): Promise<void>;
+  playNow?(
+    guildId: GuildId,
+    url: string,
+    requestedBy: string,
+  ): Promise<{ success: boolean; error?: string }>;
 }
 
 interface AnnoyingServiceLike {

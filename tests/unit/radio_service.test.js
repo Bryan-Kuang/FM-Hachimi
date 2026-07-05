@@ -35,6 +35,11 @@ function makeWorld() {
     radioMode: false,
     setLoopMode: jest.fn(),
     joinVoiceChannel: jest.fn().mockResolvedValue(true),
+    // Mirrors AudioPlayer.skip: radio advancement is delegated to the hook.
+    skip: jest.fn(async (reason = "user") => {
+      if (player.advanceHook) return player.advanceHook(reason);
+      return false;
+    }),
     queue: {
       items: [],
       reset() {
@@ -323,6 +328,116 @@ describe("break video", () => {
     expect(handled).toBe(true);
     expect(w.service.isOnBreak("g-public")).toBe(true);
     expect(isBreakTrack(lastTrack(w))).toBe(true);
+  });
+});
+
+describe("playNow (daily recommendation interlude)", () => {
+  const INTERLUDE_URL = "https://www.bilibili.com/video/BVdaily1";
+  const INTERVAL_MS = 10 * 60_000;
+  const lastAddCall = (w) => {
+    const calls = w.playerService.addTrack.mock.calls;
+    return calls[calls.length - 1];
+  };
+
+  test("plays the requested video immediately with the requester attribution", async () => {
+    const w = makeWorld();
+    await w.service.start("g1", w.voiceChannel, "chan-1");
+    await flush();
+
+    w.playerService.addTrack.mockClear();
+    const result = await w.service.playNow("g1", INTERLUDE_URL, "<@user-1>");
+
+    expect(result.success).toBe(true);
+    const [, track, requestedBy] = lastAddCall(w);
+    expect(track.title).toBe("BVdaily1");
+    expect(requestedBy).toBe("<@user-1>");
+    expect(w.player.skip).toHaveBeenCalledWith("user");
+    expect(w.service.isEnabled("g1")).toBe(true);
+    expect(w.player.queue.items).toHaveLength(1);
+  });
+
+  test("returns to the random rotation when the interlude ends", async () => {
+    const w = makeWorld();
+    await w.service.start("g1", w.voiceChannel, "chan-1");
+    await flush();
+    await w.service.playNow("g1", INTERLUDE_URL, "<@user-1>");
+    await flush();
+
+    w.playerService.addTrack.mockClear();
+    const handled = await w.player.advanceHook("ended");
+
+    expect(handled).toBe(true);
+    const [, track, requestedBy] = lastAddCall(w);
+    expect(track.title).toMatch(/^BVsong/);
+    expect(requestedBy).toBe("📻 Radio");
+    expect(w.service.isEnabled("g1")).toBe(true);
+  });
+
+  test("a user skip during the interlude also returns to the rotation", async () => {
+    const w = makeWorld();
+    await w.service.start("g1", w.voiceChannel, "chan-1");
+    await flush();
+    await w.service.playNow("g1", INTERLUDE_URL, "<@user-1>");
+    await flush();
+
+    w.playerService.addTrack.mockClear();
+    const handled = await w.player.advanceHook("user");
+
+    expect(handled).toBe(true);
+    expect(lastAddCall(w)[1].title).toMatch(/^BVsong/);
+  });
+
+  test("records the interlude video in guild history", async () => {
+    const w = makeWorld();
+    await w.service.start("g1", w.voiceChannel, "chan-1");
+    await w.service.playNow("g1", INTERLUDE_URL, "<@user-1>");
+
+    expect(w.bilibiliApi.recordHachimiHistory).toHaveBeenCalledWith("g1", "BVdaily1");
+  });
+
+  test("refuses when radio is not enabled", async () => {
+    const w = makeWorld();
+    const result = await w.service.playNow("g1", INTERLUDE_URL, "<@user-1>");
+
+    expect(result.success).toBe(false);
+    expect(w.player.skip).not.toHaveBeenCalled();
+  });
+
+  test("refuses while the non-skippable break video is playing", async () => {
+    const w = makeWorld();
+    jest.spyOn(Date, "now").mockReturnValue(1000);
+    await w.service.start("g1", w.voiceChannel, "chan-1");
+    await flush();
+
+    Date.now.mockReturnValue(1000 + INTERVAL_MS + 1);
+    await w.player.advanceHook("ended");
+    expect(w.service.isOnBreak("g1")).toBe(true);
+
+    const result = await w.service.playNow("g1", INTERLUDE_URL, "<@user-1>");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/休息一下/);
+  });
+
+  test("fails cleanly when extraction throws and keeps the rotation running", async () => {
+    const w = makeWorld();
+    await w.service.start("g1", w.voiceChannel, "chan-1");
+    await flush();
+
+    w.extractor.extractAudio.mockImplementation(async (url) => {
+      if (url === INTERLUDE_URL) throw new Error("daily boom");
+      return extracted(url.split("/").pop());
+    });
+
+    const result = await w.service.playNow("g1", INTERLUDE_URL, "<@user-1>");
+    expect(result.success).toBe(false);
+    expect(w.player.skip).not.toHaveBeenCalled();
+
+    // Rotation is untouched: the next advance still plays a random track.
+    w.playerService.addTrack.mockClear();
+    const handled = await w.player.advanceHook("ended");
+    expect(handled).toBe(true);
+    expect(lastAddCall(w)[1].title).toMatch(/^BVsong/);
   });
 });
 
