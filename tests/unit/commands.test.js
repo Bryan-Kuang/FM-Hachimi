@@ -224,6 +224,26 @@ describe("Bot Commands Coverage", () => {
         })
       );
     });
+
+    test("烦人模式开启时非豁免用户不能 /stop", async () => {
+      mockPlaybackService.stop.mockResolvedValue(true);
+      const { interaction, player } = SceneFactory.createScene({
+        userVc: "vc-1", botVc: "vc-1", playerState: "playing",
+      });
+      mockPlaybackService.getPlayer.mockReturnValue(player);
+      mockPlaybackService.getAnnoyingService = jest.fn(() => ({
+        isProtectedFrom: jest.fn().mockReturnValue(true),
+      }));
+
+      await stopCommand.execute(interaction);
+
+      expect(mockPlaybackService.stop).not.toHaveBeenCalled();
+      expect(interaction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({ content: expect.stringContaining("烦人模式") })
+      );
+
+      delete mockPlaybackService.getAnnoyingService;
+    });
   });
 
   describe("Pause Command", () => {

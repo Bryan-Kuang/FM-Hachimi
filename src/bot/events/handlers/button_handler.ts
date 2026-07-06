@@ -21,6 +21,7 @@ import {
   isRadioBlockedButton,
 } from '../../../playback/radio_controls';
 import * as logger from '../../../services/logger_service';
+import AnnoyingService = require('../../../services/annoying_service');
 import * as Lock from '../../../utils/lock';
 
 const RADIO_SKIP_DEBOUNCE_MS = 5000;
@@ -68,6 +69,17 @@ function createButtonHandler(playerService: any) {
       if (customId === 'skip' && radioMode && isRadioOnBreak(interaction, playerService)) {
         return await interaction.followUp({
           content: RADIO_BREAK_MESSAGE,
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      // While annoying mode is armed, only the exempt user may stop the bot.
+      if (
+        customId === 'stop' &&
+        playerService.getAnnoyingService?.()?.isProtectedFrom?.(interaction.guild?.id, user)
+      ) {
+        return await interaction.followUp({
+          content: AnnoyingService.STOP_BLOCKED_MESSAGE,
           flags: MessageFlags.Ephemeral,
         });
       }

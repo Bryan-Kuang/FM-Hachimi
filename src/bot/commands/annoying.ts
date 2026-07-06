@@ -30,6 +30,18 @@ const createAnnoyingCommand = (playbackService: any) => {
         return;
       }
 
+      // Disarming is gated: if anyone could toggle the mode off, /annoying
+      // followed by /stop would defeat the whole protection. Arming stays
+      // open to everyone.
+      if (annoying.isProtectedFrom?.(interaction.guild.id, interaction.user)) {
+        const errorEmbed = EmbedBuilders.createErrorEmbed(
+          '烦人模式关不掉',
+          '烦人模式开启中，只有基米的主人才能关掉它喵～',
+        );
+        await interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
+        return;
+      }
+
       const enabled = annoying.toggle(interaction.guild.id);
 
       logger.info('Annoying mode toggled', {
