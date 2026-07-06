@@ -6,6 +6,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { SlashCommandBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import * as logger from '../../services/logger_service';
+import AnnoyingService = require('../../services/annoying_service');
 
 const createStopCommand = (playbackService: any) => ({
   data: new SlashCommandBuilder()
@@ -22,6 +23,15 @@ const createStopCommand = (playbackService: any) => ({
       if (!member.voice.channel) {
         await interaction.reply({
           content: 'Voice channel required',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      // While annoying mode is armed, only the exempt user may stop the bot.
+      if (playbackService.getAnnoyingService?.()?.isProtectedFrom?.(interaction.guild.id, user)) {
+        await interaction.reply({
+          content: AnnoyingService.STOP_BLOCKED_MESSAGE,
           flags: MessageFlags.Ephemeral,
         });
         return;

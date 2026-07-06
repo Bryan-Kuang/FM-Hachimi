@@ -108,6 +108,23 @@ describe('AnnoyingService', () => {
     });
   });
 
+  describe('isProtectedFrom', () => {
+    test('blocks non-exempt users only while the mode is armed', () => {
+      const svc = makeService(makeDeps({}).deps, { exemptUser: 'bk233' });
+
+      expect(svc.isProtectedFrom('guild-1', { id: '42', username: 'attacker' })).toBe(false); // off
+      svc.enable('guild-1');
+      expect(svc.isProtectedFrom('guild-1', { id: '42', username: 'attacker' })).toBe(true);
+      expect(svc.isProtectedFrom('guild-1', { id: 'bk233', username: 'whoever' })).toBe(false);
+    });
+
+    test('gates nothing when no exempt user is configured (no lockout)', () => {
+      const svc = makeService(makeDeps({}).deps, { exemptUser: '' });
+      svc.enable('guild-1');
+      expect(svc.isProtectedFrom('guild-1', { id: '42', username: 'anyone' })).toBe(false);
+    });
+  });
+
   describe('handleBotDisconnect', () => {
     test('ignores when the mode is off', async () => {
       const player = makePlayer();

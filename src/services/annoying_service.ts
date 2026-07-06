@@ -7,9 +7,11 @@
  * re-arm radio, announced with the same "基米永不灭～" message as restart
  * resume) a moment later, a forced channel move is countered by moving back,
  * and a server mute/deafen is cleared (this one needs the Mute Members /
- * Deafen Members permission). The one exception is the exempt user
- * (config.annoying.exemptUser, injected via the ANNOYING_EXEMPT_USER secret),
- * whose actions are respected.
+ * Deafen Members permission). Bot-side removal is gated too: while the mode
+ * is armed, /stop (command and button) and turning /annoying off are refused
+ * for everyone but the exempt user — otherwise anyone could disarm-then-stop.
+ * The one exception throughout is the exempt user (config.annoying.exemptUser,
+ * injected via the ANNOYING_EXEMPT_USER secret), whose actions are respected.
  *
  * Self-initiated leaves and moves (idle auto-disconnect, /stop, /play joining
  * another channel, our own counter-move) are recognized via the AudioPlayer's
@@ -48,6 +50,9 @@ interface AnnoyingDeps {
 type DisconnectOutcome = 'ignore' | 'exempt' | 'reconstructing';
 
 class AnnoyingService {
+  /** Reply for /stop (command or button) refused while the mode is armed. */
+  static readonly STOP_BLOCKED_MESSAGE = '😼 烦人模式开启中，只有基米的主人才能让基米停下～';
+
   private readonly options: AnnoyingOptions;
   private deps: AnnoyingDeps | null;
   private readonly enabledGuilds: Set<string>;
@@ -102,6 +107,21 @@ class AnnoyingService {
     const exempt = this.options.exemptUser;
     if (!exempt || !user) return false;
     return user.id === exempt || user.username === exempt;
+  }
+
+  /**
+   * True when annoying mode should refuse this user's attempt to stop or
+   * disarm the bot (mode armed, an exempt user is configured, and this isn't
+   * them). With no exempt user configured, nothing is gated — otherwise
+   * /stop and /annoying-off would be locked for EVERYONE with no escape hatch.
+   */
+  isProtectedFrom(
+    guildId: string,
+    user: { id?: string; username?: string } | null | undefined,
+  ): boolean {
+    if (!this.isEnabled(guildId)) return false;
+    if (!this.options.exemptUser) return false;
+    return !this.isExemptUser(user);
   }
 
   /**

@@ -306,3 +306,57 @@ describe("radio interaction guard", () => {
     });
   });
 });
+
+describe("annoying mode stop guard", () => {
+  test("stop button is refused for protected users", async () => {
+    const playerService = makePlayerService({ radioMode: false });
+    playerService.getAnnoyingService = jest.fn(() => ({
+      isProtectedFrom: jest.fn().mockReturnValue(true),
+    }));
+    const handler = createButtonHandler(playerService);
+    const interaction = makeButtonInteraction("stop");
+
+    await handler(interaction);
+
+    expect(playerService.stop).not.toHaveBeenCalled();
+    expect(interaction.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("烦人模式") }),
+    );
+  });
+
+  test("stop button works for the exempt user", async () => {
+    const playerService = makePlayerService({ radioMode: false });
+    playerService.getAnnoyingService = jest.fn(() => ({
+      isProtectedFrom: jest.fn().mockReturnValue(false),
+    }));
+    const handler = createButtonHandler(playerService);
+    const interaction = makeButtonInteraction("stop");
+
+    await handler(interaction);
+
+    expect(playerService.stop).toHaveBeenCalledWith("guild-1");
+  });
+
+  test("player service stop routing is refused for protected users (defense in depth)", async () => {
+    const { service, audioManager } = makeRealPlayerServiceForGuard({ radioMode: false });
+    service.setAnnoyingService({
+      isEnabled: () => true,
+      toggle: () => false,
+      isProtectedFrom: jest.fn().mockReturnValue(true),
+      handleBotDisconnect: jest.fn(),
+      handleBotMove: jest.fn(),
+      handleBotMuteDeafen: jest.fn(),
+    });
+
+    const result = await service.handleButtonInteraction({
+      customId: "stop",
+      guild: { id: "guild-1" },
+      channelId: "channel-1",
+      user: { id: "attacker", username: "attacker" },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/烦人模式/);
+    expect(audioManager.getPlayer).not.toHaveBeenCalled();
+  });
+});

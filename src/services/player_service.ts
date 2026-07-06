@@ -8,6 +8,7 @@
 import { EventEmitter } from 'events';
 import * as logger from './logger_service';
 import * as metrics from '../observability/metrics';
+import AnnoyingService = require('./annoying_service');
 import {
   RADIO_ONLY_STOP_MESSAGE,
   RADIO_ONLY_STOP_SUGGESTION,
@@ -55,6 +56,7 @@ interface RadioServiceLike {
 interface AnnoyingServiceLike {
   isEnabled(guildId: GuildId): boolean;
   toggle(guildId: GuildId): boolean;
+  isProtectedFrom(guildId: GuildId, user: { id?: string; username?: string } | null): boolean;
   handleBotDisconnect(oldState: unknown): Promise<string>;
   handleBotMove(oldState: unknown, newState: unknown): Promise<void>;
   handleBotMuteDeafen(oldState: unknown, newState: unknown): Promise<void>;
@@ -402,9 +404,18 @@ class PlayerService extends EventEmitter {
   // state through this service's own pause/skip/etc.; queue/loop buttons act on
   // the player directly. (Previously this delegated the queue cases to a second,
   // near-identical switch in AudioManager — that duplicate is now gone.)
-  async handleButtonInteraction(interaction: { customId: string; guild: { id: string }; channelId: string }): Promise<ActionResult> {
+  async handleButtonInteraction(interaction: { customId: string; guild: { id: string }; channelId: string; user?: { id?: string; username?: string } }): Promise<ActionResult> {
     const customId = interaction.customId;
     const guildId  = interaction.guild.id;
+
+    // Defense in depth — the button handler already refuses this upstream.
+    if (customId === 'stop' && this.annoyingService?.isProtectedFrom?.(guildId, interaction.user ?? null)) {
+      return {
+        success: false,
+        error: AnnoyingService.STOP_BLOCKED_MESSAGE,
+        suggestion: '只有基米的主人才能使用 Stop。',
+      };
+    }
 
     if (isRadioBlockedButton(customId) && this.getPlayer(guildId).radioMode) {
       return {
