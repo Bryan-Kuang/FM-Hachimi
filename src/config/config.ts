@@ -143,6 +143,12 @@ interface AnnoyingConfig {
   exemptUser: string;
   /** Delay before the bot rejoins after a hostile disconnect/move. */
   rejoinDelayMs: number;
+  /**
+   * Per-guild enabled state (JSON array of guild ids), under the persisted
+   * data/ mount so the flag survives redeploys regardless of whether
+   * anything is playing when the process restarts.
+   */
+  dataFile: string;
 }
 
 interface ResumeConfig {
@@ -412,6 +418,8 @@ const config: BotConfig = {
     // Small delay before rejoining — avoids racing Discord's own state
     // propagation and doubles as the rate limiter for spam-disconnects.
     rejoinDelayMs: Math.max(0, parseIntegerEnv(process.env.ANNOYING_REJOIN_DELAY_MS, 1500)),
+    dataFile: process.env.ANNOYING_DATA_FILE
+      || path.join(process.cwd(), "data", "annoying_state.json"),
   },
   resume: {
     // Resume interrupted playback after a restart/redeploy. A snapshot of every

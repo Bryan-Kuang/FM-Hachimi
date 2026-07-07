@@ -20,9 +20,18 @@
  *
  * Exempting requires the View Audit Log permission; without it the culprit is
  * unknown and treated as hostile (escape hatch: /annoying again to turn off).
+ *
+ * The enabled/disabled flag is persisted to its own file (config.annoying.
+ * dataFile), independent of whether anything is playing. It used to piggyback
+ * on ResumeService's playback snapshot, which only captures guilds with a live
+ * track — so a redeploy while the bot sat idle in a channel silently dropped
+ * the guard. This repo's pipeline redeploys on every merge to main, so that
+ * gap meant /annoying reverted to "off" far more often than intended.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import * as fs from 'fs';
+import * as path from 'path';
 import { AuditLogEvent } from 'discord.js';
 import * as logger from './logger_service';
 import AuditLog = require('../utils/audit_log');
@@ -37,6 +46,12 @@ interface AnnoyingOptions {
   exemptUser: string;
   /** Delay before fighting back — also the spam-disconnect rate limiter. */
   rejoinDelayMs: number;
+  /**
+   * Where the set of enabled guild ids is persisted (JSON array), under the
+   * persisted data/ mount so the flag survives redeploys. Omit to disable
+   * persistence (in-memory only — used by tests).
+   */
+  dataFile?: string;
 }
 
 interface AnnoyingDeps {
@@ -80,16 +95,58 @@ class AnnoyingService {
     this.deps = deps;
   }
 
+  /**
+   * Load previously-enabled guilds from disk. Call once at startup — /annoying
+   * is a sticky per-guild setting that must survive redeploys regardless of
+   * whether anything happens to be playing at that moment.
+   */
+  load(): void {
+    const dataFile = this.options.dataFile;
+    if (!dataFile) return;
+    try {
+      if (!fs.existsSync(dataFile)) return;
+      const raw = fs.readFileSync(dataFile, 'utf8');
+      const guildIds = JSON.parse(raw);
+      if (!Array.isArray(guildIds)) return;
+      for (const guildId of guildIds) {
+        if (typeof guildId === 'string') this.enabledGuilds.add(guildId);
+      }
+      logger.info('Annoying mode: loaded persisted state', { guilds: this.enabledGuilds.size });
+    } catch (err: unknown) {
+      logger.warn('Annoying mode: failed to load persisted state, starting fresh', {
+        dataFile,
+        error: (err as Error).message,
+      });
+    }
+  }
+
+  private persist(): void {
+    const dataFile = this.options.dataFile;
+    if (!dataFile) return;
+    try {
+      const dir = path.dirname(dataFile);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(dataFile, JSON.stringify([...this.enabledGuilds]), 'utf8');
+    } catch (err: unknown) {
+      logger.warn('Annoying mode: failed to persist state', {
+        dataFile,
+        error: (err as Error).message,
+      });
+    }
+  }
+
   isEnabled(guildId: string): boolean {
     return this.enabledGuilds.has(guildId);
   }
 
   enable(guildId: string): void {
     this.enabledGuilds.add(guildId);
+    this.persist();
   }
 
   disable(guildId: string): void {
     this.enabledGuilds.delete(guildId);
+    this.persist();
   }
 
   /** Flip the flag; returns the new state. */

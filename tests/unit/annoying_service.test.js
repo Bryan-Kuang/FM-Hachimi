@@ -1,8 +1,13 @@
 /**
  * Unit tests for AnnoyingService (/annoying 反谋害模式)
  * Covers toggle semantics, exempt-user matching, self-leave/self-move
- * detection, and the fight-back paths (reconstruction + move-back).
+ * detection, the fight-back paths (reconstruction + move-back), and
+ * on-disk persistence of the enabled flag (independent of playback state).
  */
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 jest.mock('../../src/services/logger_service', () => ({
   info: jest.fn(),
@@ -89,6 +94,61 @@ describe('AnnoyingService', () => {
       expect(svc.isEnabled('guild-1')).toBe(true);
       expect(svc.toggle('guild-1')).toBe(false);
       expect(svc.isEnabled('guild-1')).toBe(false);
+    });
+  });
+
+  describe('persistence', () => {
+    let tmpFile;
+
+    beforeEach(() => {
+      tmpFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'annoying-')), 'state.json');
+    });
+
+    test('enable/disable/toggle write the enabled-guild set to disk', () => {
+      const svc = new AnnoyingService({ exemptUser: '', rejoinDelayMs: 1500, dataFile: tmpFile });
+      svc.initialize(makeDeps({}).deps);
+
+      svc.enable('guild-1');
+      expect(JSON.parse(fs.readFileSync(tmpFile, 'utf8'))).toEqual(['guild-1']);
+
+      svc.enable('guild-2');
+      expect(JSON.parse(fs.readFileSync(tmpFile, 'utf8')).sort()).toEqual(['guild-1', 'guild-2']);
+
+      svc.disable('guild-1');
+      expect(JSON.parse(fs.readFileSync(tmpFile, 'utf8'))).toEqual(['guild-2']);
+    });
+
+    test('load() restores previously-enabled guilds — the redeploy-survival path', () => {
+      fs.writeFileSync(tmpFile, JSON.stringify(['guild-1', 'guild-3']), 'utf8');
+
+      const svc = new AnnoyingService({ exemptUser: '', rejoinDelayMs: 1500, dataFile: tmpFile });
+      svc.load();
+
+      expect(svc.isEnabled('guild-1')).toBe(true);
+      expect(svc.isEnabled('guild-3')).toBe(true);
+      expect(svc.isEnabled('guild-2')).toBe(false);
+    });
+
+    test('load() is a no-op when the file does not exist yet', () => {
+      const svc = new AnnoyingService({ exemptUser: '', rejoinDelayMs: 1500, dataFile: tmpFile });
+      expect(() => svc.load()).not.toThrow();
+      expect(svc.isEnabled('guild-1')).toBe(false);
+    });
+
+    test('load() tolerates a corrupt file instead of crashing startup', () => {
+      fs.writeFileSync(tmpFile, '{not valid json', 'utf8');
+      const svc = new AnnoyingService({ exemptUser: '', rejoinDelayMs: 1500, dataFile: tmpFile });
+      expect(() => svc.load()).not.toThrow();
+      expect(svc.isEnabled('guild-1')).toBe(false);
+    });
+
+    test('without a dataFile, persistence is skipped entirely (in-memory only)', () => {
+      const svc = new AnnoyingService({ exemptUser: '', rejoinDelayMs: 1500 });
+      expect(() => {
+        svc.load();
+        svc.enable('guild-1');
+      }).not.toThrow();
+      expect(svc.isEnabled('guild-1')).toBe(true);
     });
   });
 
