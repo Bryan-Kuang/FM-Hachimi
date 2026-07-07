@@ -37,8 +37,6 @@ interface GuildResumeState {
   isPaused: boolean;
   /** Whether the guild was in endless radio mode (re-armed on restore). */
   radioMode: boolean;
-  /** Whether /annoying anti-disconnect mode was on (re-armed on restore). */
-  annoyingMode?: boolean;
   /** Recently-played bvids (radio/Hachimi dedup window). */
   history: string[];
 }
@@ -61,7 +59,6 @@ class ResumeService {
   private readonly maxAgeMs: number;
   private readonly snapshotIntervalMs: number;
   private snapshotTimer: NodeJS.Timeout | null;
-  private annoyingService: any | null;
 
   constructor(options: ResumeServiceOptions) {
     this.enabled = options.enabled;
@@ -69,15 +66,6 @@ class ResumeService {
     this.maxAgeMs = options.maxAgeMs;
     this.snapshotIntervalMs = options.snapshotIntervalMs ?? 0;
     this.snapshotTimer = null;
-    this.annoyingService = null;
-  }
-
-  /**
-   * Lets snapshots carry the per-guild /annoying flag across redeploys.
-   * Guilds not captured (nothing playing) lose the flag — acceptable.
-   */
-  setAnnoyingService(annoyingService: any): void {
-    this.annoyingService = annoyingService;
   }
 
   // ── Periodic flush ────────────────────────────────────────────────────
@@ -163,7 +151,6 @@ class ResumeService {
       positionSeconds: Math.max(0, Math.floor(player.getCurrentTime?.() ?? 0)),
       isPaused: !!player.isPaused,
       radioMode: !!player.radioMode,
-      annoyingMode: !!this.annoyingService?.isEnabled?.(guildId),
       history: [...session.history],
     };
   }
@@ -383,12 +370,6 @@ class ResumeService {
       }
     }
 
-    // Re-arm /annoying anti-disconnect mode so a redeploy doesn't drop the
-    // guard (idempotent when the flag is already set on an in-process rejoin).
-    if (state.annoyingMode) {
-      this.annoyingService?.enable?.(state.guildId);
-    }
-
     logger.info('Resumed playback after restart', {
       guildId: state.guildId,
       track: tracks[index].title,
@@ -396,7 +377,6 @@ class ResumeService {
       queueLength: tracks.length,
       wasPaused: state.isPaused,
       radioMode: state.radioMode,
-      annoyingMode: !!state.annoyingMode,
     });
 
     this.announceResume(client, state.textChannelId, tracks[index]).catch((err: Error) => {

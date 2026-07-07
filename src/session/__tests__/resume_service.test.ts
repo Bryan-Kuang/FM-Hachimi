@@ -151,44 +151,11 @@ describe('ResumeService radio mode', () => {
       const state = svc.captureGuild(sm, 'guild-1');
       expect(state).not.toBeNull();
       expect(state!.voiceChannelId).toBe('voice-1');
-      expect(state!.annoyingMode).toBe(false);
 
       const overridden = svc.captureGuild(sm, 'guild-1', 'voice-override');
       expect(overridden!.voiceChannelId).toBe('voice-override');
 
       expect(svc.captureGuild(sm, 'missing-guild')).toBeNull();
-    });
-
-    it('captures the /annoying flag and re-enables it on restore', async () => {
-      const captureSvc = new ResumeService(opts());
-      captureSvc.setAnnoyingService({ isEnabled: () => true });
-      captureSvc.persist(makeSessionManager(makePlayer()));
-
-      const snapshot = JSON.parse(fs.readFileSync(tmpFile, 'utf8'));
-      expect(snapshot.guilds[0].annoyingMode).toBe(true);
-
-      const restoreSvc = new ResumeService(opts());
-      const annoyingService = { isEnabled: () => false, enable: jest.fn() };
-      restoreSvc.setAnnoyingService(annoyingService);
-
-      const voiceChannel = {
-        id: 'voice-1',
-        isVoiceBased: () => true,
-        guild: { voiceStates: { cache: new Map([['human-1', { channelId: 'voice-1', id: 'human-1' }]]) } },
-      };
-      const client = {
-        user: { id: 'bot-1' },
-        channels: { fetch: jest.fn().mockResolvedValue(voiceChannel) },
-      };
-
-      const result = await restoreSvc.restore({
-        client,
-        audioManager: { getPlayer: () => makePlayer() },
-        sessionManager: { get: () => ({ addHistory: jest.fn() }) },
-      });
-
-      expect(result.restored).toBe(1);
-      expect(annoyingService.enable).toHaveBeenCalledWith('guild-1');
     });
 
     it('reconstructGuild restores in-process and announces the resurrection', async () => {

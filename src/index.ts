@@ -174,6 +174,10 @@ class BilibiliDiscordBot {
       // reconstructing the session via the resume machinery. Attached to
       // playerService so the command and voiceStateUpdate handler can reach it.
       const annoyingService = new AnnoyingService(config.annoying);
+      // Load the persisted on/off flag BEFORE anything can toggle it — this is
+      // what lets /annoying survive a redeploy even when nothing is playing
+      // (this repo's pipeline redeploys on every merge to main).
+      annoyingService.load();
       annoyingService.initialize({
         client: this.botClient.getClient(),
         audioManager,
@@ -182,8 +186,6 @@ class BilibiliDiscordBot {
         resumeService,
       });
       playerService.setAnnoyingService(annoyingService as any);
-      // Lets snapshots carry the /annoying flag across redeploys.
-      resumeService.setAnnoyingService(annoyingService);
 
       resumeService.scheduleRestore({
         client: this.botClient.getClient(),
