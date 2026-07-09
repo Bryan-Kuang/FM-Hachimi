@@ -332,4 +332,73 @@ describe("Extractor", () => {
       }));
     });
   });
+
+  describe("media cache", () => {
+    const url = "https://www.bilibili.com/video/BV1xx411c7BF";
+
+    beforeEach(() => {
+      extractor._ytdlpChecked = true;
+      extractor.videoInfoCache.clear();
+      extractor.extractionCache.clear();
+    });
+
+    function mockExtractionProcess(title = "Break Video") {
+      const json = JSON.stringify({
+        id: "BV1xx411c7BF",
+        title,
+        duration: 120,
+        webpage_url: url,
+        requested_downloads: [{
+          url: "https://cdn.bilibili.com/audio.m4a",
+          format_id: "30280",
+          protocol: "https",
+          acodec: "mp4a.40.2",
+          vcodec: "none",
+        }],
+      });
+      spawn.mockImplementation(() => createMockProcess({ stdout: json, exitCode: 0 }));
+    }
+
+    test("a media-cache hit plays the local file and skips extraction entirely", async () => {
+      const mediaCache = {
+        getEntry: jest.fn(() => ({
+          path: "/app/cache/bilibili/BV1xx411c7BF.m4a",
+          meta: {
+            title: "Break Video",
+            audioUrl: "https://cdn.bilibili.com/audio.m4a",
+            streamHeaders: { referer: "https://www.bilibili.com/" },
+          },
+        })),
+        put: jest.fn(),
+      };
+      extractor.setMediaCache(mediaCache);
+
+      const result = await extractor.extractAudio(url);
+
+      // Plays the on-disk file, not the (expiring) CDN URL.
+      expect(result.audioUrl).toBe("/app/cache/bilibili/BV1xx411c7BF.m4a");
+      expect(result.title).toBe("Break Video");
+      // `cached: true` stops the player refreshing the local path to a CDN URL.
+      expect(result.cached).toBe(true);
+      // No yt-dlp/native extraction, and nothing re-enqueued for download.
+      expect(spawn).not.toHaveBeenCalled();
+      expect(mediaCache.put).not.toHaveBeenCalled();
+    });
+
+    test("a media-cache miss extracts, then enqueues a background download with platform headers", async () => {
+      mockExtractionProcess();
+      const mediaCache = { getEntry: jest.fn(() => null), put: jest.fn() };
+      extractor.setMediaCache(mediaCache);
+
+      const result = await extractor.extractAudio(url);
+
+      expect(result.audioUrl).toBe("https://cdn.bilibili.com/audio.m4a");
+      expect(mediaCache.put).toHaveBeenCalledWith(
+        expect.any(String),
+        "https://cdn.bilibili.com/audio.m4a",
+        expect.objectContaining({ referer: "https://www.bilibili.com/" }),
+        expect.objectContaining({ title: "Break Video" }),
+      );
+    });
+  });
 });
