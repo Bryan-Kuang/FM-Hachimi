@@ -97,6 +97,22 @@ class BilibiliDiscordBot {
         });
       }
 
+      // Bilibili gets its own media cache (separate dir + budget) so replayed
+      // Bilibili tracks — notably the fixed radio break video — play from a
+      // local file instead of re-extracting/streaming from Bilibili's CDN.
+      if (config.bilibili.mediaCacheEnabled) {
+        const bilibiliMediaCache = new MediaCache({
+          dir: config.bilibili.mediaCacheDir,
+          maxEntries: config.bilibili.mediaCacheMaxEntries,
+          maxBytes: config.bilibili.mediaCacheMaxBytes,
+        });
+        extractor.setMediaCache(bilibiliMediaCache);
+        logger.info('Bilibili media cache enabled', {
+          dir: config.bilibili.mediaCacheDir,
+          maxEntries: config.bilibili.mediaCacheMaxEntries,
+        });
+      }
+
       const youtubeCookieRefreshService = new YouTubeCookieRefreshService(config.youtube.cookieRefresh);
       youtubeCookieRefreshService.start();
       youtubeCookieRefreshService.refreshInBackground({ reason: 'startup' });

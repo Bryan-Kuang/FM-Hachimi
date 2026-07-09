@@ -113,21 +113,35 @@ yt-dlp --cookies-from-browser chrome \
 
 Never commit `secrets/`, cookie files, browser profiles, or bot-account credentials.
 
-## Media cache (YouTube)
+## Media cache (YouTube + Bilibili)
 
-Since cold YouTube extraction is ~16s and can't be made fast on this IP, the bot
-caches the **downloaded audio file** for replayed videos. After the first play of a
-video, `YouTubeExtractor` downloads the audio (HTTP GET of the signed URL) into the
-`cache/` host bind-mount; later plays — even after the signed URL expires — read the
-local file instantly (no yt-dlp, no network). `src/audio/media_cache.ts`, keyed by
-video, LRU-evicted by entry count **and** total size.
+Since cold extraction is slow (YouTube ~16s; Bilibili re-extracts + streams from its
+CDN each play) and can't be made fast on this IP, the bot caches the **downloaded
+audio file** for replayed videos. After the first play, the extractor downloads the
+audio (HTTP GET of the signed URL) into the `cache/` host bind-mount; later plays —
+even after the signed URL expires — read the local file instantly (no yt-dlp/native
+extract, no network). `src/audio/media_cache.ts`, keyed by video, LRU-evicted by
+entry count **and** total size.
 
-- Lives at `cache/` (mounted `/app/cache`), with a small `cache/index.json`.
-- Env: `YOUTUBE_MEDIA_CACHE_ENABLED` (default true), `YOUTUBE_MEDIA_CACHE_DIR`,
-  `YOUTUBE_MEDIA_CACHE_MAX_ENTRIES` (200), `YOUTUBE_MEDIA_CACHE_MAX_MB` (1024).
-- Cached tracks set `cached: true` so the player skips stale-URL refresh + CDN-retry.
+Each platform gets its **own cache dir + budget** (separate subdirs under the same
+`cache/` mount) so neither platform's churn can evict the other's files. Combined
+budget ~1 GB, split evenly:
+
+- Dirs: YouTube → `cache/youtube/`, Bilibili → `cache/bilibili/` (each with its own
+  `index.json`). Both under the `./cache:/app/cache` mount — no compose change.
+- YouTube env: `YOUTUBE_MEDIA_CACHE_ENABLED` (default true), `YOUTUBE_MEDIA_CACHE_DIR`
+  (`/app/cache/youtube`), `YOUTUBE_MEDIA_CACHE_MAX_ENTRIES` (100), `..._MAX_MB` (512).
+- Bilibili env: `BILIBILI_MEDIA_CACHE_ENABLED` (default true), `BILIBILI_MEDIA_CACHE_DIR`
+  (`/app/cache/bilibili`), `BILIBILI_MEDIA_CACHE_MAX_ENTRIES` (100), `..._MAX_MB` (512).
+- This is what keeps the fixed radio **break video** fast on repeat plays, and covers
+  any replayed Bilibili track (e.g. the daily recommendation).
 - Clear it any time: `rm -rf ~/bilibili-bot/cache/*` (re-downloads on next play).
-- A cache hit logs `YouTube media cache hit — playing local file`.
+- A cache hit logs `YouTube media cache hit — playing local file` /
+  `Bilibili media cache hit — playing local file`.
+- **One-time cleanup on upgrade:** YouTube's cache dir moved from `cache/` root to
+  `cache/youtube/`. Old files at the `cache/` root (`cache/index.json`, loose
+  `*.m4a`/`*.webm`) are now orphaned — delete the loose root files once:
+  `find ~/bilibili-bot/cache -maxdepth 1 -type f -delete` (leaves the two subdirs).
 
 ## World Cup (temporal feature)
 

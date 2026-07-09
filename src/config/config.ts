@@ -70,6 +70,10 @@ interface BilibiliConfig {
   hachimiMaxDurationSec: number;
   hachimiMinDurationSec: number;
   hachimiSearchKeywords: string[];
+  mediaCacheEnabled: boolean;
+  mediaCacheDir: string;
+  mediaCacheMaxEntries: number;
+  mediaCacheMaxBytes: number;
 }
 
 interface YouTubeConfig {
@@ -327,6 +331,17 @@ const config: BotConfig = {
       "哈基米 鬼畜",
       "哈基米 remix",
     ]),
+    // Persistent on-disk cache of downloaded Bilibili audio — a hit plays from a
+    // local file (instant, no yt-dlp/native extract, no signed-URL expiry). This
+    // is what keeps the fixed radio break video fast on repeat plays, and it
+    // covers any replayed Bilibili track (e.g. the daily recommendation) too.
+    // Its own dir + budget (separate from YouTube's) so neither platform's churn
+    // can evict the other's files. Default 100 entries / 512 MB — half of the
+    // combined ~1 GB media-cache budget, mirroring YouTube's other half.
+    mediaCacheEnabled: process.env.BILIBILI_MEDIA_CACHE_ENABLED !== "false",
+    mediaCacheDir: process.env.BILIBILI_MEDIA_CACHE_DIR || "/app/cache/bilibili",
+    mediaCacheMaxEntries: Math.max(1, parseIntegerEnv(process.env.BILIBILI_MEDIA_CACHE_MAX_ENTRIES, 100)),
+    mediaCacheMaxBytes: Math.max(1, parseIntegerEnv(process.env.BILIBILI_MEDIA_CACHE_MAX_MB, 512)) * 1024 * 1024,
   },
   youtube: {
     preextractEnabled: process.env.YOUTUBE_PREEXTRACT_ENABLED !== "false",
@@ -347,10 +362,13 @@ const config: BotConfig = {
     potProviderUrl: (process.env.YTDLP_POT_PROVIDER_URL ?? "").trim(),
     // Persistent on-disk cache of downloaded audio for replayed videos — a hit
     // plays from a local file (instant, no yt-dlp, no signed-URL expiry).
+    // Shares a combined ~1 GB media-cache budget with Bilibili (see
+    // bilibili.mediaCache*): 100 entries / 512 MB each, in separate dirs so
+    // neither platform's churn evicts the other's files.
     mediaCacheEnabled: process.env.YOUTUBE_MEDIA_CACHE_ENABLED !== "false",
-    mediaCacheDir: process.env.YOUTUBE_MEDIA_CACHE_DIR || "/app/cache",
-    mediaCacheMaxEntries: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_MEDIA_CACHE_MAX_ENTRIES, 200)),
-    mediaCacheMaxBytes: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_MEDIA_CACHE_MAX_MB, 1024)) * 1024 * 1024,
+    mediaCacheDir: process.env.YOUTUBE_MEDIA_CACHE_DIR || "/app/cache/youtube",
+    mediaCacheMaxEntries: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_MEDIA_CACHE_MAX_ENTRIES, 100)),
+    mediaCacheMaxBytes: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_MEDIA_CACHE_MAX_MB, 512)) * 1024 * 1024,
     cookieRefresh: {
       enabled: process.env.YOUTUBE_COOKIE_AUTO_REFRESH_ENABLED !== "false",
       cookiesFile: process.env.YOUTUBE_COOKIES_FILE || "/app/secrets/youtube_cookies.txt",

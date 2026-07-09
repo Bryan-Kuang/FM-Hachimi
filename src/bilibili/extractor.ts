@@ -10,6 +10,7 @@ import NativeBilibiliExtractor = require('./native_extractor');
 import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage_feedback';
 import config = require('../config/config');
 import ExpiringCache = require('../utils/expiring_cache');
+import MediaCache = require('../audio/media_cache');
 import UrlValidator = require('./validator');
 
 interface VideoMetadata {
@@ -49,6 +50,12 @@ interface ExtractedAudio extends VideoMetadata {
   videoCodec?: string;
   /** Platform headers FFmpeg should send when fetching this audio URL. */
   streamHeaders: StreamHeaders;
+  /**
+   * True when `audioUrl` is a local media-cache file rather than a signed CDN
+   * URL. The player uses this to skip stale-URL refresh + CDN-retry (a local
+   * file never expires), so it must never be overwritten with a fresh CDN URL.
+   */
+  cached?: boolean;
 }
 
 interface SearchResult {
@@ -123,6 +130,8 @@ class BilibiliExtractor {
   private videoInfoCache: ExpiringCache<VideoMetadata>;
   private extractionCache: ExpiringCache<ExtractedAudio>;
   private inFlightExtractions: Map<string, Promise<ExtractedAudio>>;
+  // Persistent downloaded-audio cache (injected by the composition root).
+  private _mediaCache: MediaCache | null;
 
   constructor() {
     this.userAgent =
@@ -138,6 +147,12 @@ class BilibiliExtractor {
     this.videoInfoCache = new ExpiringCache(30 * 60 * 1000, 100, { label: 'bilibili-videoinfo' });
     this.extractionCache = new ExpiringCache(10 * 60 * 1000, 100, { label: 'bilibili-extraction' });
     this.inFlightExtractions = new Map();
+    this._mediaCache = null;
+  }
+
+  /** Inject the persistent downloaded-audio cache (composition root). */
+  setMediaCache(cache: MediaCache | null): void {
+    this._mediaCache = cache;
   }
 
   /**
@@ -224,6 +239,28 @@ class BilibiliExtractor {
         throw new Error("Failed to normalize URL");
       }
 
+      // Persistent media cache: if the audio is downloaded locally, play from
+      // the file — instant, and immune to signed-URL expiry. Checked before the
+      // URL cache because the local file never goes stale. This is the hot path
+      // for the fixed radio break video on repeat plays.
+      const mediaHit = this._mediaCache?.getEntry(normalizedUrl);
+      if (mediaHit) {
+        const data = mediaHit.meta as ExtractedAudio;
+        logger.info("Bilibili media cache hit — playing local file", {
+          url: normalizedUrl,
+          title: data.title,
+        });
+        this.logExtractionTiming({
+          method: 'cache',
+          cacheHit: true,
+          ytdlpMs: 0,
+          parseMs: 0,
+          totalMs: Date.now() - totalStartedAt,
+          ...this.selectedFormatFromExtractedAudio(data),
+        });
+        return { ...data, audioUrl: mediaHit.path, cached: true };
+      }
+
       const cached = this.extractionCache.get(normalizedUrl);
       if (cached) {
         logger.info("Bilibili extraction cache hit", {
@@ -290,6 +327,9 @@ class BilibiliExtractor {
           const result = this.createExtractedAudioFromNativePayload(url, normalizedUrl, nativePayload);
 
           this.extractionCache.set(normalizedUrl, result);
+          // Fire-and-forget: download the audio so future plays hit the local
+          // file (no extract, no signed-URL expiry). Stores the full metadata.
+          this._mediaCache?.put(normalizedUrl, result.audioUrl, result.streamHeaders, result);
 
           logger.info("Bilibili native extraction completed successfully", {
             url,
@@ -362,6 +402,9 @@ class BilibiliExtractor {
       };
 
       this.extractionCache.set(normalizedUrl, result);
+      // Fire-and-forget: download the audio so future plays hit the local file
+      // (no extract, no signed-URL expiry). Stores the full metadata.
+      this._mediaCache?.put(normalizedUrl, result.audioUrl, result.streamHeaders, result);
 
       logger.info("Audio extraction completed successfully", {
         url,
