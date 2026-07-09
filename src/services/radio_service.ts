@@ -25,13 +25,20 @@ interface VoiceChannelLike {
   id: string;
 }
 
+interface ExtractorLike {
+  extractAudio(url: string, options?: any): Promise<ExtractedTrackData>;
+}
+
 interface PlayerServiceLike {
   getPlayer(guildId: string): any;
-  getExtractor(): { extractAudio(url: string, options?: any): Promise<ExtractedTrackData> } | null;
+  getExtractor(): ExtractorLike | null;
+  getYouTubeExtractor?(): ExtractorLike | null;
   addTrack(guildId: string, videoOrUrl: ExtractedTrackData | string, requestedBy: string): Promise<unknown>;
   play(guildId: string): Promise<boolean>;
   setUIContext(guildId: string, channelId: string): void;
 }
+
+type InterludePlatform = 'bilibili' | 'youtube';
 
 interface HachimiCandidate {
   url: string;
@@ -72,6 +79,7 @@ interface RadioState {
 interface RadioStartResult {
   success: boolean;
   error?: string;
+  track?: ExtractedTrackData;
 }
 
 function extractBvid(candidate: HachimiCandidate): string | null {
@@ -266,12 +274,22 @@ class RadioService {
   }
 
   /**
-   * Interject a specific video (e.g. a daily recommendation) into the running
-   * rotation: it becomes the current radio track immediately, and when it ends
-   * (or is skipped) the endless rotation resumes via the normal advance flow.
-   * The hidden on-deck track is preserved, so the return is still gapless.
+   * Interject a specific video (a daily recommendation, or any /play request
+   * made while radio is running) into the rotation: it becomes the current
+   * radio track immediately, and when it ends (or is skipped) the endless
+   * rotation resumes via the normal advance flow. The hidden on-deck track is
+   * preserved, so the return is still gapless.
+   *
+   * `platform` selects the extractor: Bilibili videos are also recorded into the
+   * Hachimi history so the random rotation skips them for a while; YouTube
+   * videos use the YouTube extractor and are not recorded.
    */
-  async playNow(guildId: string, url: string, requestedBy: string): Promise<RadioStartResult> {
+  async playNow(
+    guildId: string,
+    url: string,
+    requestedBy: string,
+    platform: InterludePlatform = 'bilibili',
+  ): Promise<RadioStartResult> {
     const state = this.states.get(guildId);
     if (!state || !state.enabled) {
       return { success: false, error: 'Radio mode is not active.' };
@@ -280,7 +298,10 @@ class RadioService {
       return { success: false, error: RADIO_BREAK_MESSAGE };
     }
 
-    const extractor = this.playerService.getExtractor();
+    const extractor =
+      platform === 'youtube'
+        ? this.playerService.getYouTubeExtractor?.() ?? null
+        : this.playerService.getExtractor();
     if (!extractor) {
       return { success: false, error: 'Audio extractor is not available.' };
     }
@@ -292,6 +313,7 @@ class RadioService {
       logger.warn('Radio interlude: failed to extract requested video', {
         guildId,
         url,
+        platform,
         error: (e as Error).message,
       });
       return { success: false, error: 'Could not load the requested video. Please try again.' };
@@ -307,10 +329,13 @@ class RadioService {
       return { success: false, error: 'Audio player is not available.' };
     }
 
-    // Count it as played so the random rotation skips it for a while.
-    const bvid = extractBvid({ url });
-    if (bvid && typeof this.bilibiliApi.recordHachimiHistory === 'function') {
-      this.bilibiliApi.recordHachimiHistory(guildId, bvid);
+    // Count Bilibili videos as played so the random rotation skips them for a
+    // while. YouTube videos never appear in the Hachimi rotation, so skip it.
+    if (platform === 'bilibili') {
+      const bvid = extractBvid({ url });
+      if (bvid && typeof this.bilibiliApi.recordHachimiHistory === 'function') {
+        this.bilibiliApi.recordHachimiHistory(guildId, bvid);
+      }
     }
 
     // Route through the player's skip machinery (not a bare play) so the
@@ -323,8 +348,8 @@ class RadioService {
       return { success: false, error: 'Failed to play the requested video.' };
     }
 
-    logger.info('Radio interlude playing', { guildId, url, requestedBy });
-    return { success: true };
+    logger.info('Radio interlude playing', { guildId, url, requestedBy, platform });
+    return { success: true, track };
   }
 
   /**

@@ -228,4 +228,83 @@ describe("PlaybackCoordinator", () => {
     expect(playerService._youtubeExtractor.extractAudio).toHaveBeenCalled();
     expect(playerService.playBilibiliVideo).not.toHaveBeenCalled();
   });
+
+  test("playUrl interjects into radio via playNow instead of the normal queue", async () => {
+    const coordinator = PlaybackCoordinator();
+    const playerService = makePlayerService();
+    const radio = {
+      isEnabled: jest.fn().mockReturnValue(true),
+      playNow: jest.fn().mockResolvedValue({ success: true, track: { title: "Interlude" } }),
+    };
+    playerService.getRadioService = jest.fn().mockReturnValue(radio);
+
+    const result = await coordinator.playUrl("bilibili", {
+      interaction: makeInteraction(),
+      playerService,
+      url: "https://bili/video",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.track).toEqual({ title: "Interlude" });
+    expect(radio.playNow).toHaveBeenCalledWith("guild-1", "https://bili/video", "<@user-1>", "bilibili");
+    // The normal queue path must NOT run — the rotation would discard it.
+    expect(playerService.playBilibiliVideo).not.toHaveBeenCalled();
+  });
+
+  test("playUrl routes a YouTube URL to playNow with the youtube platform", async () => {
+    const coordinator = PlaybackCoordinator();
+    const playerService = makePlayerService();
+    const radio = {
+      isEnabled: jest.fn().mockReturnValue(true),
+      playNow: jest.fn().mockResolvedValue({ success: true, track: { title: "YT Interlude" } }),
+    };
+    playerService.getRadioService = jest.fn().mockReturnValue(radio);
+
+    const result = await coordinator.playUrl("youtube", {
+      interaction: makeInteraction(),
+      playerService,
+      url: "https://youtube.com/watch?v=abc",
+    });
+
+    expect(result.success).toBe(true);
+    expect(radio.playNow).toHaveBeenCalledWith("guild-1", "https://youtube.com/watch?v=abc", "<@user-1>", "youtube");
+    expect(playerService._youtubeExtractor.extractAudio).not.toHaveBeenCalled();
+  });
+
+  test("playUrl surfaces a playNow failure (e.g. during a break) without falling back", async () => {
+    const coordinator = PlaybackCoordinator();
+    const playerService = makePlayerService();
+    const radio = {
+      isEnabled: jest.fn().mockReturnValue(true),
+      playNow: jest.fn().mockResolvedValue({ success: false, error: "break in progress" }),
+    };
+    playerService.getRadioService = jest.fn().mockReturnValue(radio);
+
+    const result = await coordinator.playUrl("bilibili", {
+      interaction: makeInteraction(),
+      playerService,
+      url: "https://bili/video",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("break in progress");
+    expect(playerService.playBilibiliVideo).not.toHaveBeenCalled();
+  });
+
+  test("playUrl uses the normal queue path when radio is not active", async () => {
+    const coordinator = PlaybackCoordinator();
+    const playerService = makePlayerService();
+    const radio = { isEnabled: jest.fn().mockReturnValue(false), playNow: jest.fn() };
+    playerService.getRadioService = jest.fn().mockReturnValue(radio);
+
+    const result = await coordinator.playUrl("bilibili", {
+      interaction: makeInteraction(),
+      playerService,
+      url: "https://bili/video",
+    });
+
+    expect(result.success).toBe(true);
+    expect(radio.playNow).not.toHaveBeenCalled();
+    expect(playerService.playBilibiliVideo).toHaveBeenCalled();
+  });
 });

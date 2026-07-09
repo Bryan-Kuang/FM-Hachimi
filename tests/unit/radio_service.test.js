@@ -52,9 +52,14 @@ function makeWorld() {
     extractAudio: jest.fn(async (url) => extracted(url.split("/").pop())),
   };
 
+  const youtubeExtractor = {
+    extractAudio: jest.fn(async (url) => extracted(`yt-${url.split("=").pop()}`)),
+  };
+
   const playerService = {
     getPlayer: jest.fn(() => player),
     getExtractor: jest.fn(() => extractor),
+    getYouTubeExtractor: jest.fn(() => youtubeExtractor),
     addTrack: jest.fn(async (_guildId, data) => {
       player.queue.items.push(data);
       return { title: data.title };
@@ -75,7 +80,7 @@ function makeWorld() {
 
   const voiceChannel = { id: "voice-1" };
   const service = new RadioService(playerService, bilibiliApi);
-  return { service, player, extractor, playerService, bilibiliApi, voiceChannel };
+  return { service, player, extractor, youtubeExtractor, playerService, bilibiliApi, voiceChannel };
 }
 
 beforeEach(() => {
@@ -393,6 +398,34 @@ describe("playNow (daily recommendation interlude)", () => {
     await w.service.playNow("g1", INTERLUDE_URL, "<@user-1>");
 
     expect(w.bilibiliApi.recordHachimiHistory).toHaveBeenCalledWith("g1", "BVdaily1");
+  });
+
+  test("extracts a YouTube interlude with the YouTube extractor and skips history", async () => {
+    const w = makeWorld();
+    await w.service.start("g1", w.voiceChannel, "chan-1");
+    await flush();
+
+    w.playerService.addTrack.mockClear();
+    w.bilibiliApi.recordHachimiHistory.mockClear();
+    const YT_URL = "https://www.youtube.com/watch?v=abc123";
+    const result = await w.service.playNow("g1", YT_URL, "<@user-1>", "youtube");
+
+    expect(result.success).toBe(true);
+    expect(w.youtubeExtractor.extractAudio).toHaveBeenCalledWith(YT_URL);
+    expect(w.extractor.extractAudio).not.toHaveBeenCalledWith(YT_URL);
+    // YouTube videos never join the Hachimi rotation, so they aren't recorded.
+    expect(w.bilibiliApi.recordHachimiHistory).not.toHaveBeenCalled();
+    expect(result.track.title).toBe("yt-abc123");
+    expect(w.player.skip).toHaveBeenCalledWith("user");
+  });
+
+  test("returns the extracted track on success", async () => {
+    const w = makeWorld();
+    await w.service.start("g1", w.voiceChannel, "chan-1");
+    await flush();
+
+    const result = await w.service.playNow("g1", INTERLUDE_URL, "<@user-1>");
+    expect(result.track.title).toBe("BVdaily1");
   });
 
   test("refuses when radio is not enabled", async () => {
