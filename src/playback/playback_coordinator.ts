@@ -33,9 +33,20 @@ interface PlayerLike {
   leaveVoiceChannel?(): void;
 }
 
+interface RadioServiceLike {
+  isEnabled(guildId: string): boolean;
+  playNow?(
+    guildId: string,
+    url: string,
+    requestedBy: string,
+    platform?: PlayUrlPlatform,
+  ): Promise<{ success: boolean; error?: string; track?: unknown }>;
+}
+
 interface PlayerServiceLike {
   setUIContext(guildId: string, channelId: string): void;
   notifyState(guildId: string): void;
+  getRadioService?(): RadioServiceLike | null;
   playBilibiliVideo(interaction: InteractionLike, url: string, options?: { onStage?: PlaybackStageReporter }): Promise<PlayResult>;
   getYouTubeExtractor(): AudioExtractorLike | null;
   getPlayer(guildId: string): PlayerLike;
@@ -199,11 +210,53 @@ async function playYouTubeUrl({
  * Full convergence of the two paths onto extractAndJoin is the deferred
  * playback-core consolidation (TASKS.md Phase 2) — not done here.
  */
-function playUrl(
+async function playUrl(
   platform: PlayUrlPlatform,
   options: PlayUrlOptions,
 ): Promise<CoordinatorResult> {
+  // While radio is running, the rotation owns the queue — a normally-queued
+  // track would be discarded on the next advance. Interject the request into
+  // the rotation instead (same path as the daily recommendation): it plays now
+  // and the radio resumes when it ends.
+  const radioResult = await maybePlayAsRadioInterlude(platform, options);
+  if (radioResult) return radioResult;
+
   return platform === 'youtube' ? playYouTubeUrl(options) : playBilibiliUrl(options);
+}
+
+/**
+ * If radio mode is active for this guild, interject the requested video via
+ * RadioService.playNow so it plays immediately and the rotation resumes after.
+ * Returns the interlude result, or null when radio is off (fall through to the
+ * normal queue path).
+ */
+async function maybePlayAsRadioInterlude(
+  platform: PlayUrlPlatform,
+  options: PlayUrlOptions,
+): Promise<CoordinatorResult | null> {
+  const { interaction, playerService, url, requestedBy } = options;
+  const guildId = interaction.guild?.id;
+  if (!guildId) return null;
+
+  const radio = playerService.getRadioService?.();
+  if (!radio || !radio.isEnabled(guildId) || typeof radio.playNow !== 'function') {
+    return null;
+  }
+
+  const channelId = interaction.channelId;
+  if (channelId) playerService.setUIContext(guildId, channelId);
+
+  const result = await radio.playNow(
+    guildId,
+    url,
+    getRequestedBy(interaction, requestedBy),
+    platform,
+  );
+  return {
+    success: result.success,
+    error: result.error,
+    track: result.track,
+  };
 }
 
 export = {
