@@ -113,7 +113,7 @@ describe('ResumeService', () => {
   });
 
   describe('capture', () => {
-    test('captures playing and paused sessions, skips idle ones', () => {
+    test('captures every connected session: playing, paused, and idle (presence only)', () => {
       const sm = makeSessionManager();
       sm.get('g-playing').player = makePlayingPlayer();
       sm.get('g-paused').player = makePlayingPlayer({ playing: false, paused: true });
@@ -124,9 +124,13 @@ describe('ResumeService', () => {
       const snapshot = service.capture(sm);
 
       const ids = snapshot.guilds.map((g) => g.guildId).sort();
-      expect(ids).toEqual(['g-paused', 'g-playing']);
+      expect(ids).toEqual(['g-idle', 'g-paused', 'g-playing']);
       const paused = snapshot.guilds.find((g) => g.guildId === 'g-paused');
       expect(paused.isPaused).toBe(true);
+      // Idle-but-connected becomes a presence-only state: no tracks to resume,
+      // just the channel to rejoin.
+      const idle = snapshot.guilds.find((g) => g.guildId === 'g-idle');
+      expect(idle.tracks).toEqual([]);
     });
 
     test('records queue, cursor, position, loop mode, and history', () => {

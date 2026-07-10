@@ -1,13 +1,20 @@
 /**
  * Resume Service
- * Carries active playback sessions across process restarts (redeploys).
+ * Carries voice presence and active playback sessions across process restarts
+ * (redeploys).
  *
- * On graceful shutdown every guild that is actively playing (or paused) gets
- * snapshotted — voice channel, queue, cursor, position, loop mode — into a
- * JSON file under the persisted data/ mount. On the next startup the snapshot
- * is consumed (delete-on-read, so a crash loop can never replay it), the bot
- * rejoins each voice channel and resumes the interrupted track where it left
- * off via FFmpeg input seeking.
+ * On graceful shutdown every guild the bot is connected to gets snapshotted
+ * into a JSON file under the persisted data/ mount. A guild that is actively
+ * playing (or paused) captures the full playback state — voice channel, queue,
+ * cursor, position, loop mode; a guild that is merely sitting in a voice
+ * channel captures a presence-only state (empty track list). On the next
+ * startup the snapshot is consumed (delete-on-read, so a crash loop can never
+ * replay it): full states rejoin and resume the interrupted track where it
+ * left off via FFmpeg input seeking, presence-only states just rejoin the
+ * channel (restarting the radio rotation if one was armed). This repo's
+ * pipeline redeploys on every merge to main, so without the presence-only
+ * path any merge would silently kick the bot out of the channel it was
+ * parked in.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -106,9 +113,10 @@ class ResumeService {
   // ── Shutdown side ─────────────────────────────────────────────────────
 
   /**
-   * Snapshot every session worth resuming: connected to voice with a current
-   * track that is playing or paused. Idle sessions (queue ended, waiting for
-   * the inactivity timer) are not captured.
+   * Snapshot every session worth resuming: any session connected to voice.
+   * Playing/paused sessions capture full playback state; idle-but-connected
+   * sessions capture presence only, so a redeploy never evicts the bot from
+   * its channel.
    */
   capture(sessionManager: any): ResumeSnapshot {
     const guilds: GuildResumeState[] = [];
@@ -122,10 +130,13 @@ class ResumeService {
   }
 
   /**
-   * Snapshot a single guild's live playback state, or null when there is
-   * nothing worth resuming. `voiceChannelIdOverride` covers the forced-
-   * disconnect path, where Discord may have already cleared the connection's
-   * join config by the time the voiceStateUpdate event is handled.
+   * Snapshot a single guild's state, or null when the bot isn't connected to
+   * voice there. With a live (playing or paused) track this is the full
+   * playback state; otherwise a presence-only state with an empty track list —
+   * enough for the restore side to rejoin the channel. `voiceChannelIdOverride`
+   * covers the forced-disconnect path, where Discord may have already cleared
+   * the connection's join config by the time the voiceStateUpdate event is
+   * handled.
    */
   captureGuild(
     sessionManager: any,
@@ -134,12 +145,27 @@ class ResumeService {
   ): GuildResumeState | null {
     const session = sessionManager.sessions.get(guildId);
     const player = session?.player;
-    if (!player || !player.voiceConnection || !player.currentTrack) return null;
-    if (!player.isPlaying && !player.isPaused) return null;
+    if (!player || !player.voiceConnection) return null;
 
     const voiceChannelId =
       voiceChannelIdOverride ?? player.voiceConnection.joinConfig?.channelId;
     if (!voiceChannelId) return null;
+
+    if (!player.currentTrack || (!player.isPlaying && !player.isPaused)) {
+      // Connected but nothing live — capture presence only.
+      return {
+        guildId,
+        voiceChannelId,
+        textChannelId: session.uiContext?.channelId ?? null,
+        tracks: [],
+        currentIndex: -1,
+        loopMode: player.queue?.loopMode ?? 'none',
+        positionSeconds: 0,
+        isPaused: false,
+        radioMode: !!player.radioMode,
+        history: [...session.history],
+      };
+    }
 
     return {
       guildId,
@@ -316,13 +342,19 @@ class ResumeService {
       return false;
     }
 
-    const tracks = (state.tracks || []).map((raw: any) => {
+    // Presence-only snapshot: the bot was parked in the channel with nothing
+    // live. Rejoin (and restart the radio rotation if one was armed) instead
+    // of resuming a track.
+    if (!state.tracks || state.tracks.length === 0) {
+      return this.restorePresence(deps, state, voiceChannel);
+    }
+
+    const tracks = state.tracks.map((raw: any) => {
       const track = new Track(raw, raw.requestedBy);
       if (raw.addedAt) track.addedAt = new Date(raw.addedAt);
       track.retryCount = 0;
       return track;
     });
-    if (tracks.length === 0) return false;
 
     const index =
       state.currentIndex >= 0 && state.currentIndex < tracks.length ? state.currentIndex : 0;
@@ -383,6 +415,53 @@ class ResumeService {
       logger.debug('Failed to send resume announcement', { error: err.message });
     });
 
+    return true;
+  }
+
+  /**
+   * Rejoin a voice channel the bot was merely parked in — no track to resume,
+   * so no announcement and no inactivity timer: the pre-restart session was
+   * already past (or outside) its idle countdown, and evicting the bot right
+   * after it fought its way back would defeat the point. A radio-mode
+   * presence (SIGTERM landed between rotation tracks) restarts the rotation
+   * from scratch via radioService.start(), which seeds and plays a fresh
+   * track — resume() can't be used here since it assumes a restored track is
+   * already playing.
+   */
+  private async restorePresence(
+    deps: RestoreDeps,
+    state: GuildResumeState,
+    voiceChannel: any,
+  ): Promise<boolean> {
+    const player = deps.audioManager.getPlayer(state.guildId);
+    const session = deps.sessionManager.get(state.guildId);
+    for (const bvid of state.history || []) session.addHistory(bvid);
+
+    const joined = await player.joinVoiceChannel(voiceChannel);
+    if (!joined) {
+      logger.warn('Presence resume skipped: failed to rejoin voice channel', {
+        guildId: state.guildId,
+        channelId: state.voiceChannelId,
+      });
+      return false;
+    }
+
+    if (state.radioMode && deps.radioService && state.textChannelId) {
+      try {
+        await deps.radioService.start(state.guildId, voiceChannel, state.textChannelId);
+      } catch (err: unknown) {
+        logger.warn('Presence resume: failed to restart radio mode', {
+          guildId: state.guildId,
+          error: (err as Error).message,
+        });
+      }
+    }
+
+    logger.info('Rejoined voice channel after restart (presence only)', {
+      guildId: state.guildId,
+      channelId: state.voiceChannelId,
+      radioMode: state.radioMode,
+    });
     return true;
   }
 
