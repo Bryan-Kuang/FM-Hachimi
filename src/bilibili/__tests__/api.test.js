@@ -37,6 +37,20 @@ describe("config.bilibili.hachimiSearchKeywords", () => {
     expect(config.bilibili.hachimiSearchKeywords).not.toContain("哈基米");
     expect(config.bilibili.hachimiSearchKeywords.length).toBeGreaterThan(1);
   });
+
+  test("covers the newer 大狗叫 / 叮咚鸡 memes", () => {
+    const joined = config.bilibili.hachimiSearchKeywords.join(" ");
+    expect(joined).toContain("大狗叫");
+    expect(joined).toContain("叮咚鸡");
+  });
+});
+
+describe("config.bilibili.hachimiRelevanceTerms", () => {
+  test("gates on every tracked meme family, bare terms only", () => {
+    expect(config.bilibili.hachimiRelevanceTerms).toEqual(
+      expect.arrayContaining(["哈基米", "大狗叫", "叮咚鸡"]),
+    );
+  });
 });
 
 describe("sampleSearchKeywords", () => {

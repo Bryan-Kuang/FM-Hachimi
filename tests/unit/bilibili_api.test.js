@@ -271,7 +271,17 @@ describe("BilibiliAPI", () => {
       expect(BilibiliAPI.filterHachimiRelevance(videos)).toHaveLength(1);
     });
 
-    test("rejects video with neither title nor tag containing 哈基米", () => {
+    test("passes video with 大狗叫 in title", () => {
+      const videos = [{ bvid: "1", title: "大狗叫神曲 remix", tag: "" }];
+      expect(BilibiliAPI.filterHachimiRelevance(videos)).toHaveLength(1);
+    });
+
+    test("passes video with 叮咚鸡 in tag", () => {
+      const videos = [{ bvid: "1", title: "随便一首歌", tag: "叮咚鸡 音乐" }];
+      expect(BilibiliAPI.filterHachimiRelevance(videos)).toHaveLength(1);
+    });
+
+    test("rejects video with none of the tracked meme terms in title or tag", () => {
       const videos = [{ bvid: "1", title: "随机鬼畜视频", tag: "鬼畜 音乐" }];
       expect(BilibiliAPI.filterHachimiRelevance(videos)).toHaveLength(0);
     });

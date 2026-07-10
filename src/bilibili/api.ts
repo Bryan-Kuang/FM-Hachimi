@@ -355,21 +355,23 @@ class BilibiliAPI {
   }
 
   /**
-   * Keep only videos that are genuinely about 哈基米.
-   * At least one of title or tag must contain the keyword "哈基米".
+   * Keep only videos that are genuinely about one of the tracked memes.
+   * At least one of title or tag must contain a configured relevance term
+   * (config hachimiRelevanceTerms — 哈基米, 大狗叫, 叮咚鸡, …).
    * The music-focused search queries (config hachimiSearchKeywords) already
    * bias results, but random page sampling (pages 2-14) can surface drift
-   * content that happens to rank for the terms without being hachimi-related.
+   * content that happens to rank for the terms without being meme-related.
    * This hard filter prevents those from reaching the queue.
    * @param {Array} videos
    * @returns {Array}
    */
   filterHachimiRelevance(videos: VideoInfo[]): VideoInfo[] {
     if (!Array.isArray(videos)) return [];
+    const terms = config.bilibili.hachimiRelevanceTerms;
+    const relevanceTerms = Array.isArray(terms) && terms.length > 0 ? terms : ["哈基米"];
     return videos.filter(v => {
-      const title = v.title || "";
-      const tag = v.tag || "";
-      return title.includes("哈基米") || tag.includes("哈基米");
+      const haystack = `${v.title || ""}\n${v.tag || ""}`;
+      return relevanceTerms.some(term => haystack.includes(term));
     });
   }
 
