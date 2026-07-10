@@ -204,8 +204,11 @@ class AnnoyingService {
 
     // Snapshot the live session before the caller's teardown destroys it. The
     // event's channel id overrides joinConfig, which may already be stale.
+    // Captures full playback state, or presence-only (empty track list) when
+    // the bot was idling in the channel — either way the restore path knows
+    // how to put things back.
     const state = deps.resumeService.captureGuild(deps.sessionManager, guildId, oldState.channelId);
-    if (!state) return 'ignore'; // nothing playing — not worth fighting over
+    if (!state) return 'ignore'; // connection already gone — nothing to reclaim
 
     const culprit = await AuditLog.findRecentAuditExecutor(
       oldState.guild,

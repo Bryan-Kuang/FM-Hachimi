@@ -205,7 +205,7 @@ describe('AnnoyingService', () => {
       expect(deps.resumeService.captureGuild).not.toHaveBeenCalled();
     });
 
-    test('ignores when nothing was playing (no captured state)', async () => {
+    test('ignores when capture returns nothing (voice connection already gone)', async () => {
       const player = makePlayer();
       const { deps } = makeDeps({ player, capturedState: null });
       const svc = makeService(deps);

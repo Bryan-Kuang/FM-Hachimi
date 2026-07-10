@@ -196,6 +196,144 @@ describe('ResumeService radio mode', () => {
     });
   });
 
+  describe('voice presence (idle) resume', () => {
+    // Connected to voice but nothing playing or paused — the state a deploy
+    // used to silently kick the bot out of.
+    const idlePlayer = (overrides: any = {}) =>
+      makePlayer({
+        isPlaying: false,
+        isPaused: false,
+        currentTrack: null,
+        queue: {
+          items: [],
+          currentIndex: -1,
+          currentTrack: null,
+          loopMode: 'none',
+          setLoopMode: jest.fn(),
+          reset: jest.fn(),
+        },
+        ...overrides,
+      });
+
+    const makeVoiceChannel = () => ({
+      id: 'voice-1',
+      isVoiceBased: () => true,
+      guild: {
+        voiceStates: {
+          cache: new Map([['human-1', { channelId: 'voice-1', id: 'human-1' }]]),
+        },
+      },
+    });
+
+    it('captureGuild captures a connected-but-idle session as presence-only state', () => {
+      const svc = new ResumeService(opts());
+
+      const state = svc.captureGuild(makeSessionManager(idlePlayer()), 'guild-1');
+
+      expect(state).not.toBeNull();
+      expect(state!.voiceChannelId).toBe('voice-1');
+      expect(state!.tracks).toEqual([]);
+      expect(state!.radioMode).toBe(false);
+    });
+
+    it('captureGuild still returns null when there is no voice connection', () => {
+      const svc = new ResumeService(opts());
+      const state = svc.captureGuild(
+        makeSessionManager(idlePlayer({ voiceConnection: null })),
+        'guild-1',
+      );
+      expect(state).toBeNull();
+    });
+
+    it('persist writes a snapshot for a connected-but-idle session', () => {
+      const svc = new ResumeService(opts());
+      svc.persist(makeSessionManager(idlePlayer()));
+      expect(fs.existsSync(tmpFile)).toBe(true);
+    });
+
+    it('restore rejoins the channel without starting playback or announcing', async () => {
+      const svc = new ResumeService(opts());
+      svc.persist(makeSessionManager(idlePlayer()));
+
+      const player = idlePlayer();
+      const voiceChannel = makeVoiceChannel();
+      const textChannel = { id: 'text-1', send: jest.fn().mockResolvedValue({}) };
+      const client = {
+        user: { id: 'bot-1' },
+        channels: {
+          fetch: jest.fn((id: string) =>
+            Promise.resolve(id === 'text-1' ? textChannel : voiceChannel),
+          ),
+        },
+      };
+
+      const result = await svc.restore({
+        client,
+        audioManager: { getPlayer: () => player },
+        sessionManager: { get: () => ({ addHistory: jest.fn() }) },
+      });
+
+      expect(result.restored).toBe(1);
+      expect(player.joinVoiceChannel).toHaveBeenCalledWith(voiceChannel);
+      expect(player.playCurrentTrack).not.toHaveBeenCalled();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(textChannel.send).not.toHaveBeenCalled();
+    });
+
+    it('restarts radio rotation via radioService.start for a presence-only radio snapshot', async () => {
+      const svc = new ResumeService(opts());
+      svc.persist(makeSessionManager(idlePlayer({ radioMode: true })));
+
+      const player = idlePlayer({ radioMode: true });
+      const voiceChannel = makeVoiceChannel();
+      const client = {
+        user: { id: 'bot-1' },
+        channels: { fetch: jest.fn().mockResolvedValue(voiceChannel) },
+      };
+      const radioService = {
+        start: jest.fn().mockResolvedValue({ success: true }),
+        resume: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const result = await svc.restore({
+        client,
+        audioManager: { getPlayer: () => player },
+        sessionManager: { get: () => ({ addHistory: jest.fn() }) },
+        radioService,
+      });
+
+      expect(result.restored).toBe(1);
+      expect(radioService.start).toHaveBeenCalledWith('guild-1', voiceChannel, 'text-1');
+      // resume() assumes a restored track is already playing — wrong here.
+      expect(radioService.resume).not.toHaveBeenCalled();
+    });
+
+    it('skips the presence rejoin when the voice channel is empty', async () => {
+      const svc = new ResumeService(opts());
+      svc.persist(makeSessionManager(idlePlayer()));
+
+      const player = idlePlayer();
+      const voiceChannel = {
+        id: 'voice-1',
+        isVoiceBased: () => true,
+        guild: { voiceStates: { cache: new Map() } },
+      };
+      const client = {
+        user: { id: 'bot-1' },
+        channels: { fetch: jest.fn().mockResolvedValue(voiceChannel) },
+      };
+
+      const result = await svc.restore({
+        client,
+        audioManager: { getPlayer: () => player },
+        sessionManager: { get: () => ({ addHistory: jest.fn() }) },
+      });
+
+      expect(result.restored).toBe(0);
+      expect(player.joinVoiceChannel).not.toHaveBeenCalled();
+    });
+  });
+
   it('does not call radioService.resume for a non-radio snapshot', async () => {
     const svc = new ResumeService(opts());
     svc.persist(makeSessionManager(makePlayer({ radioMode: false })));
