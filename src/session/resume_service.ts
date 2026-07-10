@@ -326,27 +326,30 @@ class ResumeService {
       return false;
     }
 
-    // Don't rejoin a channel nobody is listening in. channel.members can't
-    // be trusted here: it only includes occupants whose GuildMember is
+    // Don't resume PLAYBACK in a channel nobody is listening in — but always
+    // rejoin it: the bot's presence must survive every deploy (the 2026-07-09
+    // incident: deploy landed while the bot played to an emptied-out channel,
+    // the old empty-channel skip left it evicted for good). channel.members
+    // can't be trusted here: it only includes occupants whose GuildMember is
     // cached, and right after startup the member cache holds only the bot
     // (no GuildMembers intent) — so every human is filtered out and the
     // channel looks empty. Count voice states instead, excluding ourselves
     // and treating occupants with no cached member as humans: a rare resume
     // into a bots-only channel beats never resuming at all.
     const listeners = this.countListeners(client, voiceChannel);
-    if (listeners === 0) {
-      logger.info('Resume skipped: voice channel is empty', {
+    const channelEmpty = listeners === 0;
+    if (channelEmpty) {
+      logger.info('Resume: voice channel is empty, rejoining without playback', {
         guildId: state.guildId,
         channelId: state.voiceChannelId,
       });
-      return false;
     }
 
-    // Presence-only snapshot: the bot was parked in the channel with nothing
-    // live. Rejoin (and restart the radio rotation if one was armed) instead
-    // of resuming a track.
-    if (!state.tracks || state.tracks.length === 0) {
-      return this.restorePresence(deps, state, voiceChannel);
+    // Presence-only snapshot (the bot was parked with nothing live), or a
+    // playback snapshot downgraded because the room is empty: rejoin instead
+    // of resuming a track. Radio only restarts when someone is listening.
+    if (channelEmpty || !state.tracks || state.tracks.length === 0) {
+      return this.restorePresence(deps, state, voiceChannel, { restartRadio: !channelEmpty });
     }
 
     const tracks = state.tracks.map((raw: any) => {
@@ -419,19 +422,22 @@ class ResumeService {
   }
 
   /**
-   * Rejoin a voice channel the bot was merely parked in — no track to resume,
-   * so no announcement and no inactivity timer: the pre-restart session was
+   * Rejoin a voice channel without resuming a track — either the bot was
+   * merely parked there, or it was playing but the room is empty now. No
+   * announcement and no inactivity timer: the pre-restart session was
    * already past (or outside) its idle countdown, and evicting the bot right
-   * after it fought its way back would defeat the point. A radio-mode
-   * presence (SIGTERM landed between rotation tracks) restarts the rotation
-   * from scratch via radioService.start(), which seeds and plays a fresh
-   * track — resume() can't be used here since it assumes a restored track is
-   * already playing.
+   * after it fought its way back would defeat the point. With restartRadio, a
+   * radio-mode snapshot (armed rotation, or SIGTERM landed between rotation
+   * tracks) restarts the rotation from scratch via radioService.start(),
+   * which seeds and plays a fresh track — resume() can't be used here since
+   * it assumes a restored track is already playing. Callers pass
+   * restartRadio: false for an empty room so radio doesn't stream to nobody.
    */
   private async restorePresence(
     deps: RestoreDeps,
     state: GuildResumeState,
     voiceChannel: any,
+    { restartRadio }: { restartRadio: boolean },
   ): Promise<boolean> {
     const player = deps.audioManager.getPlayer(state.guildId);
     const session = deps.sessionManager.get(state.guildId);
@@ -446,7 +452,7 @@ class ResumeService {
       return false;
     }
 
-    if (state.radioMode && deps.radioService && state.textChannelId) {
+    if (restartRadio && state.radioMode && deps.radioService && state.textChannelId) {
       try {
         await deps.radioService.start(state.guildId, voiceChannel, state.textChannelId);
       } catch (err: unknown) {
