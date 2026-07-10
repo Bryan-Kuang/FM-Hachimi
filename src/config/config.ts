@@ -70,6 +70,7 @@ interface BilibiliConfig {
   hachimiMaxDurationSec: number;
   hachimiMinDurationSec: number;
   hachimiSearchKeywords: string[];
+  hachimiRelevanceTerms: string[];
   mediaCacheEnabled: boolean;
   mediaCacheDir: string;
   mediaCacheMaxEntries: number;
@@ -320,16 +321,30 @@ const config: BotConfig = {
     // passed through so we don't silently drop otherwise-valid results.
     hachimiMaxDurationSec: parseInt(process.env.HACHIMI_MAX_DURATION_SEC!) || 360,  // 6 min
     hachimiMinDurationSec: parseInt(process.env.HACHIMI_MIN_DURATION_SEC!) || 60,   // 1 min
-    // Search keywords for the 哈基米 meme-music corpus. The bare keyword "哈基米"
-    // ranks lots of non-music content (cat vlogs, game clips, anime cuts) that the
+    // Search keywords for the meme-music corpus. Bare keywords like "哈基米"
+    // rank lots of non-music content (cat vlogs, game clips, anime cuts) that the
     // downstream filters can't reliably reject, which is how off-topic videos kept
     // reaching recommendations. Music-focused queries keep results on the meme
     // songs; each search samples from this list, which also diversifies the pool.
+    // Covers 哈基米 plus the newer 大狗叫 / 叮咚鸡 memes riding the same wave.
     hachimiSearchKeywords: parseListEnv(process.env.HACHIMI_SEARCH_KEYWORDS, [
       "哈基米音乐",
       "哈基米 音mad",
       "哈基米 鬼畜",
       "哈基米 remix",
+      "大狗叫音乐",
+      "大狗叫 remix",
+      "叮咚鸡音乐",
+      "叮咚鸡 remix",
+    ]),
+    // Bare meme names for the hard relevance filter: a fetched video is kept only
+    // if its title or tag contains one of these. This is the gate that rejects
+    // drift content surfacing on deeper search pages. Keep in sync with the meme
+    // families the search keywords above target.
+    hachimiRelevanceTerms: parseListEnv(process.env.HACHIMI_RELEVANCE_TERMS, [
+      "哈基米",
+      "大狗叫",
+      "叮咚鸡",
     ]),
     // Persistent on-disk cache of downloaded Bilibili audio — a hit plays from a
     // local file (instant, no yt-dlp/native extract, no signed-URL expiry). This
