@@ -308,11 +308,11 @@ describe('ResumeService radio mode', () => {
       expect(radioService.resume).not.toHaveBeenCalled();
     });
 
-    it('skips the presence rejoin when the voice channel is empty', async () => {
+    it('rejoins an empty channel too, but without restarting radio', async () => {
       const svc = new ResumeService(opts());
-      svc.persist(makeSessionManager(idlePlayer()));
+      svc.persist(makeSessionManager(idlePlayer({ radioMode: true })));
 
-      const player = idlePlayer();
+      const player = idlePlayer({ radioMode: true });
       const voiceChannel = {
         id: 'voice-1',
         isVoiceBased: () => true,
@@ -322,15 +322,64 @@ describe('ResumeService radio mode', () => {
         user: { id: 'bot-1' },
         channels: { fetch: jest.fn().mockResolvedValue(voiceChannel) },
       };
+      const radioService = {
+        start: jest.fn().mockResolvedValue({ success: true }),
+        resume: jest.fn().mockResolvedValue(undefined),
+      };
 
       const result = await svc.restore({
         client,
         audioManager: { getPlayer: () => player },
         sessionManager: { get: () => ({ addHistory: jest.fn() }) },
+        radioService,
       });
 
-      expect(result.restored).toBe(0);
-      expect(player.joinVoiceChannel).not.toHaveBeenCalled();
+      expect(result.restored).toBe(1);
+      expect(player.joinVoiceChannel).toHaveBeenCalledWith(voiceChannel);
+      // Nobody listening — don't stream radio to an empty room.
+      expect(radioService.start).not.toHaveBeenCalled();
+    });
+
+    it('downgrades a playback snapshot to a presence rejoin when the channel is empty', async () => {
+      // The 2026-07-09 04:09 UTC incident: bot playing at deploy time, channel
+      // empty at restart — it must still come back, just silently.
+      const svc = new ResumeService(opts());
+      svc.persist(makeSessionManager(makePlayer({ radioMode: true })));
+
+      const player = makePlayer({ radioMode: true });
+      const voiceChannel = {
+        id: 'voice-1',
+        isVoiceBased: () => true,
+        guild: { voiceStates: { cache: new Map() } },
+      };
+      const textChannel = { id: 'text-1', send: jest.fn().mockResolvedValue({}) };
+      const client = {
+        user: { id: 'bot-1' },
+        channels: {
+          fetch: jest.fn((id: string) =>
+            Promise.resolve(id === 'text-1' ? textChannel : voiceChannel),
+          ),
+        },
+      };
+      const radioService = {
+        start: jest.fn().mockResolvedValue({ success: true }),
+        resume: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const result = await svc.restore({
+        client,
+        audioManager: { getPlayer: () => player },
+        sessionManager: { get: () => ({ addHistory: jest.fn() }) },
+        radioService,
+      });
+
+      expect(result.restored).toBe(1);
+      expect(player.joinVoiceChannel).toHaveBeenCalledWith(voiceChannel);
+      expect(player.playCurrentTrack).not.toHaveBeenCalled();
+      expect(radioService.start).not.toHaveBeenCalled();
+      expect(radioService.resume).not.toHaveBeenCalled();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(textChannel.send).not.toHaveBeenCalled();
     });
   });
 
