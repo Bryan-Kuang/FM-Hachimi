@@ -214,49 +214,20 @@ async function playUrl(
   platform: PlayUrlPlatform,
   options: PlayUrlOptions,
 ): Promise<CoordinatorResult> {
+  const { interaction, playerService, url, requestedBy } = options;
+
   // While radio is running, the rotation owns the queue — a normally-queued
   // track would be discarded on the next advance. Interject the request into
   // the rotation instead (same path as the daily recommendation): it plays now
   // and the radio resumes when it ends.
-  const radioResult = await maybePlayAsRadioInterlude(platform, options);
-  if (radioResult) return radioResult;
-
-  return platform === 'youtube' ? playYouTubeUrl(options) : playBilibiliUrl(options);
-}
-
-/**
- * If radio mode is active for this guild, interject the requested video via
- * RadioService.playNow so it plays immediately and the rotation resumes after.
- * Returns the interlude result, or null when radio is off (fall through to the
- * normal queue path).
- */
-async function maybePlayAsRadioInterlude(
-  platform: PlayUrlPlatform,
-  options: PlayUrlOptions,
-): Promise<CoordinatorResult | null> {
-  const { interaction, playerService, url, requestedBy } = options;
   const guildId = interaction.guild?.id;
-  if (!guildId) return null;
-
-  const radio = playerService.getRadioService?.();
-  if (!radio || !radio.isEnabled(guildId) || typeof radio.playNow !== 'function') {
-    return null;
+  const radio = guildId ? playerService.getRadioService?.() : null;
+  if (guildId && radio?.isEnabled(guildId) && typeof radio.playNow === 'function') {
+    if (interaction.channelId) playerService.setUIContext(guildId, interaction.channelId);
+    return radio.playNow(guildId, url, getRequestedBy(interaction, requestedBy), platform);
   }
 
-  const channelId = interaction.channelId;
-  if (channelId) playerService.setUIContext(guildId, channelId);
-
-  const result = await radio.playNow(
-    guildId,
-    url,
-    getRequestedBy(interaction, requestedBy),
-    platform,
-  );
-  return {
-    success: result.success,
-    error: result.error,
-    track: result.track,
-  };
+  return platform === 'youtube' ? playYouTubeUrl(options) : playBilibiliUrl(options);
 }
 
 export = {
