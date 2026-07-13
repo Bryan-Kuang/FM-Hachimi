@@ -2,10 +2,6 @@ jest.mock("child_process", () => ({
   spawn: jest.fn(),
 }));
 
-jest.mock("axios", () => ({
-  get: jest.fn(),
-}));
-
 jest.mock("../../src/services/logger_service", () => ({
   info: jest.fn(),
   error: jest.fn(),
@@ -17,7 +13,6 @@ const { createMockProcess } = require("../utils/mock_spawn");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const axios = require("axios");
 const { spawn } = require("child_process");
 const logger = require("../../src/services/logger_service");
 const BilibiliExtractor = require("../../src/bilibili/extractor");
@@ -25,71 +20,75 @@ const NativeBilibiliExtractor = require("../../src/bilibili/native_extractor");
 
 const VIDEO_URL = "https://www.bilibili.com/video/BV1xx411c7BF";
 
+function jsonResponse(body) {
+  return { ok: true, status: 200, json: async () => body };
+}
+
+// The native extractor (via @bryan-kuang/bilibili-audio-extractor) talks to
+// Bilibili over global fetch, not axios — this mocks that transport.
 function mockNativeResponses({ audio = undefined, navCode = 0, navMessage = undefined, duration = 123, pages = undefined } = {}) {
-  axios.get.mockImplementation((url) => {
+  global.fetch = jest.fn(async (url) => {
+    if (url.includes("/x/frontend/finger/spi")) {
+      return jsonResponse({ code: 0, data: { b_3: "test-buvid3", b_4: "test-buvid4" } });
+    }
+
     if (url.includes("/x/web-interface/view")) {
-      return Promise.resolve({
+      return jsonResponse({
+        code: 0,
         data: {
-          code: 0,
-          data: {
-            bvid: "BV1xx411c7BF",
-            aid: 170001,
-            cid: 990001,
-            title: "Native Bilibili Track",
-            desc: "native metadata",
-            duration,
-            ...(pages ? { pages } : {}),
-            owner: { name: "Native Uploader" },
-            pubdate: 1760000000,
-            stat: { view: 1234, like: 56 },
-            pic: "https://i0.hdslb.com/thumb.jpg",
-          },
+          bvid: "BV1xx411c7BF",
+          aid: 170001,
+          cid: 990001,
+          title: "Native Bilibili Track",
+          desc: "native metadata",
+          duration,
+          ...(pages ? { pages } : {}),
+          owner: { name: "Native Uploader" },
+          pubdate: 1760000000,
+          stat: { view: 1234, like: 56 },
+          pic: "https://i0.hdslb.com/thumb.jpg",
         },
       });
     }
 
     if (url.includes("/x/web-interface/nav")) {
-      return Promise.resolve({
+      return jsonResponse({
+        code: navCode,
+        message: navMessage,
         data: {
-          code: navCode,
-          message: navMessage,
-          data: {
-            wbi_img: {
-              img_url: "https://i0.hdslb.com/bfs/wbi/nativeimg.png",
-              sub_url: "https://i0.hdslb.com/bfs/wbi/nativesub.png",
-            },
+          wbi_img: {
+            img_url: "https://i0.hdslb.com/bfs/wbi/nativeimg.png",
+            sub_url: "https://i0.hdslb.com/bfs/wbi/nativesub.png",
           },
         },
       });
     }
 
     if (url.includes("/x/player/wbi/playurl")) {
-      return Promise.resolve({
+      return jsonResponse({
+        code: 0,
         data: {
-          code: 0,
-          data: {
-            dash: {
-              audio: audio ?? [
-                {
-                  id: 30216,
-                  baseUrl: "https://upos.example.com/audio-low.m4a",
-                  bandwidth: 64000,
-                  codecs: "mp4a.40.2",
-                },
-                {
-                  id: 30280,
-                  baseUrl: "https://upos.example.com/audio-high.m4a",
-                  bandwidth: 128000,
-                  codecs: "mp4a.40.2",
-                },
-              ],
-            },
+          dash: {
+            audio: audio ?? [
+              {
+                id: 30216,
+                baseUrl: "https://upos.example.com/audio-low.m4a",
+                bandwidth: 64000,
+                codecs: "mp4a.40.2",
+              },
+              {
+                id: 30280,
+                baseUrl: "https://upos.example.com/audio-high.m4a",
+                bandwidth: 128000,
+                codecs: "mp4a.40.2",
+              },
+            ],
           },
         },
       });
     }
 
-    return Promise.reject(new Error(`Unexpected URL: ${url}`));
+    throw new Error(`Unexpected URL: ${url}`);
   });
 }
 
@@ -120,6 +119,7 @@ describe("Bilibili native extractor", () => {
 
   afterEach(() => {
     extractor.destroy();
+    delete global.fetch;
   });
 
   test("extracts metadata and direct audio with native Bilibili APIs without spawning yt-dlp", async () => {
@@ -140,13 +140,13 @@ describe("Bilibili native extractor", () => {
       videoCodec: "none",
     });
     expect(spawn).not.toHaveBeenCalled();
-    expect(axios.get).toHaveBeenCalledWith(
+    expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining("/x/web-interface/view"),
-      expect.objectContaining({ params: expect.objectContaining({ bvid: "BV1xx411c7BF" }) }),
+      expect.anything(),
     );
-    expect(axios.get).toHaveBeenCalledWith(
-      expect.stringContaining("/x/player/wbi/playurl"),
-      expect.objectContaining({ params: expect.objectContaining({ cid: 990001 }) }),
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/x\/player\/wbi\/playurl.*cid=990001/),
+      expect.anything(),
     );
   });
 
@@ -230,14 +230,9 @@ describe("Bilibili native extractor", () => {
         audioCodec: "mp4a.40.2",
       }),
     });
-    expect(axios.get).toHaveBeenCalledWith(
-      expect.stringContaining("/x/player/wbi/playurl"),
-      expect.objectContaining({
-        params: expect.objectContaining({
-          w_rid: expect.any(String),
-          wts: expect.any(Number),
-        }),
-      }),
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/x\/player\/wbi\/playurl.*w_rid=/),
+      expect.anything(),
     );
   });
 
@@ -258,7 +253,7 @@ describe("Bilibili native extractor", () => {
 
       await nativeExtractor.extract(VIDEO_URL);
 
-      expect(axios.get).toHaveBeenCalledWith(
+      expect(global.fetch).toHaveBeenCalledWith(
         expect.stringContaining("/x/web-interface/view"),
         expect.objectContaining({
           headers: expect.objectContaining({

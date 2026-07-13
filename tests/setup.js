@@ -148,6 +148,17 @@ jest.mock("axios", () => ({
   }),
 }));
 
+// Default global fetch: an empty-but-well-formed JSON body. Mirrors the axios
+// mock above so native Bilibili extraction (which talks to the live API via
+// fetch, not axios) fails fast and falls back to the mocked yt-dlp path
+// instead of making real network calls. Test files exercising the native
+// path directly (e.g. bilibili_native_extractor.test.js) override this.
+global.fetch = jest.fn().mockResolvedValue({
+  ok: true,
+  status: 200,
+  json: async () => ({}),
+});
+
 // Mock winston logger
 jest.mock("winston", () => ({
   createLogger: jest.fn().mockReturnValue({
