@@ -1,29 +1,32 @@
 /**
- * Resume Service
- * Carries voice presence and active playback sessions across process restarts
- * (redeploys).
+ * Thin adapter over the extracted `discord-voice-resume` package (which grew
+ * out of this file). Preserves the exact surface `index.ts` and
+ * `annoying_service.ts` already call — capture/captureGuild/persist/consume/
+ * scheduleRestore/restore/reconstructGuild/announceResume/startAutoSnapshot/
+ * stopAutoSnapshot — so those call sites are unchanged.
  *
- * On graceful shutdown every guild the bot is connected to gets snapshotted
- * into a JSON file under the persisted data/ mount. A guild that is actively
- * playing (or paused) captures the full playback state — voice channel, queue,
- * cursor, position, loop mode; a guild that is merely sitting in a voice
- * channel captures a presence-only state (empty track list). On the next
- * startup the snapshot is consumed (delete-on-read, so a crash loop can never
- * replay it): full states rejoin and resume the interrupted track where it
- * left off via FFmpeg input seeking, presence-only states just rejoin the
- * channel (restarting the radio rotation if one was armed). This repo's
- * pipeline redeploys on every merge to main, so without the presence-only
- * path any merge would silently kick the bot out of the channel it was
- * parked in.
+ * The package owns the crash-safe snapshot file (delete-on-read, TTL,
+ * auto-flush timer) and the discord.js-specific restore mechanics (channel
+ * fetch/validation, empty-room detection via the voice-state cache). This
+ * adapter owns everything bot-specific: rebuilding the queue/Track objects,
+ * seeking, re-arming radio mode, and the "基米永不灭～" announcement — all
+ * inside the `onRestore` callback, mirroring the original restoreGuild /
+ * restorePresence split but driven by the package's own empty-room
+ * detection instead of a locally re-implemented one.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import * as fs from 'fs';
-import * as path from 'path';
-import { AudioPlayerStatus } from '@discordjs/voice';
+import fs = require('fs');
+import voice = require('@discordjs/voice');
+import discordVoiceResume = require('discord-voice-resume');
 import Track = require('../models/track');
-import * as logger from '../services/logger_service';
+import logger = require('../services/logger_service');
+
+const { AudioPlayerStatus } = voice;
+const { SessionResume } = discordVoiceResume;
+type PackageGuildState<T> = discordVoiceResume.GuildResumeState<T>;
+type RestoreContext = discordVoiceResume.RestoreContext;
 
 interface ResumeServiceOptions {
   enabled: boolean;
@@ -60,84 +63,75 @@ interface RestoreDeps {
   radioService?: any;   // RadioService — re-armed when a snapshot was in radio mode
 }
 
+/** Everything captured per guild, minus the identity/routing fields the package already tracks. */
+type PlaybackPayload = Omit<GuildResumeState, 'guildId' | 'voiceChannelId' | 'textChannelId'>;
+
+const EMPTY_PAYLOAD: PlaybackPayload = {
+  tracks: [],
+  currentIndex: -1,
+  loopMode: 'none',
+  positionSeconds: 0,
+  isPaused: false,
+  radioMode: false,
+  history: [],
+};
+
 class ResumeService {
   private readonly enabled: boolean;
   private readonly dataFile: string;
-  private readonly maxAgeMs: number;
-  private readonly snapshotIntervalMs: number;
-  private snapshotTimer: NodeJS.Timeout | null;
+  private readonly resume: discordVoiceResume.SessionResume<PlaybackPayload>;
 
   constructor(options: ResumeServiceOptions) {
     this.enabled = options.enabled;
     this.dataFile = options.dataFile;
-    this.maxAgeMs = options.maxAgeMs;
-    this.snapshotIntervalMs = options.snapshotIntervalMs ?? 0;
-    this.snapshotTimer = null;
+    this.resume = new SessionResume<PlaybackPayload>({
+      enabled: options.enabled,
+      dataFile: options.dataFile,
+      maxAgeMs: options.maxAgeMs,
+      snapshotIntervalMs: options.snapshotIntervalMs,
+    });
+
+    this.resume.on('persist', (e) => {
+      if (e.guilds > 0) logger.info('Playback resume snapshot persisted', { guilds: e.guilds, file: e.file });
+    });
+    this.resume.on('persist:error', (e) => {
+      logger.error('Failed to persist playback resume snapshot', { file: this.dataFile, error: e.error });
+    });
+    this.resume.on('restore:skipped', (e) => {
+      logger.warn('Resume skipped', { guildId: e.guildId, reason: e.reason });
+    });
+    this.resume.on('restore:error', (e) => {
+      logger.error('Failed to resume guild playback', { guildId: e.guildId, error: e.error });
+    });
   }
 
   // ── Periodic flush ────────────────────────────────────────────────────
 
-  /**
-   * Flush the snapshot to disk on a fixed interval so a hard kill / crash (not
-   * just a graceful SIGTERM) still leaves a fresh file to resume from.
-   *
-   * The first flush is deferred by one interval, which doubles as a crash-loop
-   * guard: a track that crashes the process before surviving one interval is
-   * never re-persisted (consume() already deleted the file on boot), so the bot
-   * won't endlessly resume into the same poison track.
-   */
   startAutoSnapshot(sessionManager: any): void {
-    if (!this.enabled || this.snapshotIntervalMs <= 0 || this.snapshotTimer) return;
-
-    this.snapshotTimer = setInterval(() => {
-      try {
-        this.persist(sessionManager);
-      } catch (err: unknown) {
-        logger.warn('Auto-snapshot flush failed', { error: (err as Error).message });
-      }
-    }, this.snapshotIntervalMs);
-
-    // Don't keep the event loop alive just for snapshots.
-    this.snapshotTimer.unref?.();
-
-    logger.info('Playback auto-snapshot started', { intervalMs: this.snapshotIntervalMs });
+    this.resume.startAutoSnapshot(
+      () => [...sessionManager.sessions.keys()],
+      (guildId: string) => this.toCapture(sessionManager, guildId),
+    );
+    if (this.enabled) {
+      logger.info('Playback auto-snapshot started');
+    }
   }
 
   stopAutoSnapshot(): void {
-    if (this.snapshotTimer) {
-      clearInterval(this.snapshotTimer);
-      this.snapshotTimer = null;
-    }
+    this.resume.stopAutoSnapshot();
   }
 
   // ── Shutdown side ─────────────────────────────────────────────────────
 
-  /**
-   * Snapshot every session worth resuming: any session connected to voice.
-   * Playing/paused sessions capture full playback state; idle-but-connected
-   * sessions capture presence only, so a redeploy never evicts the bot from
-   * its channel.
-   */
   capture(sessionManager: any): ResumeSnapshot {
     const guilds: GuildResumeState[] = [];
-
     for (const [guildId] of sessionManager.sessions) {
       const state = this.captureGuild(sessionManager, guildId);
       if (state) guilds.push(state);
     }
-
     return { savedAt: new Date().toISOString(), guilds };
   }
 
-  /**
-   * Snapshot a single guild's state, or null when the bot isn't connected to
-   * voice there. With a live (playing or paused) track this is the full
-   * playback state; otherwise a presence-only state with an empty track list —
-   * enough for the restore side to rejoin the channel. `voiceChannelIdOverride`
-   * covers the forced-disconnect path, where Discord may have already cleared
-   * the connection's join config by the time the voiceStateUpdate event is
-   * handled.
-   */
   captureGuild(
     sessionManager: any,
     guildId: string,
@@ -181,82 +175,39 @@ class ResumeService {
     };
   }
 
-  /**
-   * Capture and write the snapshot file. Must be cheap and synchronous — it
-   * runs inside the SIGTERM handler before voice connections are torn down,
-   * within Docker's stop grace period.
-   */
   persist(sessionManager: any): void {
-    if (!this.enabled) return;
+    const guildIds = [...sessionManager.sessions.keys()];
+    this.resume.persist(guildIds, (guildId) => this.toCapture(sessionManager, guildId));
+  }
 
-    try {
-      const snapshot = this.capture(sessionManager);
-
-      if (snapshot.guilds.length === 0) {
-        if (fs.existsSync(this.dataFile)) fs.unlinkSync(this.dataFile);
-        return;
-      }
-
-      const dir = path.dirname(this.dataFile);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(this.dataFile, JSON.stringify(snapshot, null, 2), 'utf8');
-
-      logger.info('Playback resume snapshot persisted', {
-        guilds: snapshot.guilds.length,
-        file: this.dataFile,
-      });
-    } catch (err: unknown) {
-      logger.error('Failed to persist playback resume snapshot', {
-        file: this.dataFile,
-        error: (err as Error).message,
-      });
-    }
+  private toCapture(
+    sessionManager: any,
+    guildId: string,
+  ): { voiceChannelId: string; textChannelId: string | null; payload: PlaybackPayload } | null {
+    const state = this.captureGuild(sessionManager, guildId);
+    if (!state) return null;
+    const { guildId: _guildId, voiceChannelId, textChannelId, ...payload } = state;
+    return { voiceChannelId, textChannelId, payload };
   }
 
   // ── Startup side ──────────────────────────────────────────────────────
 
-  /**
-   * Read and delete the snapshot file. Deleting before acting guarantees a
-   * snapshot is attempted at most once, even if the process crashes while
-   * restoring it.
-   */
   consume(): ResumeSnapshot | null {
-    if (!this.enabled) return null;
+    const snapshot = this.resume.consume();
+    if (!snapshot) return null;
+    return {
+      savedAt: snapshot.savedAt,
+      guilds: snapshot.guilds.map((g) => this.flatten(g)),
+    };
+  }
 
-    let raw: string;
-    try {
-      if (!fs.existsSync(this.dataFile)) return null;
-      raw = fs.readFileSync(this.dataFile, 'utf8');
-      fs.unlinkSync(this.dataFile);
-    } catch (err: unknown) {
-      logger.warn('Failed to read playback resume snapshot', {
-        file: this.dataFile,
-        error: (err as Error).message,
-      });
-      return null;
-    }
-
-    try {
-      const snapshot = JSON.parse(raw) as ResumeSnapshot;
-      if (!Array.isArray(snapshot?.guilds) || snapshot.guilds.length === 0) return null;
-
-      const ageMs = Date.now() - new Date(snapshot.savedAt).getTime();
-      if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > this.maxAgeMs) {
-        logger.warn('Playback resume snapshot expired, discarding', {
-          ageMs,
-          maxAgeMs: this.maxAgeMs,
-          guilds: snapshot.guilds.length,
-        });
-        return null;
-      }
-
-      return snapshot;
-    } catch (err: unknown) {
-      logger.warn('Playback resume snapshot is corrupt, discarding', {
-        error: (err as Error).message,
-      });
-      return null;
-    }
+  private flatten(state: PackageGuildState<PlaybackPayload>): GuildResumeState {
+    return {
+      guildId: state.guildId,
+      voiceChannelId: state.voiceChannelId,
+      textChannelId: state.textChannelId,
+      ...(state.payload ?? EMPTY_PAYLOAD),
+    };
   }
 
   /**
@@ -278,78 +229,55 @@ class ResumeService {
   }
 
   async restore(deps: RestoreDeps): Promise<{ restored: number; skipped: number }> {
-    const snapshot = this.consume();
-    if (!snapshot) return { restored: 0, skipped: 0 };
-
-    logger.info('Resuming playback sessions from snapshot', {
-      guilds: snapshot.guilds.length,
-      savedAt: snapshot.savedAt,
+    const result = await this.resume.restoreAll(deps.client, {
+      onRestore: (voiceChannel, payload, ctx) => this.onRestore(deps, voiceChannel, payload, ctx),
     });
-
-    let restored = 0;
-    let skipped = 0;
-    for (const state of snapshot.guilds) {
-      try {
-        if (await this.restoreGuild(deps, state)) restored++;
-        else skipped++;
-      } catch (err: unknown) {
-        skipped++;
-        logger.error('Failed to resume guild playback', {
-          guildId: state.guildId,
-          error: (err as Error).message,
-        });
-      }
-    }
-
-    logger.info('Playback resume completed', { restored, skipped });
-    return { restored, skipped };
+    logger.info('Playback resume completed', result);
+    return result;
   }
 
   /**
    * Rebuild a guild's session from a captured state while the process is still
    * running — the /annoying anti-disconnect rejoin. Same machinery as restart
-   * resume, including the "基米永不灭～" announcement.
+   * resume, including the "基米永不灭～" announcement. No file I/O.
    */
   async reconstructGuild(deps: RestoreDeps, state: GuildResumeState): Promise<boolean> {
-    return this.restoreGuild(deps, state);
+    const { guildId, voiceChannelId, textChannelId, ...payload } = state;
+    return this.resume.restoreSession(
+      deps.client,
+      { guildId, voiceChannelId, textChannelId, payload },
+      { onRestore: (voiceChannel, p, ctx) => this.onRestore(deps, voiceChannel, p, ctx) },
+    );
   }
 
-  private async restoreGuild(deps: RestoreDeps, state: GuildResumeState): Promise<boolean> {
+  private async onRestore(
+    deps: RestoreDeps,
+    voiceChannel: any,
+    payload: PlaybackPayload | null,
+    ctx: RestoreContext,
+  ): Promise<boolean> {
     const { client, audioManager, sessionManager } = deps;
-
-    const voiceChannel = await client.channels.fetch(state.voiceChannelId).catch(() => null);
-    if (!voiceChannel || typeof voiceChannel.isVoiceBased !== 'function' || !voiceChannel.isVoiceBased()) {
-      logger.warn('Resume skipped: voice channel unavailable', {
-        guildId: state.guildId,
-        channelId: state.voiceChannelId,
-      });
-      return false;
-    }
+    const { guildId, textChannelId, roomWasEmpty } = ctx;
+    const state = payload ?? EMPTY_PAYLOAD;
 
     // Don't resume PLAYBACK in a channel nobody is listening in — but always
     // rejoin it: the bot's presence must survive every deploy (the 2026-07-09
     // incident: deploy landed while the bot played to an emptied-out channel,
-    // the old empty-channel skip left it evicted for good). channel.members
-    // can't be trusted here: it only includes occupants whose GuildMember is
-    // cached, and right after startup the member cache holds only the bot
-    // (no GuildMembers intent) — so every human is filtered out and the
-    // channel looks empty. Count voice states instead, excluding ourselves
-    // and treating occupants with no cached member as humans: a rare resume
-    // into a bots-only channel beats never resuming at all.
-    const listeners = this.countListeners(client, voiceChannel);
-    const channelEmpty = listeners === 0;
-    if (channelEmpty) {
+    // the old empty-channel skip left it evicted for good).
+    if (roomWasEmpty) {
       logger.info('Resume: voice channel is empty, rejoining without playback', {
-        guildId: state.guildId,
-        channelId: state.voiceChannelId,
+        guildId,
+        channelId: voiceChannel.id,
       });
     }
 
     // Presence-only snapshot (the bot was parked with nothing live), or a
     // playback snapshot downgraded because the room is empty: rejoin instead
     // of resuming a track. Radio only restarts when someone is listening.
-    if (channelEmpty || !state.tracks || state.tracks.length === 0) {
-      return this.restorePresence(deps, state, voiceChannel, { restartRadio: !channelEmpty });
+    if (roomWasEmpty || !state.tracks || state.tracks.length === 0) {
+      return this.restorePresence(deps, guildId, textChannelId, state, voiceChannel, {
+        restartRadio: !roomWasEmpty,
+      });
     }
 
     const tracks = state.tracks.map((raw: any) => {
@@ -362,20 +290,20 @@ class ResumeService {
     const index =
       state.currentIndex >= 0 && state.currentIndex < tracks.length ? state.currentIndex : 0;
 
-    const player = audioManager.getPlayer(state.guildId);
+    const player = audioManager.getPlayer(guildId);
     player.queue.items = tracks;
     player.queue.currentIndex = index;
     player.queue.currentTrack = tracks[index];
     player.queue.setLoopMode(state.loopMode);
 
-    const session = sessionManager.get(state.guildId);
+    const session = sessionManager.get(guildId);
     for (const bvid of state.history || []) session.addHistory(bvid);
 
     const joined = await player.joinVoiceChannel(voiceChannel);
     if (!joined) {
       logger.warn('Resume skipped: failed to rejoin voice channel', {
-        guildId: state.guildId,
-        channelId: state.voiceChannelId,
+        guildId,
+        channelId: voiceChannel.id,
       });
       player.queue.reset();
       return false;
@@ -396,17 +324,17 @@ class ResumeService {
     // current track in the visible queue, with loop disabled).
     if (state.radioMode && deps.radioService) {
       try {
-        await deps.radioService.resume(state.guildId, state.textChannelId);
+        await deps.radioService.resume(guildId, textChannelId);
       } catch (err: unknown) {
         logger.warn('Resume: failed to re-arm radio mode', {
-          guildId: state.guildId,
+          guildId,
           error: (err as Error).message,
         });
       }
     }
 
     logger.info('Resumed playback after restart', {
-      guildId: state.guildId,
+      guildId,
       track: tracks[index].title,
       positionSeconds: state.positionSeconds,
       queueLength: tracks.length,
@@ -414,7 +342,7 @@ class ResumeService {
       radioMode: state.radioMode,
     });
 
-    this.announceResume(client, state.textChannelId, tracks[index]).catch((err: Error) => {
+    this.announceResume(client, textChannelId, tracks[index]).catch((err: Error) => {
       logger.debug('Failed to send resume announcement', { error: err.message });
     });
 
@@ -435,65 +363,47 @@ class ResumeService {
    */
   private async restorePresence(
     deps: RestoreDeps,
-    state: GuildResumeState,
+    guildId: string,
+    textChannelId: string | null,
+    state: PlaybackPayload,
     voiceChannel: any,
     { restartRadio }: { restartRadio: boolean },
   ): Promise<boolean> {
-    const player = deps.audioManager.getPlayer(state.guildId);
-    const session = deps.sessionManager.get(state.guildId);
+    const player = deps.audioManager.getPlayer(guildId);
+    const session = deps.sessionManager.get(guildId);
     for (const bvid of state.history || []) session.addHistory(bvid);
 
     const joined = await player.joinVoiceChannel(voiceChannel);
     if (!joined) {
       logger.warn('Presence resume skipped: failed to rejoin voice channel', {
-        guildId: state.guildId,
-        channelId: state.voiceChannelId,
+        guildId,
+        channelId: voiceChannel.id,
       });
       return false;
     }
 
-    if (restartRadio && state.radioMode && deps.radioService && state.textChannelId) {
+    if (restartRadio && state.radioMode && deps.radioService && textChannelId) {
       try {
-        await deps.radioService.start(state.guildId, voiceChannel, state.textChannelId);
+        await deps.radioService.start(guildId, voiceChannel, textChannelId);
       } catch (err: unknown) {
         logger.warn('Presence resume: failed to restart radio mode', {
-          guildId: state.guildId,
+          guildId,
           error: (err as Error).message,
         });
       }
     }
 
     logger.info('Rejoined voice channel after restart (presence only)', {
-      guildId: state.guildId,
-      channelId: state.voiceChannelId,
+      guildId,
+      channelId: voiceChannel.id,
       radioMode: state.radioMode,
     });
     return true;
   }
 
   /**
-   * Number of listeners in the voice channel, derived from the guild's voice
-   * state cache (populated by GUILD_CREATE even when member objects aren't).
-   * Returns null when voice states are unavailable — callers should proceed
-   * rather than skip.
-   */
-  private countListeners(client: any, voiceChannel: any): number | null {
-    const voiceStates = voiceChannel.guild?.voiceStates?.cache;
-    if (!voiceStates || typeof voiceStates.values !== 'function') return null;
-
-    let listeners = 0;
-    for (const voiceState of voiceStates.values()) {
-      if (voiceState?.channelId !== voiceChannel.id) continue;
-      if (voiceState.id === client.user?.id) continue; // our own stale pre-restart state
-      if (voiceState.member?.user?.bot) continue;
-      listeners++; // human, or occupant with no cached member — assume human
-    }
-    return listeners;
-  }
-
-  /**
    * The "基米永不灭～" revival announcement — shared by restart resume,
-   * /annoying reconstruction (via restoreGuild), and the /annoying move-back.
+   * /annoying reconstruction (via reconstructGuild), and the /annoying move-back.
    */
   async announceResume(client: any, textChannelId: string | null, track: any): Promise<void> {
     if (!textChannelId) return;
