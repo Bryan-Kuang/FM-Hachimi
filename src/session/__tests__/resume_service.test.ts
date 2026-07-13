@@ -122,8 +122,10 @@ describe('ResumeService radio mode', () => {
 
       jest.advanceTimersByTime(15000);
       expect(fs.existsSync(tmpFile)).toBe(true);
+      // On-disk shape is discord-voice-resume's own: playback fields live
+      // under guilds[0].payload, not flattened at the guild level.
       const first = JSON.parse(fs.readFileSync(tmpFile, 'utf8'));
-      expect(first.guilds[0].radioMode).toBe(true);
+      expect(first.guilds[0].payload.radioMode).toBe(true);
 
       jest.advanceTimersByTime(15000);
       expect(fs.existsSync(tmpFile)).toBe(true);
