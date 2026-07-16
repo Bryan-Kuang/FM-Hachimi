@@ -171,6 +171,26 @@ interface TestConfig {
   guildId: string | undefined;
 }
 
+interface SpotifyConfig {
+  clientId: string | undefined;
+  clientSecret: string | undefined;
+  market: string;
+  /** True only when both clientId and clientSecret are set (after trim). */
+  enabled: boolean;
+}
+
+interface PlaylistConfig {
+  maxItems: number;
+  progressIntervalMs: number;
+  /** yt-dlp kill timer when resolving a playlist. */
+  resolveTimeoutMs: number;
+  multipartDetectTimeoutMs: number;
+}
+
+interface AttachmentConfig {
+  maxBytes: number;
+}
+
 interface BotConfig {
   discord: DiscordConfig;
   audio: AudioConfig;
@@ -186,6 +206,9 @@ interface BotConfig {
   annoying: AnnoyingConfig;
   resume: ResumeConfig;
   test: TestConfig;
+  spotify: SpotifyConfig;
+  playlists: PlaylistConfig;
+  attachments: AttachmentConfig;
 }
 
 function parseIntegerEnv(value: string | undefined, fallback: number): number {
@@ -472,6 +495,23 @@ const config: BotConfig = {
   test: {
     mode: process.env.TEST_MODE === "true",
     guildId: process.env.TEST_GUILD_ID,
+  },
+  spotify: {
+    clientId: process.env.SPOTIFY_CLIENT_ID,
+    clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
+    market: process.env.SPOTIFY_MARKET || "US",
+    enabled: Boolean(
+      (process.env.SPOTIFY_CLIENT_ID ?? "").trim() && (process.env.SPOTIFY_CLIENT_SECRET ?? "").trim()
+    ),
+  },
+  playlists: {
+    maxItems: Math.max(1, parseIntegerEnv(process.env.PLAYLIST_MAX_ITEMS, 100)),
+    progressIntervalMs: Math.max(0, parseIntegerEnv(process.env.PLAYLIST_PROGRESS_INTERVAL_MS, 1500)),
+    resolveTimeoutMs: Math.max(1000, parseIntegerEnv(process.env.PLAYLIST_RESOLVE_TIMEOUT_MS, 60000)),
+    multipartDetectTimeoutMs: Math.max(0, parseIntegerEnv(process.env.PLAYLIST_MULTIPART_DETECT_TIMEOUT_MS, 3000)),
+  },
+  attachments: {
+    maxBytes: Math.max(1, parseIntegerEnv(process.env.ATTACHMENT_MAX_BYTES, 50 * 1024 * 1024)),
   },
 };
 
