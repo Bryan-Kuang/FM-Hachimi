@@ -18,7 +18,7 @@ import { validateAttachment, buildAttachmentTrackData, type AttachmentInput } fr
 import * as logger from '../../services/logger_service';
 import config = require('../../config/config');
 import SpotifyClient = require('../../spotify/client');
-import { findYouTubeMatch } from '../../spotify/resolver';
+import { resolveSpotifyPlayback } from '../../spotify/playback_resolver';
 import { interleaveRoundRobin } from '../../search/interleave';
 import BilibiliApi = require('../../bilibili/api');
 import BilibiliValidator = require('../../bilibili/validator');
@@ -401,11 +401,52 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
           return;
         }
 
-        const match = await findYouTubeMatch(trackMeta, ytExtractorForSpotify);
-        if (!match) {
+        // Project B seam: direct Spotify extraction first (when the sidecar
+        // is configured and radio isn't active), YouTube-match on any
+        // failure — see spotify/playback_resolver.ts.
+        const radioActiveForSpotify = Boolean(playbackService.getRadioService?.()?.isEnabled(interaction.guild.id));
+        const spotifyTarget = await resolveSpotifyPlayback(
+          { id: route.spotify.id, title: trackMeta.title, artists: trackMeta.artists, durationSec: trackMeta.durationSec },
+          {
+            youtubeExtractor: ytExtractorForSpotify,
+            directExtractor: playbackService.getSpotifyDirectExtractor?.(),
+            radioActive: radioActiveForSpotify,
+          },
+        );
+
+        if (!spotifyTarget) {
           const artist = trackMeta.artists[0] ?? '';
           await interaction.editReply({
             content: `[!] 找不到对应的 YouTube 视频: ${artist} - ${trackMeta.title}`,
+          });
+          return;
+        }
+
+        if (spotifyTarget.kind === 'direct') {
+          const directStageReporter = createInteractionStageReporter(interaction, 'Spotify');
+          const directResult = await playAttachment({
+            interaction,
+            playerService: playbackService,
+            data: spotifyTarget.data,
+            onStage: directStageReporter,
+          });
+          await directStageReporter.finish();
+
+          if (!directResult.success) {
+            if (directResult.error === 'RADIO_ACTIVE') {
+              await interaction.editReply({ content: '[!] 电台模式运行中，无法直接播放该曲目。请先使用 /radio 关闭电台。' });
+            } else {
+              await interaction.editReply({ content: `[!] 播放失败: ${(directResult.error || '').substring(0, 100)}` });
+            }
+            return;
+          }
+
+          await interaction.editReply({ content: `>> 已添加: ${trackMeta.title}（Spotify 直连）` });
+          logger.info('Play command completed (Spotify direct)', {
+            query,
+            spotifyId: route.spotify.id,
+            title: trackMeta.title,
+            user: user.username,
           });
           return;
         }
@@ -414,7 +455,7 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         const spotifyResult = await PlaybackCoordinator.playUrl('youtube', {
           interaction,
           playerService: playbackService,
-          url: match.url,
+          url: spotifyTarget.url,
           onStage: spotifyStageReporter,
         });
         await spotifyStageReporter.finish();
@@ -433,7 +474,7 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
             await interaction.editReply({ content: `[!] YouTube extraction failed: ${msg.substring(0, 100)}` });
           }
           logger.error('YouTube extraction failed in play command (Spotify)', {
-            url: match.url,
+            url: spotifyTarget.url,
             error: msg,
             user: user.username,
           });
@@ -444,7 +485,7 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         logger.info('Play command completed (Spotify → YouTube)', {
           query,
           spotifyId: route.spotify.id,
-          url: match.url,
+          url: spotifyTarget.url,
           title: trackMeta.title,
           user: user.username,
         });

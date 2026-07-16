@@ -171,12 +171,33 @@ interface TestConfig {
   guildId: string | undefined;
 }
 
+/**
+ * Direct Spotify audio extraction (Project B) — a librespot-family sidecar
+ * (zotify, see spotify/direct_extractor.ts) logged into a dedicated Spotify
+ * account, invoked per-track. Disabled by default: it requires a one-time
+ * manual login bootstrap on the deploy host (OPERATIONS.md) that doesn't
+ * exist in CI/dev, and every consumer already degrades cleanly to the
+ * YouTube-match path when `enabled` is false or `isConfigured()` is false.
+ */
+interface SpotifyDirectConfig {
+  enabled: boolean;
+  /** Dir holding the sidecar's cached OAuth login (`credentials.json`). */
+  credentialsDir: string;
+  /** Dir downloaded track files are written to / reused from. */
+  cacheDir: string;
+  /** Sidecar kill timer. */
+  timeoutMs: number;
+  /** Sidecar executable — resolved on PATH by default. */
+  sidecarCommand: string;
+}
+
 interface SpotifyConfig {
   clientId: string | undefined;
   clientSecret: string | undefined;
   market: string;
   /** True only when both clientId and clientSecret are set (after trim). */
   enabled: boolean;
+  direct: SpotifyDirectConfig;
 }
 
 interface SearchConfig {
@@ -509,6 +530,13 @@ const config: BotConfig = {
     enabled: Boolean(
       (process.env.SPOTIFY_CLIENT_ID ?? "").trim() && (process.env.SPOTIFY_CLIENT_SECRET ?? "").trim()
     ),
+    direct: {
+      enabled: process.env.SPOTIFY_DIRECT_ENABLED === "true",
+      credentialsDir: process.env.SPOTIFY_CREDENTIALS_DIR || "/app/secrets/spotify",
+      cacheDir: process.env.SPOTIFY_DIRECT_CACHE_DIR || "/app/cache/spotify",
+      timeoutMs: Math.max(1000, parseIntegerEnv(process.env.SPOTIFY_DIRECT_TIMEOUT_MS, 30000)),
+      sidecarCommand: process.env.SPOTIFY_SIDECAR_CMD || "zotify",
+    },
   },
   search: {
     limitPerPlatform: Math.max(1, parseIntegerEnv(process.env.SEARCH_LIMIT_PER_PLATFORM, 10)),
