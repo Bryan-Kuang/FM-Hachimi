@@ -416,4 +416,199 @@ describe("BilibiliAPI", () => {
       expect(Array.isArray(results)).toBe(true);
     });
   });
+
+  // ─── getFavFolderPage (Task 2.4) ─────────────────────────────
+
+  describe("getFavFolderPage", () => {
+    const axios = require("axios");
+
+    test("fetches the correct URL/params and shapes the response", async () => {
+      axios.get.mockResolvedValueOnce({
+        data: {
+          code: 0,
+          data: {
+            info: { id: 123, title: "My Favorites", media_count: 2 },
+            medias: [
+              { bvid: "BV1abc", type: 2, attr: 0, title: "Song A", duration: 180, upper: { name: "Author A" }, cover: "cover-a" },
+            ],
+            has_more: true,
+          },
+        },
+      });
+
+      const result = await BilibiliAPI.getFavFolderPage("123456", 1, 20);
+
+      expect(axios.get).toHaveBeenCalledWith(
+        "https://api.bilibili.com/x/v3/fav/resource/list",
+        expect.objectContaining({
+          params: { media_id: "123456", pn: 1, ps: 20, platform: "web" },
+        }),
+      );
+      expect(result).toEqual({
+        title: "My Favorites",
+        mediaCount: 2,
+        hasMore: true,
+        items: [{ bvid: "BV1abc", title: "Song A", durationSec: 180, author: "Author A", cover: "cover-a" }],
+      });
+    });
+
+    test("handles medias: null (empty page)", async () => {
+      axios.get.mockResolvedValueOnce({
+        data: {
+          code: 0,
+          data: { info: { title: "Empty", media_count: 0 }, medias: null, has_more: false },
+        },
+      });
+
+      const result = await BilibiliAPI.getFavFolderPage("1", 2, 20);
+
+      expect(result.items).toEqual([]);
+      expect(result.hasMore).toBe(false);
+    });
+
+    test("filters out non-video types and invalidated (attr!==0) entries", async () => {
+      axios.get.mockResolvedValueOnce({
+        data: {
+          code: 0,
+          data: {
+            info: { title: "Mixed", media_count: 3 },
+            medias: [
+              { bvid: "BV1valid", type: 2, attr: 0, title: "Valid", duration: 100 },
+              { bvid: "BV1invalid", type: 2, attr: 1, title: "Invalidated", duration: 100 },
+              { bvid: "", type: 2, attr: 0, title: "No bvid", duration: 100 },
+              { bvid: "BV1notvideo", type: 24, attr: 0, title: "Not a video (e.g. article)", duration: 100 },
+            ],
+            has_more: false,
+          },
+        },
+      });
+
+      const result = await BilibiliAPI.getFavFolderPage("1", 1, 20);
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].bvid).toBe("BV1valid");
+    });
+
+    test("throws BILIBILI_FAV_PRIVATE on code -403", async () => {
+      axios.get.mockResolvedValueOnce({ data: { code: -403, message: "访问权限不足" } });
+
+      await expect(BilibiliAPI.getFavFolderPage("1", 1, 20)).rejects.toThrow("BILIBILI_FAV_PRIVATE");
+    });
+
+    test("throws BILIBILI_FAV_PRIVATE on code 11010", async () => {
+      axios.get.mockResolvedValueOnce({ data: { code: 11010, message: "收藏夹不存在" } });
+
+      await expect(BilibiliAPI.getFavFolderPage("1", 1, 20)).rejects.toThrow("BILIBILI_FAV_PRIVATE");
+    });
+
+    test("throws a generic error on other non-zero codes", async () => {
+      axios.get.mockResolvedValueOnce({ data: { code: -1, message: "系统错误" } });
+
+      await expect(BilibiliAPI.getFavFolderPage("1", 1, 20)).rejects.toThrow(/Failed to get fav folder/);
+    });
+  });
+
+  // ─── getCollectionPage (Task 2.4) ────────────────────────────
+
+  describe("getCollectionPage", () => {
+    const axios = require("axios");
+
+    test("season: fetches seasons_archives_list with exact params", async () => {
+      axios.get.mockResolvedValueOnce({
+        data: {
+          code: 0,
+          data: {
+            archives: [{ bvid: "BV1s1", title: "Part 1", duration: 200, pic: "pic1" }],
+            meta: { name: "My Collection", total: 5 },
+            page: { page_num: 1, page_size: 30, total: 5 },
+          },
+        },
+      });
+
+      const result = await BilibiliAPI.getCollectionPage("999", "555", 1, "season", 30);
+
+      expect(axios.get).toHaveBeenCalledWith(
+        "https://api.bilibili.com/x/polymer/web-space/seasons_archives_list",
+        expect.objectContaining({
+          params: { mid: "999", season_id: "555", sort_reverse: false, page_num: 1, page_size: 30 },
+        }),
+      );
+      expect(result).toEqual({
+        title: "My Collection",
+        total: 5,
+        items: [{ bvid: "BV1s1", title: "Part 1", durationSec: 200, cover: "pic1" }],
+      });
+    });
+
+    test("series: fetches series/archives with exact params and falls back to '合集' title", async () => {
+      axios.get.mockResolvedValueOnce({
+        data: {
+          code: 0,
+          data: {
+            archives: [{ bvid: "BV1ser1", title: "Ep 1", duration: 150, pic: "pic-ep1" }],
+            page: { num: 1, size: 30, total: 3 },
+          },
+        },
+      });
+
+      const result = await BilibiliAPI.getCollectionPage("999", "777", 1, "series", 30);
+
+      expect(axios.get).toHaveBeenCalledWith(
+        "https://api.bilibili.com/x/series/archives",
+        expect.objectContaining({
+          params: { mid: "999", series_id: "777", pn: 1, ps: 30 },
+        }),
+      );
+      expect(result.title).toBe("合集");
+      expect(result.total).toBe(3);
+      expect(result.items).toEqual([{ bvid: "BV1ser1", title: "Ep 1", durationSec: 150, cover: "pic-ep1" }]);
+    });
+
+    test("throws on non-zero code", async () => {
+      axios.get.mockResolvedValueOnce({ data: { code: -1, message: "error" } });
+
+      await expect(BilibiliAPI.getCollectionPage("1", "2", 1, "season", 30)).rejects.toThrow(/Failed to get season archives/);
+    });
+  });
+
+  // ─── getVideoPages (Task 2.4) ────────────────────────────────
+
+  describe("getVideoPages", () => {
+    const axios = require("axios");
+
+    test("reuses getVideoDetails and maps pages", async () => {
+      axios.get.mockResolvedValueOnce({
+        data: {
+          code: 0,
+          data: {
+            title: "Multipart Video",
+            pages: [
+              { page: 1, part: "Part One", duration: 120, cid: 111 },
+              { page: 2, part: "Part Two", duration: 90, cid: 222 },
+            ],
+          },
+        },
+      });
+
+      const result = await BilibiliAPI.getVideoPages("BV1multi");
+
+      expect(result).toEqual({
+        title: "Multipart Video",
+        pages: [
+          { page: 1, part: "Part One", durationSec: 120, cid: 111 },
+          { page: 2, part: "Part Two", durationSec: 90, cid: 222 },
+        ],
+      });
+    });
+
+    test("returns an empty pages array for a single-part video (no pages field)", async () => {
+      axios.get.mockResolvedValueOnce({
+        data: { code: 0, data: { title: "Single Part Video" } },
+      });
+
+      const result = await BilibiliAPI.getVideoPages("BV1single");
+
+      expect(result.pages).toEqual([]);
+    });
+  });
 });

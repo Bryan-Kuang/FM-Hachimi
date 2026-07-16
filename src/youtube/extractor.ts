@@ -105,6 +105,21 @@ interface ResolvedExtractionOptions {
   onStage?: PlaybackStageReporter;
 }
 
+interface YtFlatPlaylistEntry {
+  id: string;
+  title: string;
+  duration: number;
+  uploader: string;
+  url: string;
+}
+
+interface YtFlatPlaylistResult {
+  success: boolean;
+  playlistTitle?: string;
+  entries?: YtFlatPlaylistEntry[];
+  error?: string;
+}
+
 interface CookieRefreshServiceLike {
   refreshNow(context?: { reason?: string; source?: string; force?: boolean }): Promise<{
     success: boolean;
@@ -631,6 +646,90 @@ class YouTubeExtractor {
           timestamp: new Date().toISOString(),
         });
       }, 20000).unref();
+
+      ytdlp.on('close', () => clearTimeout(timeoutId));
+      ytdlp.on('error', () => clearTimeout(timeoutId));
+    });
+  }
+
+  /**
+   * List the items of a YouTube playlist (flat — no per-item metadata fetch,
+   * just id/title/duration/uploader from the playlist page itself). Used by
+   * the bulk-enqueue playlist path; each returned entry becomes a
+   * lazily-extracted pending track (see src/playlists/youtube_playlist_resolver.ts).
+   */
+  async listPlaylistItems(playlistUrl: string, limit: number): Promise<YtFlatPlaylistResult> {
+    return new Promise((resolve) => {
+      const args = [
+        playlistUrl,
+        '--flat-playlist',
+        '--dump-json',
+        '--no-download',
+        '--playlist-end', String(limit),
+        ...this._baseArgs(),
+      ];
+
+      logger.debug('YouTube playlist listing via yt-dlp', { playlistUrl, limit });
+
+      const ytdlp: ChildProcess = spawn('yt-dlp', args);
+      let stdout = '';
+      let stderr = '';
+
+      ytdlp.stdout!.on('data', (data: Buffer) => { stdout += data.toString(); });
+      ytdlp.stderr!.on('data', (data: Buffer) => { stderr += data.toString(); });
+
+      ytdlp.on('close', (code: number | null) => {
+        if (code !== 0 && code !== null) {
+          const errorMessage = this.formatYtDlpError(code, stderr);
+          logger.error('YouTube playlist listing failed', { code, stderr, playlistUrl });
+          resolve({ success: false, error: `Playlist listing failed: ${errorMessage}` });
+          return;
+        }
+
+        try {
+          const lines = stdout.split('\n').filter(l => l.trim().startsWith('{'));
+          let playlistTitle: string | undefined;
+          const entries: YtFlatPlaylistEntry[] = [];
+
+          for (const line of lines) {
+            const data = JSON.parse(line) as Record<string, unknown>;
+            if (!playlistTitle && typeof data.playlist_title === 'string') {
+              playlistTitle = data.playlist_title;
+            }
+
+            const title = (data.title as string) || '';
+            if (title === '[Private video]' || title === '[Deleted video]') continue;
+
+            const id = (data.id as string) || '';
+            if (!id) continue;
+
+            entries.push({
+              id,
+              title: title || 'Unknown',
+              duration: (data.duration as number) || 0,
+              uploader: (data.uploader as string) || (data.channel as string) || 'Unknown',
+              // Never trust entry.url for flat-playlist output — build the
+              // canonical watch URL from the id instead.
+              url: `https://www.youtube.com/watch?v=${id}`,
+            });
+          }
+
+          resolve({ success: true, playlistTitle, entries });
+        } catch (parseError) {
+          logger.error('Failed to parse YouTube playlist listing', { error: (parseError as Error).message });
+          resolve({ success: false, error: `Parse error: ${(parseError as Error).message}` });
+        }
+      });
+
+      ytdlp.on('error', (error: NodeJS.ErrnoException) => {
+        resolve({ success: false, error: `yt-dlp error: ${error.message}` });
+      });
+
+      const timeoutId = setTimeout(() => {
+        ytdlp.kill('SIGTERM');
+        setTimeout(() => { if (!ytdlp.killed) ytdlp.kill('SIGKILL'); }, 2000);
+        resolve({ success: false, error: 'Playlist listing timeout' });
+      }, config.playlists.resolveTimeoutMs).unref();
 
       ytdlp.on('close', () => clearTimeout(timeoutId));
       ytdlp.on('error', () => clearTimeout(timeoutId));

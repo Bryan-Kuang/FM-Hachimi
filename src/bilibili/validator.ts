@@ -56,8 +56,13 @@ class UrlValidator {
     if (videoInfo.type === 'SHORT') return url;
 
     const baseUrl = 'https://www.bilibili.com/video/';
-    if (videoInfo.type === 'BV') return `${baseUrl}${videoInfo.id}`;
-    if (videoInfo.type === 'AV') return `${baseUrl}av${videoInfo.id}`;
+    // Preserve the 分P (multipart) page number when present and > 1 so the
+    // rest of the pipeline (extractor, cache keys) can tell parts apart.
+    // p=1 or absent normalizes to the bare URL — same cache key as before.
+    const pMatch = url.match(/[?&]p=(\d+)/);
+    const pSuffix = pMatch && Number(pMatch[1]) > 1 ? `?p=${pMatch[1]}` : '';
+    if (videoInfo.type === 'BV') return `${baseUrl}${videoInfo.id}${pSuffix}`;
+    if (videoInfo.type === 'AV') return `${baseUrl}av${videoInfo.id}${pSuffix}`;
 
     return url;
   }

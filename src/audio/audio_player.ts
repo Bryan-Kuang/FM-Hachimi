@@ -570,8 +570,14 @@ class AudioPlayer {
 
       this.cleanupFFmpegProcess();
 
-      // Re-extract audio URL if stale (never for a local media-cache file).
-      if (this.currentTrack.normalizedUrl && this.currentTrack.isExpired() && !this.currentTrack.cached) {
+      // Re-extract audio URL if stale, or if there's no URL at all yet (never
+      // for a local media-cache file). The second condition is what makes a
+      // "pending" bulk-enqueued track (audioUrl: '', normalizedUrl set,
+      // epoch extractedAt) work — isExpired() alone already covers the epoch
+      // case, but !audioUrl guards any future producer that leaves
+      // extractedAt unset entirely.
+      if (this.currentTrack.normalizedUrl && !this.currentTrack.cached &&
+          (this.currentTrack.isExpired() || !this.currentTrack.audioUrl)) {
         try {
           const refreshExtractor = this.getRefreshExtractor(this.currentTrack);
           if (refreshExtractor) {
@@ -590,6 +596,19 @@ class AudioPlayer {
           }
         } catch (e: any) {
           logger.warn('Failed to refresh audio URL, using cached', { error: e.message });
+        }
+
+        // A pending playlist item (audioUrl still '') that failed to refresh —
+        // or had no extractor configured at all — can't be played. Don't hand
+        // '' to createAudioResource (that would spawn ffmpeg against nothing
+        // and burn a full 3-attempt CDN-retry cycle for what is really a
+        // single failed extraction). Drop it and move on now.
+        if (!this.currentTrack.audioUrl) {
+          logger.warn('Dropping unplayable pending track (refresh failed, no audio URL)', {
+            title: this.currentTrack.title,
+          });
+          this.queue.dropCurrent();
+          return this.skip('ended');
         }
       }
 

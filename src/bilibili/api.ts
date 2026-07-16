@@ -68,6 +68,46 @@ interface SearchHachimiResult {
   error?: string;
 }
 
+interface FavFolderItem {
+  bvid: string;
+  title: string;
+  durationSec: number;
+  author: string;
+  cover: string;
+}
+
+interface FavFolderPage {
+  title: string;
+  mediaCount: number;
+  hasMore: boolean;
+  items: FavFolderItem[];
+}
+
+interface CollectionItem {
+  bvid: string;
+  title: string;
+  durationSec: number;
+  cover: string;
+}
+
+interface CollectionPage {
+  title: string;
+  total: number;
+  items: CollectionItem[];
+}
+
+interface VideoPageEntry {
+  page: number;
+  part: string;
+  durationSec: number;
+  cid: number;
+}
+
+interface VideoPagesResult {
+  title: string;
+  pages: VideoPageEntry[];
+}
+
 class BilibiliAPI {
   private baseURL: string;
   private headers: Record<string, string>;
@@ -677,6 +717,157 @@ class BilibiliAPI {
       });
       throw error;
     }
+  }
+
+  /**
+   * Fetch a single page of a Bilibili favorites folder (收藏夹).
+   * Pagination is the caller's responsibility (see src/playlists/bilibili_playlist_resolver.ts) —
+   * this method only fetches and shapes one page.
+   * @param mediaId - The fid from a favlist/medialist URL
+   * @param pn - Page number (1-indexed)
+   * @param ps - Page size
+   */
+  async getFavFolderPage(mediaId: string, pn: number, ps = 20): Promise<FavFolderPage> {
+    const url = `${this.baseURL}/x/v3/fav/resource/list`;
+    const params = { media_id: mediaId, pn, ps, platform: "web" };
+
+    const response = await axios.get(url, {
+      params,
+      headers: this.headers,
+      timeout: 10000,
+    });
+
+    const code = response.data?.code;
+    if (code === -403 || code === 11010) {
+      throw new Error("BILIBILI_FAV_PRIVATE");
+    }
+    if (code !== 0) {
+      throw new Error(`Failed to get fav folder: ${response.data?.message}`);
+    }
+
+    const data = response.data.data || {};
+    const info = data.info || {};
+    const medias: Array<Record<string, unknown>> = Array.isArray(data.medias) ? data.medias : [];
+
+    const items: FavFolderItem[] = [];
+    for (const media of medias) {
+      const bvid = media.bvid as string | undefined;
+      const type = media.type as number | undefined;
+      const attr = media.attr as number | undefined;
+      if (!bvid || type !== 2 || attr !== 0) continue;
+      items.push({
+        bvid,
+        title: (media.title as string) || "",
+        durationSec: typeof media.duration === "number" ? media.duration : 0,
+        author: ((media.upper as Record<string, unknown> | undefined)?.name as string) || "",
+        cover: (media.cover as string) || "",
+      });
+    }
+
+    return {
+      title: (info.title as string) || "",
+      mediaCount: (info.media_count as number) || 0,
+      hasMore: Boolean(data.has_more),
+      items,
+    };
+  }
+
+  /**
+   * Fetch a single page of a Bilibili collection (合集/系列).
+   * `season` uses the newer seasons_archives_list endpoint; `series` uses the
+   * older series/archives endpoint (no folder title in the response — callers
+   * should fall back to a generic '合集' title).
+   */
+  async getCollectionPage(
+    mid: string,
+    seasonId: string,
+    pageNum: number,
+    listType: 'season' | 'series',
+    ps = 30,
+  ): Promise<CollectionPage> {
+    if (listType === 'series') {
+      const url = `${this.baseURL}/x/series/archives`;
+      const params = { mid, series_id: seasonId, pn: pageNum, ps };
+
+      const response = await axios.get(url, {
+        params,
+        headers: this.headers,
+        timeout: 10000,
+      });
+
+      if (response.data?.code !== 0) {
+        throw new Error(`Failed to get series archives: ${response.data?.message}`);
+      }
+
+      const data = response.data.data || {};
+      const archives: Array<Record<string, unknown>> = Array.isArray(data.archives) ? data.archives : [];
+      const page = data.page || {};
+
+      return {
+        title: "合集",
+        total: (page.total as number) || 0,
+        items: archives.map((a) => ({
+          bvid: (a.bvid as string) || "",
+          title: (a.title as string) || "",
+          durationSec: typeof a.duration === "number" ? a.duration : 0,
+          cover: (a.pic as string) || "",
+        })).filter((item) => item.bvid),
+      };
+    }
+
+    const url = `${this.baseURL}/x/polymer/web-space/seasons_archives_list`;
+    const params = {
+      mid,
+      season_id: seasonId,
+      sort_reverse: false,
+      page_num: pageNum,
+      page_size: ps,
+    };
+
+    const response = await axios.get(url, {
+      params,
+      headers: this.headers,
+      timeout: 10000,
+    });
+
+    if (response.data?.code !== 0) {
+      throw new Error(`Failed to get season archives: ${response.data?.message}`);
+    }
+
+    const data = response.data.data || {};
+    const archives: Array<Record<string, unknown>> = Array.isArray(data.archives) ? data.archives : [];
+    const meta = data.meta || {};
+    const page = data.page || {};
+
+    return {
+      title: (meta.name as string) || "",
+      total: (page.total as number) || (meta.total as number) || 0,
+      items: archives.map((a) => ({
+        bvid: (a.bvid as string) || "",
+        title: (a.title as string) || "",
+        durationSec: typeof a.duration === "number" ? a.duration : 0,
+        cover: (a.pic as string) || "",
+      })).filter((item) => item.bvid),
+    };
+  }
+
+  /**
+   * Get all 分P (multi-part) pages for a single video, reusing the existing
+   * /x/web-interface/view endpoint (getVideoDetails).
+   */
+  async getVideoPages(bvid: string): Promise<VideoPagesResult> {
+    const data = (await this.getVideoDetails(bvid)) as Record<string, unknown>;
+    const pages: Array<Record<string, unknown>> = Array.isArray(data?.pages) ? data.pages as Array<Record<string, unknown>> : [];
+
+    return {
+      title: (data?.title as string) || "",
+      pages: pages.map((p) => ({
+        page: (p.page as number) || 0,
+        part: (p.part as string) || "",
+        durationSec: typeof p.duration === "number" ? p.duration : 0,
+        cid: (p.cid as number) || 0,
+      })),
+    };
   }
 }
 
