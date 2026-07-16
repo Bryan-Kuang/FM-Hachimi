@@ -57,6 +57,7 @@ class InteractionBuilder {
       options: {
         getString: jest.fn().mockImplementation((k) => this._options[k]),
         getInteger: jest.fn().mockImplementation((k) => this._options[k]),
+        getAttachment: jest.fn().mockImplementation((k) => this._options[k] ?? null),
       },
     };
     return interaction;

@@ -11,6 +11,14 @@ jest.mock("discord.js", () => ({
         });
         return builder;
       }),
+      addAttachmentOption: jest.fn().mockImplementation((cb) => {
+        cb({
+          setName: jest.fn().mockReturnThis(),
+          setDescription: jest.fn().mockReturnThis(),
+          setRequired: jest.fn().mockReturnThis(),
+        });
+        return builder;
+      }),
     };
     return builder;
   }),
