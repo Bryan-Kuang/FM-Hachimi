@@ -67,6 +67,10 @@ export function validateEnv(env: NodeJS.ProcessEnv = process.env): EnvValidation
     "BILIBILI_SEARCH_TIMEOUT",
     "BILIBILI_PREEXTRACT_CONCURRENCY",
     "BILIBILI_PREEXTRACT_MAX_PER_CARD_SET",
+    "PLAYLIST_MAX_ITEMS",
+    "PLAYLIST_PROGRESS_INTERVAL_MS",
+    "PLAYLIST_RESOLVE_TIMEOUT_MS",
+    "PLAYLIST_MULTIPART_DETECT_TIMEOUT_MS",
   ];
   for (const key of intVars) {
     if (!isPositiveInt(env[key])) {
@@ -83,6 +87,14 @@ export function validateEnv(env: NodeJS.ProcessEnv = process.env): EnvValidation
 
   if (env.LOG_LEVEL && !["error", "warn", "info", "debug", "verbose", "silly"].includes(env.LOG_LEVEL)) {
     warnings.push(`Unrecognized LOG_LEVEL "${env.LOG_LEVEL}"; Winston will fall back to info`);
+  }
+
+  const hasSpotifyId = isNonEmptyString(env.SPOTIFY_CLIENT_ID);
+  const hasSpotifySecret = isNonEmptyString(env.SPOTIFY_CLIENT_SECRET);
+  if (hasSpotifyId !== hasSpotifySecret) {
+    warnings.push(
+      "Only one of SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET is set; Spotify support stays disabled until both are provided"
+    );
   }
 
   if (errors.length > 0) {
