@@ -25,6 +25,10 @@ jest.mock("discord.js", () => ({
       if (cb) cb(optionBuilder);
       return builder;
     });
+    builder.addAttachmentOption = jest.fn().mockImplementation((cb) => {
+      if (cb) cb(optionBuilder);
+      return builder;
+    });
     return builder;
   }),
   EmbedBuilder: jest.fn().mockImplementation(() => {

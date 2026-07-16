@@ -13,7 +13,8 @@ import BilibiliUrls = require('../../search/bilibili_urls');
 import YouTubeUrls = require('../../search/youtube_urls');
 import PlaybackCoordinator = require('../../playback/playback_coordinator');
 import { createInteractionStageReporter, createThrottledProgressReporter } from '../../playback/stage_feedback';
-import { playPlaylist } from '../../playback/playlist_coordinator';
+import { playPlaylist, playAttachment } from '../../playback/playlist_coordinator';
+import { validateAttachment, buildAttachmentTrackData, type AttachmentInput } from '../../playback/attachment_track';
 import * as logger from '../../services/logger_service';
 import config = require('../../config/config');
 import SpotifyClient = require('../../spotify/client');
@@ -107,6 +108,56 @@ async function runPlaylistFlow(
   }
 }
 
+/**
+ * Shared validate → build → play → reply flow for both the `file` slash-
+ * command option and a pasted Discord CDN link (route.kind === 'attachment').
+ * No extraction step — the attachment IS the audio URL — so this only
+ * validates type/size, builds the finished track, and hands it to
+ * playAttachment.
+ */
+async function runAttachmentFlow(
+  interaction: ChatInputCommandInteraction<'cached'>,
+  playbackService: any,
+  input: AttachmentInput,
+): Promise<void> {
+  const validation = validateAttachment(input, config.attachments.maxBytes);
+  if (!validation.ok) {
+    if (validation.reason === 'size') {
+      const maxMb = Math.floor(config.attachments.maxBytes / 1024 / 1024);
+      await interaction.editReply({ content: `[!] 文件过大（上限 ${maxMb}MB）` });
+    } else {
+      await interaction.editReply({ content: '[!] 不支持的文件类型（支持 mp3/m4a/ogg/wav/flac/webm）' });
+    }
+    return;
+  }
+
+  const trackData = buildAttachmentTrackData(input);
+  const stageReporter = createInteractionStageReporter(interaction, 'Attachment');
+  const result = await playAttachment({
+    interaction,
+    playerService: playbackService,
+    data: trackData,
+    onStage: stageReporter,
+  });
+  await stageReporter.finish();
+
+  if (!result.success) {
+    if (result.error === 'RADIO_ACTIVE') {
+      await interaction.editReply({ content: '[!] 电台模式运行中，无法添加上传的文件。请先使用 /radio 关闭电台。' });
+    } else {
+      await interaction.editReply({ content: result.error || '[!] 添加失败' });
+    }
+    return;
+  }
+
+  const trackTitle = (result.track as { title?: string } | undefined)?.title;
+  await interaction.editReply({ content: `>> 已添加: ${trackTitle || trackData.title}` });
+  logger.info('Play command completed (attachment)', {
+    title: trackTitle || trackData.title,
+    user: interaction.user.username,
+  });
+}
+
 /** Whether route.kind represents a bulk playlist source (Task 2.9). */
 function isPlaylistRoute(route: RouteResult): boolean {
   if (route.kind === 'youtube-playlist' || route.kind === 'bilibili-fav' || route.kind === 'bilibili-collection') {
@@ -123,7 +174,13 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
       option
         .setName('query')
         .setDescription('视频链接或搜索关键词（支持 Bilibili / YouTube）')
-        .setRequired(true),
+        .setRequired(false),
+    )
+    .addAttachmentOption((option) =>
+      option
+        .setName('file')
+        .setDescription('音频文件 (mp3/m4a/ogg/wav/flac/webm)')
+        .setRequired(false),
     ),
 
   cooldown: 5,
@@ -131,6 +188,10 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
   async execute(interaction: ChatInputCommandInteraction<'cached'>): Promise<void> {
     try {
       const query  = interaction.options.getString('query') || interaction.options.getString('url');
+      // Guarded with `?.` — several lightweight per-file test mocks of
+      // `interaction.options` only implement getString/getInteger; real
+      // discord.js interactions always have getAttachment.
+      const attachment = interaction.options.getAttachment?.('file') ?? null;
       const user   = interaction.user;
       const member = interaction.member;
 
@@ -148,9 +209,35 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         return;
       }
 
+      if (!query && !attachment) {
+        await interaction.reply({
+          content: '请提供链接/关键词，或附加一个音频文件',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+      // ─── Uploaded audio file (attachment wins when both query and file
+      // are given) ────────────────────────────────────────────────────────
+      if (attachment) {
+        await runAttachmentFlow(interaction, playbackService, {
+          url: attachment.url,
+          name: attachment.name,
+          contentType: attachment.contentType,
+          size: attachment.size,
+        });
+        return;
+      }
+
       const route = routeQuery(query as string);
+
+      // ─── Pasted Discord CDN attachment link ────────────────────────────────
+      if (route.kind === 'attachment') {
+        await runAttachmentFlow(interaction, playbackService, { url: route.raw });
+        return;
+      }
 
       // ─── YouTube URL ────────────────────────────────────────────────────────
       // kind check (not just platform) — 'youtube-playlist' also has

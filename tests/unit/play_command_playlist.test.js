@@ -14,6 +14,10 @@ jest.mock("discord.js", () => ({
       if (cb) cb({ setName: jest.fn().mockReturnThis(), setDescription: jest.fn().mockReturnThis(), setRequired: jest.fn().mockReturnThis() });
       return builder;
     });
+    builder.addAttachmentOption = jest.fn().mockImplementation((cb) => {
+      if (cb) cb({ setName: jest.fn().mockReturnThis(), setDescription: jest.fn().mockReturnThis(), setRequired: jest.fn().mockReturnThis() });
+      return builder;
+    });
     return builder;
   }),
   MessageFlags: { Ephemeral: 64 },
