@@ -319,9 +319,20 @@ class BilibiliExtractor {
     options: ExtractionOptions = {},
   ): Promise<ExtractedAudio> {
     let fallbackReason: string | undefined;
+    // The native extractor's public API (`extract(input)`) is single-video
+    // only — for a 分P (multipart) URL it silently returns page 1's audio
+    // regardless of the requested `?p=N`. Bypass it entirely for multipart
+    // URLs and fall straight to yt-dlp, which does honor `?p=`.
+    const isMultipart = /[?&]p=\d+/.test(normalizedUrl);
 
     try {
-      if (config.bilibili.nativeExtractorEnabled) {
+      if (isMultipart) {
+        fallbackReason = 'multipart';
+        logger.info("Skipping native Bilibili extractor for multipart (分P) URL", {
+          url: normalizedUrl,
+        });
+        emitPlaybackStage(options.onStage, 'fallback_to_ytdlp', { reason: fallbackReason });
+      } else if (config.bilibili.nativeExtractorEnabled) {
         try {
           const nativePayload = await this.nativeExtractor.extract(normalizedUrl);
           const result = this.createExtractedAudioFromNativePayload(url, normalizedUrl, nativePayload);
@@ -463,6 +474,9 @@ class BilibiliExtractor {
         "--no-download",
         "--no-check-certificate",
         "--no-warnings",
+        // Defensive: a bare 分P URL (?p=N) should extract exactly that part,
+        // never expand into the whole multi-part upload as a playlist.
+        "--no-playlist",
         "--user-agent", this.userAgent,
         ...this._getCookieArgs(),
         normalizedUrl,
@@ -759,7 +773,15 @@ class BilibiliExtractor {
    */
   async getAudioStreamUrl(url: string): Promise<string> {
     const normalizedUrl = UrlValidator.normalizeUrl(url) || url;
-    if (config.bilibili.nativeExtractorEnabled) {
+    // Same page-1-only limitation as extractAudioUncached — never let the
+    // native extractor refresh a multipart URL, or every part would keep
+    // returning part 1's audio forever.
+    const isMultipart = /[?&]p=\d+/.test(normalizedUrl);
+    if (isMultipart) {
+      logger.info("Skipping native Bilibili stream URL refresh for multipart (分P) URL", {
+        url: normalizedUrl,
+      });
+    } else if (config.bilibili.nativeExtractorEnabled) {
       try {
         const nativePayload = await this.nativeExtractor.extract(normalizedUrl);
         logger.info("Bilibili native stream URL refresh completed", {
@@ -787,6 +809,8 @@ class BilibiliExtractor {
         "bestaudio/best",
         "--no-check-certificate",
         "--no-warnings",
+        // Defensive: never let a bare 分P URL expand into a full playlist.
+        "--no-playlist",
         "--user-agent",
         this.userAgent,
         ...this._getCookieArgs(),

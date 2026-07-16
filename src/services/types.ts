@@ -6,7 +6,7 @@
  */
 
 import type Track from '../models/track';
-import type { GuildId, ChannelId, MessageId } from '../types';
+import type { GuildId, ChannelId, MessageId, StreamHeaders } from '../types';
 import type { PlaybackStageReporter } from '../playback/stage_feedback';
 
 // ─── AudioPlayer state snapshot (returned by AudioPlayer.getState()) ──────
@@ -41,6 +41,8 @@ export interface AudioPlayerLike {
   getState(): AudioPlayerState;
   playNext(): Promise<boolean>;
   playCurrentTrack(): Promise<boolean>;
+  /** Jump to a specific queue index and start playback there (bulk-enqueue seam — avoids the newest-track quirk in playNext()). */
+  playTrack(index: number): Promise<boolean>;
   addToQueue(data: ExtractedTrackData, requestedBy: string): Track;
   removeFromQueue(index: number): boolean;
   clearQueue(): void;
@@ -148,6 +150,10 @@ export interface ExtractedTrackData {
   videoCodec?: string;
   /** True when audioUrl is a local media-cache file. */
   cached?: boolean;
+  /** Platform-specific headers for FFmpeg to send when fetching the audio stream. */
+  streamHeaders?: StreamHeaders;
+  thumbnail?: string | null;
+  author?: string;
 }
 
 export interface SearchResultResponse {

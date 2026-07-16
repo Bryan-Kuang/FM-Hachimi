@@ -185,6 +185,29 @@ class PlayerService extends EventEmitter {
     }
   }
 
+  /**
+   * Jump to a specific queue index and start playback there. Used by the
+   * bulk-enqueue playlist path (playlist_coordinator.ts) instead of play() —
+   * playNext()'s "cursor cleared, queue non-empty → resume from the newest
+   * item" quirk would otherwise start a freshly-appended playlist at its
+   * LAST item instead of its first.
+   */
+  async playTrackAt(guildId: GuildId, index: number): Promise<boolean> {
+    try {
+      metrics.counter('player_play_total', 'Tracks started').inc({ guildId });
+      const player = this.audioManager.getPlayer(guildId);
+      if (!player) return false;
+      const success = await player.playTrack(index);
+      const state   = player.getState();
+      this._emitState(guildId, state, state.currentTrack);
+      return success;
+    } catch (e: unknown) {
+      metrics.counter('player_errors_total', 'Player action errors').inc({ action: 'playTrackAt' });
+      logger.error('playTrackAt action failed', { guildId, index, error: (e as Error).message });
+      return false;
+    }
+  }
+
   pause(guildId: GuildId): boolean {
     try {
       metrics.counter('player_pause_total', 'Pause actions').inc({ guildId });

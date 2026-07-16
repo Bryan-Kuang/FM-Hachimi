@@ -5,18 +5,24 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { SlashCommandBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
-import { routeQuery } from '../../utils/url_router';
+import { routeQuery, type RouteResult } from '../../utils/url_router';
 import SearchResultsView = require('../../ui/search_results_view');
 import SearchService = require('../../search/search_service');
 import SearchSessionStore = require('../../search/search_session_store');
 import BilibiliUrls = require('../../search/bilibili_urls');
 import YouTubeUrls = require('../../search/youtube_urls');
 import PlaybackCoordinator = require('../../playback/playback_coordinator');
-import { createInteractionStageReporter } from '../../playback/stage_feedback';
+import { createInteractionStageReporter, createThrottledProgressReporter } from '../../playback/stage_feedback';
+import { playPlaylist } from '../../playback/playlist_coordinator';
 import * as logger from '../../services/logger_service';
 import config = require('../../config/config');
 import SpotifyClient = require('../../spotify/client');
 import { findYouTubeMatch } from '../../spotify/resolver';
+import BilibiliApi = require('../../bilibili/api');
+import BilibiliValidator = require('../../bilibili/validator');
+import { resolvePlaylist } from '../../playlists';
+import { resolveBilibiliMultipart } from '../../playlists/bilibili_playlist_resolver';
+import type { ResolvedPlaylist, PlaylistProgress } from '../../playlists/types';
 
 // Lazily constructed on first Spotify link — mirrors the
 // `require('../../bilibili/api')` singleton-on-demand precedent below.
@@ -32,6 +38,81 @@ function getSpotifyClient(): SpotifyClient {
     });
   }
   return spotifyClient;
+}
+
+/** Rejects with `timeoutError` if `promise` doesn't settle within `ms`. */
+function withTimeout<T>(promise: Promise<T>, ms: number, timeoutError: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(timeoutError)), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error as Error); },
+    );
+  });
+}
+
+/**
+ * Shared resolve → bulk-enqueue → report flow for every playlist source
+ * (YouTube playlist, Bilibili fav/collection/multipart, Spotify album/
+ * playlist). `resolve` does the source-specific fetch (and may itself throw,
+ * e.g. BILIBILI_FAV_PRIVATE) while everything after that — progress
+ * throttling, queueing via playPlaylist, and the final reply — is identical
+ * across sources.
+ */
+async function runPlaylistFlow(
+  interaction: ChatInputCommandInteraction<'cached'>,
+  playbackService: any,
+  resolve: (onProgress: PlaylistProgress) => Promise<ResolvedPlaylist>,
+): Promise<void> {
+  const progress = createThrottledProgressReporter(interaction, config.playlists.progressIntervalMs);
+
+  try {
+    const playlist = await resolve((fetched, total) => {
+      progress.report(`正在解析歌单… 已获取 ${fetched}${total ? '/' + total : ''}`);
+    });
+
+    const result = await playPlaylist({
+      interaction,
+      playerService: playbackService,
+      playlist,
+      onProgress: (queued, total) => {
+        progress.report(`已加入队列 ${queued}/${total}…`);
+      },
+    });
+
+    await progress.finish();
+
+    if (result.success) {
+      let content = `>> 歌单「${result.title}」已加入 ${result.queued} 首`;
+      if (result.truncated) {
+        content += `（共 ${result.totalCount} 首，已截断至 ${config.playlists.maxItems}）`;
+      }
+      await interaction.editReply({ content });
+      return;
+    }
+
+    if (result.error === 'RADIO_ACTIVE') {
+      await interaction.editReply({ content: '[!] 电台模式运行中，歌单会被电台覆盖。请先使用 /radio 关闭电台再导入歌单。' });
+    } else {
+      await interaction.editReply({ content: `[!] 歌单解析失败: ${(result.error || '').substring(0, 100)}` });
+    }
+  } catch (err: unknown) {
+    await progress.finish();
+    const msg = (err as Error).message || '';
+    if (msg === 'BILIBILI_FAV_PRIVATE') {
+      await interaction.editReply({ content: '[!] 收藏夹不是公开的或不存在' });
+    } else {
+      await interaction.editReply({ content: `[!] 歌单解析失败: ${msg.substring(0, 100)}` });
+    }
+  }
+}
+
+/** Whether route.kind represents a bulk playlist source (Task 2.9). */
+function isPlaylistRoute(route: RouteResult): boolean {
+  if (route.kind === 'youtube-playlist' || route.kind === 'bilibili-fav' || route.kind === 'bilibili-collection') {
+    return true;
+  }
+  return route.kind === 'spotify' && Boolean(route.spotify) && route.spotify!.type !== 'track';
 }
 
 const createPlayCommand = (playbackService: any, _queueService: any) => ({
@@ -72,7 +153,11 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
       const route = routeQuery(query as string);
 
       // ─── YouTube URL ────────────────────────────────────────────────────────
-      if (route.platform === 'youtube' && route.isUrl) {
+      // kind check (not just platform) — 'youtube-playlist' also has
+      // platform:'youtube', isUrl:true and must fall through to the
+      // playlist branch further down instead of being extracted as a
+      // single (invalid) video.
+      if (route.kind === 'youtube-video') {
         const ytExtractor = playbackService.getYouTubeExtractor();
         if (!ytExtractor) {
           await interaction.editReply({ content: '[!] YouTube support is not available' });
@@ -121,8 +206,51 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
       }
 
       // ─── Bilibili URL ───────────────────────────────────────────────────────
-      if (route.platform === 'bilibili' && route.isUrl) {
+      // kind check (not just platform) — 'bilibili-fav'/'bilibili-collection'
+      // also have platform:'bilibili', isUrl:true and must fall through to
+      // the playlist branch further down.
+      if (route.kind === 'bilibili-video') {
         const url = route.normalizedUrl || route.raw;
+
+        // 分P (multipart) detection: a bare BV URL (no explicit ?p=) whose
+        // video actually has more than one part enqueues every part instead
+        // of just page 1. Skipped while radio is enabled — the existing
+        // single-URL playUrl() path already interjects page 1 into the
+        // rotation, and a bulk enqueue would be silently discarded on the
+        // next radio advance anyway (RadioService resets the queue).
+        // Every failure mode here (bad id parse, API error, timeout) falls
+        // through to the normal single-video path unchanged — detection is
+        // strictly best-effort and must never block ordinary playback.
+        try {
+          const videoId = BilibiliValidator.extractVideoId(route.raw);
+          const hasExplicitPage = /[?&]p=\d+/.test(route.raw);
+          const radioEnabled = Boolean(playbackService.getRadioService?.()?.isEnabled(interaction.guild.id));
+
+          if (videoId?.type === 'BV' && !hasExplicitPage && !radioEnabled) {
+            const detected = await withTimeout(
+              BilibiliApi.getVideoPages(videoId.id),
+              config.playlists.multipartDetectTimeoutMs,
+              'multipart detection timeout',
+            );
+            if (detected.pages.length > 1) {
+              await runPlaylistFlow(interaction, playbackService, async (onProgress) => {
+                onProgress(detected.pages.length, detected.pages.length);
+                return resolveBilibiliMultipart({
+                  bvid: videoId.id,
+                  api: BilibiliApi,
+                  maxItems: config.playlists.maxItems,
+                });
+              });
+              return;
+            }
+          }
+        } catch (detectError: unknown) {
+          logger.debug('Bilibili multipart detection skipped', {
+            url,
+            error: (detectError as Error).message,
+          });
+        }
+
         const stageReporter = createInteractionStageReporter(interaction, 'Bilibili');
         const result = await PlaybackCoordinator.playUrl('bilibili', {
           interaction,
@@ -147,8 +275,10 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         return;
       }
 
-      // ─── Spotify link ───────────────────────────────────────────────────────
-      if (route.kind === 'spotify' && route.spotify) {
+      // ─── Spotify track link ─────────────────────────────────────────────────
+      // Album/playlist Spotify routes (route.spotify.type !== 'track') fall
+      // through to the playlist branch below instead (Task 2.9).
+      if (route.kind === 'spotify' && route.spotify && route.spotify.type === 'track') {
         if (!config.spotify.enabled) {
           await interaction.editReply({ content: '[!] Spotify 支持未配置（缺少 SPOTIFY_CLIENT_ID/SECRET）' });
           return;
@@ -157,13 +287,6 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         const ytExtractorForSpotify = playbackService.getYouTubeExtractor();
         if (!ytExtractorForSpotify) {
           await interaction.editReply({ content: '[!] YouTube support is not available' });
-          return;
-        }
-
-        if (route.spotify.type !== 'track') {
-          // Album/playlist ingestion lands in Phase 2 (Task 2.9), which
-          // replaces this stub.
-          await interaction.editReply({ content: '专辑/歌单支持即将上线，请先粘贴单曲链接' });
           return;
         }
 
@@ -235,6 +358,34 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
           spotifyId: route.spotify.id,
           url: match.url,
           title: trackMeta.title,
+          user: user.username,
+        });
+        return;
+      }
+
+      // ─── Playlist ingestion (YouTube playlist / Bilibili fav / Bilibili
+      // collection / Spotify album & playlist) ────────────────────────────────
+      // Replaces the Task 1.3 Spotify album/playlist stub.
+      if (isPlaylistRoute(route)) {
+        if (route.kind === 'youtube-playlist' && !playbackService.getYouTubeExtractor()) {
+          await interaction.editReply({ content: '[!] YouTube support is not available' });
+          return;
+        }
+        if (route.kind === 'spotify' && !config.spotify.enabled) {
+          await interaction.editReply({ content: '[!] Spotify 支持未配置（缺少 SPOTIFY_CLIENT_ID/SECRET）' });
+          return;
+        }
+
+        await runPlaylistFlow(interaction, playbackService, (onProgress) => resolvePlaylist(route, {
+          youtubeExtractor: playbackService.getYouTubeExtractor(),
+          bilibiliApi: BilibiliApi,
+          spotifyClient: config.spotify.enabled ? getSpotifyClient() : null,
+          maxItems: config.playlists.maxItems,
+          onProgress,
+        }));
+        logger.info('Play command completed (playlist)', {
+          query,
+          kind: route.kind,
           user: user.username,
         });
         return;

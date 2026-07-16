@@ -116,8 +116,62 @@ function createInteractionStageReporter(
   return reporter;
 }
 
+// ─── Throttled progress reporter ────────────────────────────────────────
+// Used by the bulk-enqueue playlist path (Task 2.7/2.9) to report resolve
+// and enqueue progress without spamming Discord's edit rate limit — an
+// intermediate report arriving less than `minIntervalMs` after the last one
+// sent is dropped (only the final `finish()` guarantees delivery of the
+// last queued content via whatever report() call closes out the chain).
+
+export interface ThrottledProgressReporter {
+  report(content: string): void;
+  finish(): Promise<void>;
+}
+
+function createThrottledProgressReporter(
+  interaction: InteractionReplyLike,
+  minIntervalMs: number,
+): ThrottledProgressReporter {
+  let closed = false;
+  let pending = Promise.resolve();
+  let lastSentAt = 0;
+
+  // report() already refuses to schedule new work once closed — this chain
+  // link doesn't re-check `closed` before sending, so a report() that
+  // slipped in just before finish() is still delivered rather than raced
+  // against the `closed = true` assignment finish() makes synchronously.
+  const send = (content: string): void => {
+    pending = pending
+      .then(() => interaction.editReply({ content }))
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        logger.debug('Failed to edit throttled progress reply', {
+          error: (error as Error).message,
+        });
+      });
+  };
+
+  return {
+    report(content: string): void {
+      if (closed) return;
+      const now = Date.now();
+      if (now - lastSentAt < minIntervalMs) return;
+      // Set synchronously (not inside the async chain) so two report() calls
+      // arriving back-to-back before the microtask queue flushes still
+      // throttle correctly against each other.
+      lastSentAt = now;
+      send(content);
+    },
+    async finish(): Promise<void> {
+      closed = true;
+      await pending;
+    },
+  };
+}
+
 export {
   createInteractionStageReporter,
+  createThrottledProgressReporter,
   emitPlaybackStage,
   type InteractionStageReporter,
   type PlaybackStage,
