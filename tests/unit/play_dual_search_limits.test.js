@@ -52,8 +52,17 @@ jest.mock("../../src/ui/search_results_view", () => ({
   totalPagesFor: jest.fn().mockReturnValue(3),
 }));
 
+// Spotify search is only exercised when config.spotify.enabled — most tests
+// below run with it disabled (the default test env has no client id/secret),
+// so this mock only matters for the dedicated "Spotify enabled" tests.
+const mockSearchTracks = jest.fn().mockResolvedValue([]);
+jest.mock("../../src/spotify/client", () => jest.fn().mockImplementation(() => ({
+  searchTracks: mockSearchTracks,
+})));
+
 const bilibiliApi = require("../../src/bilibili/api");
 const SearchResultsView = require("../../src/ui/search_results_view");
+const config = require("../../src/config/config");
 const createPlayCommand = require("../../src/bot/commands/play");
 
 function makeInteraction(query = "hachimi") {
@@ -77,12 +86,21 @@ function makeInteraction(query = "hachimi") {
   };
 }
 
-describe("/play dual-platform keyword search limits", () => {
+describe("/play tri-platform keyword search limits", () => {
+  let originalSpotifyEnabled;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    mockSearchTracks.mockResolvedValue([]);
+    originalSpotifyEnabled = config.spotify.enabled;
+    config.spotify.enabled = false;
   });
 
-  test("requests 13 results from each platform and prewarms only the first page", async () => {
+  afterEach(() => {
+    config.spotify.enabled = originalSpotifyEnabled;
+  });
+
+  test("requests config.search.limitPerPlatform results from Bilibili and YouTube and prewarms only the first page", async () => {
     const biliResults = Array.from({ length: 20 }, (_, index) => ({
       title: `Bili ${index}`,
       bvid: `BV${index}`,
@@ -110,19 +128,20 @@ describe("/play dual-platform keyword search limits", () => {
 
     await command.execute(makeInteraction());
 
-    expect(bilibiliApi.searchVideos).toHaveBeenCalledWith("hachimi", 1, 13);
-    expect(ytExtractor.searchVideos).toHaveBeenCalledWith("hachimi", 13);
+    expect(bilibiliApi.searchVideos).toHaveBeenCalledWith("hachimi", 1, config.search.limitPerPlatform);
+    expect(ytExtractor.searchVideos).toHaveBeenCalledWith("hachimi", config.search.limitPerPlatform);
+    expect(mockSearchTracks).not.toHaveBeenCalled();
 
     const [biliDisplayed] = SearchResultsView.createSessionEntries.mock.calls[0];
     const [ytDisplayed] = SearchResultsView.createSessionEntries.mock.calls[1];
+    const [spotifyDisplayed, spotifyPlatformArg] = SearchResultsView.createSessionEntries.mock.calls[2];
     expect(biliDisplayed[0]).toEqual(expect.objectContaining({ title: "Bili 0" }));
     expect(ytDisplayed[0]).toEqual(expect.objectContaining({ title: "YouTube 0" }));
-    expect(biliDisplayed).toHaveLength(13);
+    expect(biliDisplayed).toHaveLength(Math.min(20, config.search.limitPerPlatform));
     expect(ytDisplayed).toHaveLength(8);
-
-    // YouTube entries are appended after the 13 Bilibili entries, so the
-    // index fallback offset must skip them.
-    expect(SearchResultsView.createSessionEntries.mock.calls[1][2]).toBe(13);
+    // Spotify is disabled, so its arm always contributes an empty list.
+    expect(spotifyPlatformArg).toBe("spotify");
+    expect(spotifyDisplayed).toHaveLength(0);
 
     expect(playbackService.prewarmBilibiliUrls).toHaveBeenCalledWith(
       expect.arrayContaining([
@@ -148,6 +167,81 @@ describe("/play dual-platform keyword search limits", () => {
       }),
     );
     expect(playbackService.prewarmYouTubeUrls.mock.calls[0][0]).toHaveLength(5);
+  });
+
+  test("Spotify disabled: search copy omits Spotify and no Spotify entries are created", async () => {
+    bilibiliApi.searchVideos.mockResolvedValue([]);
+    const ytExtractor = { searchVideos: jest.fn().mockResolvedValue({ success: true, results: [] }) };
+    const playbackService = {
+      getYouTubeExtractor: jest.fn().mockReturnValue(ytExtractor),
+      prewarmBilibiliUrls: jest.fn(),
+      prewarmYouTubeUrls: jest.fn(),
+    };
+    const command = createPlayCommand(playbackService, {});
+    const interaction = makeInteraction();
+
+    await command.execute(interaction);
+
+    expect(mockSearchTracks).not.toHaveBeenCalled();
+    expect(interaction.editReply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("Bilibili & YouTube") }),
+    );
+    expect(interaction.editReply).not.toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("Spotify") }),
+    );
+  });
+
+  test("Spotify enabled: searches all three platforms and mentions Spotify in the searching copy", async () => {
+    config.spotify.enabled = true;
+    const spotifyResults = [
+      { id: "spot1", title: "Spot Track", artists: ["Spot Artist"], durationSec: 200 },
+    ];
+    mockSearchTracks.mockResolvedValue(spotifyResults);
+
+    bilibiliApi.searchVideos.mockResolvedValue([]);
+    const ytExtractor = { searchVideos: jest.fn().mockResolvedValue({ success: true, results: [] }) };
+    const playbackService = {
+      getYouTubeExtractor: jest.fn().mockReturnValue(ytExtractor),
+      prewarmBilibiliUrls: jest.fn(),
+      prewarmYouTubeUrls: jest.fn(),
+    };
+    const command = createPlayCommand(playbackService, {});
+    const interaction = makeInteraction();
+
+    await command.execute(interaction);
+
+    expect(mockSearchTracks).toHaveBeenCalledWith("hachimi", config.search.limitPerPlatform);
+    expect(interaction.editReply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("Spotify") }),
+    );
+
+    const [spotifyDisplayed, spotifyPlatformArg] = SearchResultsView.createSessionEntries.mock.calls[2];
+    expect(spotifyPlatformArg).toBe("spotify");
+    expect(spotifyDisplayed).toEqual(spotifyResults);
+  });
+
+  test("Spotify search failure falls back to Bilibili + YouTube results (Promise.allSettled)", async () => {
+    config.spotify.enabled = true;
+    mockSearchTracks.mockRejectedValue(new Error("spotify down"));
+
+    bilibiliApi.searchVideos.mockResolvedValue([
+      { title: "Bili only", bvid: "BVonly", author: "Uploader", duration: 60 },
+    ]);
+    const ytExtractor = { searchVideos: jest.fn().mockResolvedValue({ success: true, results: [] }) };
+    const playbackService = {
+      getYouTubeExtractor: jest.fn().mockReturnValue(ytExtractor),
+      prewarmBilibiliUrls: jest.fn(),
+      prewarmYouTubeUrls: jest.fn(),
+    };
+    const command = createPlayCommand(playbackService, {});
+    const interaction = makeInteraction();
+
+    await command.execute(interaction);
+
+    const [biliDisplayed] = SearchResultsView.createSessionEntries.mock.calls[0];
+    const [spotifyDisplayed] = SearchResultsView.createSessionEntries.mock.calls[2];
+    expect(biliDisplayed).toHaveLength(1);
+    expect(spotifyDisplayed).toHaveLength(0);
   });
 
   test("promotes exact title matches within the returned results", async () => {

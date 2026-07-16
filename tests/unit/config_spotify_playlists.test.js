@@ -64,6 +64,24 @@ describe("Spotify + playlist config", () => {
     });
   });
 
+  describe("search", () => {
+    test("defaults to 10 results per platform", () => {
+      delete process.env.SEARCH_LIMIT_PER_PLATFORM;
+
+      const config = require("../../src/config/config");
+
+      expect(config.search.limitPerPlatform).toBe(10);
+    });
+
+    test("SEARCH_LIMIT_PER_PLATFORM overrides the default", () => {
+      process.env.SEARCH_LIMIT_PER_PLATFORM = "5";
+
+      const config = require("../../src/config/config");
+
+      expect(config.search.limitPerPlatform).toBe(5);
+    });
+  });
+
   describe("playlists", () => {
     test("defaults", () => {
       delete process.env.PLAYLIST_MAX_ITEMS;
