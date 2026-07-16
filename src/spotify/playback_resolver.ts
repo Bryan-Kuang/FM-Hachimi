@@ -2,26 +2,33 @@
  * Spotify playback resolution seam.
  *
  * Spotify search results/selections don't carry a directly playable URL, so
- * every consumer (the tri-platform search select handler today; Project B's
- * direct-extraction path later) goes through this single function to turn a
- * chosen track into something the playback pipeline can use.
+ * every consumer (the tri-platform search select handler, the pasted-link
+ * branch in play.ts) goes through this single function to turn a chosen
+ * track into something the playback pipeline can use.
  *
- * Project A implementation: always resolves via a YouTube search match
- * (`findYouTubeMatch`) — the same fallback PR #142 already uses for pasted
- * Spotify track links. Project B swaps this file's internals to try direct
- * audio extraction (librespot sidecar) first, falling back to this same
- * YouTube-match behavior on any failure — the public signature and the
- * `kind: 'youtube-url'` variant are deliberately kept stable so that swap
- * doesn't ripple into callers.
+ * Project B implementation: direct audio extraction (a librespot-family
+ * sidecar — see spotify/direct_extractor.ts) is tried first when configured;
+ * on ANY failure (not logged in, sidecar crash, timeout, no output file) it
+ * falls back to the Project A behavior — a YouTube search match
+ * (`findYouTubeMatch`), same as PR #142 always did. `null` only when *both*
+ * paths fail (or produce no result).
+ *
+ * Radio rule: while radio is enabled for the guild, direct extraction is
+ * skipped entirely and resolution goes straight to the YouTube-match path.
+ * Radio's `playNow()` only knows how to (re-)extract from a URL — it can't
+ * accept an already-built local-file track (`playAttachment`, which a
+ * `kind: 'direct'` target would otherwise go through, itself refuses outright
+ * while radio is enabled — see playlist_coordinator.ts). The resolver takes
+ * the `radioActive` flag rather than leaving this to callers so a radio
+ * guild never pays for a direct-extraction fetch it can't use.
  */
 
 import { findYouTubeMatch } from './resolver';
+import * as logger from '../services/logger_service';
 
-export interface SpotifyPlaybackTarget {
-  kind: 'youtube-url';
-  url: string;
-  title: string;
-}
+export type SpotifyPlaybackTarget =
+  | { kind: 'youtube-url'; url: string; title: string }
+  | { kind: 'direct'; data: SpotifyDirectExtractedTrackLike };
 
 interface SpotifyTrackMetaLike {
   id: string;
@@ -39,11 +46,29 @@ interface YouTubeExtractorLike {
   searchVideos(keyword: string, limit: number): Promise<YouTubeSearchResponseLike>;
 }
 
-interface ResolveSpotifyPlaybackDeps {
-  youtubeExtractor: unknown;
+/** Shape of SpotifyDirectExtractor.extractAudio's resolved value — kept structural to avoid an import cycle. */
+interface SpotifyDirectExtractedTrackLike {
+  title: string;
+  audioUrl: string;
+  duration: number;
+  cached: true;
+  extractedAt: string;
 }
 
-export async function resolveSpotifyPlayback(
+interface SpotifyDirectExtractorLike {
+  isConfigured(): boolean;
+  extractAudio(trackId: string, meta: { title: string; durationSec?: number }): Promise<SpotifyDirectExtractedTrackLike>;
+}
+
+interface ResolveSpotifyPlaybackDeps {
+  youtubeExtractor: unknown;
+  /** Project B's sidecar-backed extractor. Absent/unconfigured → straight to YouTube match. */
+  directExtractor?: SpotifyDirectExtractorLike | null;
+  /** True when radio owns the guild's queue — see "Radio rule" above. */
+  radioActive?: boolean;
+}
+
+async function resolveViaYouTubeMatch(
   meta: SpotifyTrackMetaLike,
   deps: ResolveSpotifyPlaybackDeps,
 ): Promise<SpotifyPlaybackTarget | null> {
@@ -57,4 +82,26 @@ export async function resolveSpotifyPlayback(
   } catch {
     return null;
   }
+}
+
+export async function resolveSpotifyPlayback(
+  meta: SpotifyTrackMetaLike,
+  deps: ResolveSpotifyPlaybackDeps,
+): Promise<SpotifyPlaybackTarget | null> {
+  if (!deps.radioActive && deps.directExtractor?.isConfigured()) {
+    try {
+      const data = await deps.directExtractor.extractAudio(meta.id, {
+        title: meta.title,
+        durationSec: meta.durationSec,
+      });
+      return { kind: 'direct', data };
+    } catch (error: unknown) {
+      logger.warn('Spotify direct extraction failed — falling back to YouTube match', {
+        trackId: meta.id,
+        error: (error as Error).message,
+      });
+    }
+  }
+
+  return resolveViaYouTubeMatch(meta, deps);
 }

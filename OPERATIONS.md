@@ -143,6 +143,139 @@ budget ~1 GB, split evenly:
   `*.m4a`/`*.webm`) are now orphaned — delete the loose root files once:
   `find ~/bilibili-bot/cache -maxdepth 1 -type f -delete` (leaves the two subdirs).
 
+## Spotify direct playback
+
+Spotify never exposes public CDN URLs the way Bilibili/YouTube do — the only
+way to play *real* Spotify audio (rather than a YouTube re-recording) is a
+client that speaks Spotify's own protocol, authenticated as a real account.
+`src/spotify/direct_extractor.ts` drives **zotify**
+(`github.com/Googolplexed0/zotify`, pinned `v0.17.0` — a maintained
+community fork; the original zotify-dev project has been stale since Sept
+2024) as a per-track sidecar: given a track id and a cached login, it logs in
+and writes the decoded audio to a local file, then exits. `zotify` was chosen
+over the official `librespot-org/librespot` binary because that binary is a
+Spotify Connect **receiver** — it needs another Spotify client (phone/
+desktop) to remote-control it and pick what plays, so it can't be driven as a
+plain "fetch this track id and exit" subprocess. **Password login is dead**
+(deprecated since librespot v0.5, unsupported since); OAuth is the only login
+path, for zotify and for librespot generally.
+
+This is **off by default** (`SPOTIFY_DIRECT_ENABLED=false`). Every consumer
+(`resolveSpotifyPlayback` in `src/spotify/playback_resolver.ts`) already
+falls back to the existing YouTube-match behavior (PR #142) on any failure —
+sidecar not installed, not logged in, timeout, region lock, network error —
+so leaving this disabled, or a login going stale, degrades silently to
+"Spotify picks play via their closest YouTube match" rather than breaking
+playback.
+
+### Account guidance
+
+Use a **dedicated** Spotify account for the bot — never the operator's main
+account. Running an unofficial client against Spotify's protocol is against
+their ToS and carries a ban risk; a dedicated account contains the blast
+radius. **Premium** is strongly preferred: zotify auto-selects the highest
+quality available (`-q auto`), which is 320kbps on Premium vs. ~160kbps on
+Free, and Free accounts have ads/shuffle restrictions that don't apply to
+API-driven single-track fetches but are a general reason to avoid Free for
+any bot account.
+
+### One-time login bootstrap
+
+zotify's login is interactive OAuth (a URL to open in a browser, redirected
+to a local HTTP callback that captures the token) — there's no way to fully
+automate it, and it only needs to run once (or again after `credentials.json`
+is deleted/expires). Do it **locally, on a machine with a browser** — not by
+port-forwarding into the VPS — then ship the resulting file to the VPS:
+
+```bash
+# 1. On your laptop (or any machine with Python 3.10+ and a browser):
+python3 -m venv /tmp/zotify-login && /tmp/zotify-login/bin/pip install \
+  "git+https://github.com/Googolplexed0/zotify.git@v0.17.0"
+
+# 2. Run it against a throwaway track — it prints an
+#    "https://accounts.spotify.com/authorize?..." URL and waits (up to a
+#    couple minutes) for the browser callback on 127.0.0.1:4381. Log into
+#    the DEDICATED bot account in that browser tab, not your own.
+mkdir -p /tmp/zotify-creds
+/tmp/zotify-login/bin/zotify --no-splash --creds /tmp/zotify-creds \
+  --root-path /tmp/zotify-out --output-single "{id}" \
+  https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC
+#   → click the printed link, approve access as the bot account.
+#   Success leaves /tmp/zotify-creds/credentials.json and downloads the
+#   throwaway track to /tmp/zotify-out/ (safe to delete both test outputs
+#   after copying credentials.json out).
+
+# 3. Ship the credentials file to the VPS (mode 600, matches secrets/ convention):
+scp /tmp/zotify-creds/credentials.json ubuntu@<vps>:~/bilibili-bot/secrets/spotify/credentials.json
+ssh ubuntu@<vps> 'chmod 600 ~/bilibili-bot/secrets/spotify/credentials.json'
+
+# 4. Enable and redeploy:
+#    set SPOTIFY_DIRECT_ENABLED=true in .env on the VPS, then redeploy
+#    (docker compose up -d picks up the mounted ./secrets/spotify/ dir —
+#    no compose changes needed, secrets/ is already bind-mounted).
+```
+
+`credentials.json` is a long-lived OAuth refresh token (zotify refreshes the
+access token itself on each run) — it does **not** need to be regenerated on
+a schedule. Regenerate it (repeat the steps above) only if Spotify revokes it
+(account password change, suspicious-activity flag, or the token simply
+stops working — the bot's fallback to YouTube-match means this fails safe,
+not loudly).
+
+### Env vars
+
+| Var | Default | Meaning |
+|---|---|---|
+| `SPOTIFY_DIRECT_ENABLED` | `false` | Master switch — off skips constructing the extractor entirely. |
+| `SPOTIFY_CREDENTIALS_DIR` | `/app/secrets/spotify` | Where `credentials.json` lives (under the existing `./secrets` mount). |
+| `SPOTIFY_DIRECT_CACHE_DIR` | `/app/cache/spotify` | Downloaded track files, keyed by track id (under the existing `./cache` mount) — a hit skips re-invoking the sidecar entirely. |
+| `SPOTIFY_DIRECT_TIMEOUT_MS` | `30000` | Kill timer for the sidecar subprocess. |
+| `SPOTIFY_SIDECAR_CMD` | `zotify` | Executable name/path (resolved on `PATH`; the Docker image installs it there). |
+
+(Also requires the existing `SPOTIFY_CLIENT_ID`/`SPOTIFY_CLIENT_SECRET` —
+those drive catalog *metadata* lookups (title/artist/duration for search
+results and matching), which are separate from this account-authenticated
+*audio* path and stay required either way.)
+
+### Fallback behavior
+
+- `SPOTIFY_DIRECT_ENABLED=false`, or the extractor is enabled but not yet
+  logged in (`credentials.json` missing) → every Spotify pick resolves via
+  the YouTube-match path exactly as PR #142 did before this feature existed.
+- Direct extraction throws for any reason (sidecar crash, region lock, login
+  expired, timeout) → same fallback, logged as `Spotify direct extraction
+  failed — falling back to YouTube match` with the error.
+- **Radio mode**: while radio is enabled for a guild, direct extraction is
+  skipped entirely (never even attempted) — radio's `playNow()` can only
+  (re-)extract from a URL, not accept an already-downloaded local file.
+  Radio picks always resolve to a YouTube URL.
+- Spotify **playlist/album** bulk-enqueue (`/play` on an album or playlist
+  link) deliberately stays on the lazy `ytsearch1:` path, not direct
+  extraction — fetching every item in a 50-track playlist through the
+  account sidecar would hammer it; only single-track picks (search results,
+  pasted track links) go through direct extraction. Revisit if this becomes
+  a common request.
+
+### Verify
+
+```bash
+# confirms the extractor was constructed and whether it's already logged in
+docker compose logs | grep "Spotify direct extraction enabled"
+#   {"configured":true,...}  → credentials.json found, direct extraction will be attempted
+#   {"configured":false,...} → enabled but not logged in yet; every pick still falls back to YouTube
+
+# a successful direct play logs one of:
+docker compose logs | grep -E "Spotify direct extraction (completed|cache hit)"
+# a fallback logs:
+docker compose logs | grep "falling back to YouTube match"
+```
+
+### Disable
+
+Set `SPOTIFY_DIRECT_ENABLED=false` and redeploy — every Spotify pick reverts
+to YouTube-match immediately, no other changes needed. `credentials.json`
+stays on disk untouched for next time.
+
 ## World Cup (temporal feature)
 
 A time-boxed feature that pushes **live World Cup updates** (kickoff / goal /

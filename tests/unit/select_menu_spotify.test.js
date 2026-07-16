@@ -54,21 +54,31 @@ function makeInteraction({ customId, value }) {
   };
 }
 
-function makePlayerService() {
-  const player = { isPlaying: false, isPaused: false, joinVoiceChannel: jest.fn().mockResolvedValue(true) };
+function makePlayerService({ radioEnabled = false, directExtractor = undefined, voiceChannelId = "voice-1" } = {}) {
+  const player = {
+    isPlaying: false,
+    isPaused: false,
+    voiceConnection: null,
+    joinVoiceChannel: jest.fn().mockResolvedValue(true),
+  };
   const ytExtractor = {
     searchVideos: jest.fn().mockResolvedValue({ success: true, results: [] }),
     extractAudio: jest.fn().mockResolvedValue({ title: "Extracted YouTube", audioUrl: "audio", duration: 10 }),
   };
+  void voiceChannelId;
 
   return {
     getYouTubeExtractor: jest.fn().mockReturnValue(ytExtractor),
+    getSpotifyDirectExtractor: jest.fn().mockReturnValue(directExtractor),
+    getRadioService: jest.fn().mockReturnValue({ isEnabled: jest.fn().mockReturnValue(radioEnabled) }),
     getPlayer: jest.fn().mockReturnValue(player),
     addTrack: jest.fn().mockResolvedValue({ title: "Queued YouTube" }),
     setUIContext: jest.fn(),
     play: jest.fn().mockResolvedValue(true),
+    playTrackAt: jest.fn().mockResolvedValue(true),
     notifyState: jest.fn(),
     _ytExtractor: ytExtractor,
+    _player: player,
   };
 }
 
@@ -106,7 +116,7 @@ describe("search_select_v2_ Spotify selection", () => {
 
     expect(resolveSpotifyPlayback).toHaveBeenCalledWith(
       { id: "3n3Ppam7vgaVa1iaRUc9Lp", title: "Spot Track", artists: ["Artist A", "Artist B"], durationSec: 180 },
-      { youtubeExtractor: playerService._ytExtractor },
+      { youtubeExtractor: playerService._ytExtractor, directExtractor: undefined, radioActive: false },
     );
     expect(playerService._ytExtractor.extractAudio).toHaveBeenCalledWith(
       "https://www.youtube.com/watch?v=matched",
@@ -157,6 +167,82 @@ describe("search_select_v2_ Spotify selection", () => {
     expect(interaction.editReply).toHaveBeenCalledWith({
       embeds: [expect.objectContaining({ title: "Video Not Found" })],
     });
+  });
+
+  test("a 'direct' target plays via playAttachment (pre-built track, no YouTube extraction)", async () => {
+    SearchSessionStore.get.mockReturnValue({ entries: [spotifyEntry] });
+    const directData = {
+      title: "Spot Track",
+      audioUrl: "/app/cache/spotify/3n3Ppam7vgaVa1iaRUc9Lp.ogg",
+      duration: 180,
+      cached: true,
+      extractedAt: new Date().toISOString(),
+    };
+    resolveSpotifyPlayback.mockResolvedValue({ kind: "direct", data: directData });
+
+    const directExtractor = { isConfigured: jest.fn().mockReturnValue(true) };
+    const playerService = makePlayerService({ directExtractor });
+    const handler = createSelectMenuHandler(playerService);
+    const interaction = makeInteraction({
+      customId: "search_select_v2_aabbcc",
+      value: "spot:3n3Ppam7vgaVa1iaRUc9Lp",
+    });
+
+    await handler(interaction);
+
+    expect(playerService._ytExtractor.extractAudio).not.toHaveBeenCalled();
+    expect(playerService._player.joinVoiceChannel).toHaveBeenCalledWith({ id: "voice-1" });
+    expect(playerService.addTrack).toHaveBeenCalledWith("guild-1", directData, "<@user-1>");
+    expect(interaction.editReply).toHaveBeenCalledWith(
+      expect.objectContaining({ embeds: [expect.objectContaining({ title: "Added to Queue" })] }),
+    );
+  });
+
+  test("a 'direct' target that hits RADIO_ACTIVE (radio toggled mid-resolve) shows an error", async () => {
+    SearchSessionStore.get.mockReturnValue({ entries: [spotifyEntry] });
+    resolveSpotifyPlayback.mockResolvedValue({
+      kind: "direct",
+      data: { title: "Spot Track", audioUrl: "/tmp/x.ogg", duration: 180, cached: true, extractedAt: new Date().toISOString() },
+    });
+
+    const directExtractor = { isConfigured: jest.fn().mockReturnValue(true) };
+    const playerService = makePlayerService({ directExtractor, radioEnabled: true });
+    const handler = createSelectMenuHandler(playerService);
+    const interaction = makeInteraction({
+      customId: "search_select_v2_aabbcc",
+      value: "spot:3n3Ppam7vgaVa1iaRUc9Lp",
+    });
+
+    await handler(interaction);
+
+    expect(playerService.addTrack).not.toHaveBeenCalled();
+    expect(interaction.editReply).toHaveBeenCalledWith(
+      expect.objectContaining({ embeds: [expect.objectContaining({ title: "Failed to Add Track" })] }),
+    );
+  });
+
+  test("passes directExtractor and radioActive through to resolveSpotifyPlayback", async () => {
+    SearchSessionStore.get.mockReturnValue({ entries: [spotifyEntry] });
+    resolveSpotifyPlayback.mockResolvedValue({
+      kind: "youtube-url",
+      url: "https://www.youtube.com/watch?v=matched",
+      title: "Matched Video",
+    });
+
+    const directExtractor = { isConfigured: jest.fn().mockReturnValue(true) };
+    const playerService = makePlayerService({ directExtractor, radioEnabled: true });
+    const handler = createSelectMenuHandler(playerService);
+    const interaction = makeInteraction({
+      customId: "search_select_v2_aabbcc",
+      value: "spot:3n3Ppam7vgaVa1iaRUc9Lp",
+    });
+
+    await handler(interaction);
+
+    expect(resolveSpotifyPlayback).toHaveBeenCalledWith(
+      expect.anything(),
+      { youtubeExtractor: playerService._ytExtractor, directExtractor, radioActive: true },
+    );
   });
 
   test("expired/unknown session shows a 'search expired' error", async () => {

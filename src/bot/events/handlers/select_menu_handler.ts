@@ -11,6 +11,7 @@ import ButtonBuilders = require('../../../ui/buttons');
 import SearchService = require('../../../search/search_service');
 import SearchSessionStore = require('../../../search/search_session_store');
 import PlaybackCoordinator = require('../../../playback/playback_coordinator');
+import { playAttachment } from '../../../playback/playlist_coordinator';
 import { resolveSpotifyPlayback } from '../../../spotify/playback_resolver';
 import { createInteractionStageReporter } from '../../../playback/stage_feedback';
 import {
@@ -398,14 +399,48 @@ async function playDirectSelection(interaction: any, playerService: any, selecti
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves a Spotify session entry to a playable target (Project A: always a
- * YouTube match via `resolveSpotifyPlayback`) and plays it. The entry's
- * `uploader` field is the artists joined with ", " (see
+ * Plays an already-extracted Spotify direct track (`kind: 'direct'` from
+ * `resolveSpotifyPlayback`) via the same pre-built-track path uploaded
+ * attachments use (`playAttachment`) — the data is already a finished,
+ * `cached: true` `ExtractedTrackData` pointing at a local file, so there's no
+ * extraction step. `playAttachment` itself refuses while radio is enabled
+ * (`RADIO_ACTIVE`); the resolver already avoids ever reaching this branch in
+ * that case (see playback_resolver.ts's radio rule), but the guard stays as
+ * defense-in-depth against a radio toggle racing the resolve.
+ */
+async function playDirectSpotifyEntry(interaction: any, playerService: any, data: any): Promise<boolean> {
+  const result = await playAttachment({ interaction, playerService, data });
+
+  if (!result.success) {
+    const message = result.error === 'RADIO_ACTIVE'
+      ? '电台模式运行中，无法直接播放该曲目。'
+      : (result.error || '播放失败，请重试。');
+    const errorEmbed = EmbedBuilders.createErrorEmbed('Failed to Add Track', message, { suggestion: 'Please try again.' });
+    await interaction.editReply({ embeds: [errorEmbed] });
+    return false;
+  }
+
+  const title = getTitle(result.track) || data.title || 'selected track';
+  const successEmbed = EmbedBuilders.createSuccessEmbed(
+    'Added to Queue',
+    `>> **${title}** has been added to the queue（Spotify 直连）`,
+  );
+  await interaction.editReply({ content: '', embeds: [successEmbed] });
+  return true;
+}
+
+/**
+ * Resolves a Spotify session entry to a playable target — direct Spotify
+ * audio when the sidecar is configured and radio isn't active, otherwise a
+ * YouTube match (`resolveSpotifyPlayback`, Project B) — and plays it. The
+ * entry's `uploader` field is the artists joined with ", " (see
  * `search_results_view.ts`'s `createSpotifySessionEntry`), so it's split back
  * apart for the resolver's `artists: string[]` input.
  */
 async function resolveAndPlaySpotifyEntry(interaction: any, entry: any, playerService: any): Promise<boolean> {
   const youtubeExtractor = playerService.getYouTubeExtractor?.();
+  const directExtractor = playerService.getSpotifyDirectExtractor?.();
+  const radioActive = Boolean(playerService.getRadioService?.()?.isEnabled(interaction.guild.id));
   const meta = {
     id: entry.spotifyId || '',
     title: entry.title,
@@ -413,7 +448,7 @@ async function resolveAndPlaySpotifyEntry(interaction: any, entry: any, playerSe
     durationSec: typeof entry.duration === 'number' ? entry.duration : Number(entry.duration) || 0,
   };
 
-  const target = await resolveSpotifyPlayback(meta, { youtubeExtractor });
+  const target = await resolveSpotifyPlayback(meta, { youtubeExtractor, directExtractor, radioActive });
   if (!target) {
     const errorEmbed = EmbedBuilders.createErrorEmbed(
       'Video Not Found', '找不到对应的 YouTube 视频。',
@@ -421,6 +456,10 @@ async function resolveAndPlaySpotifyEntry(interaction: any, entry: any, playerSe
     );
     await interaction.editReply({ embeds: [errorEmbed] });
     return false;
+  }
+
+  if (target.kind === 'direct') {
+    return playDirectSpotifyEntry(interaction, playerService, target.data);
   }
 
   return playYouTubeSelection(interaction, playerService, target.url, target.title);

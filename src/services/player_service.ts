@@ -42,6 +42,17 @@ interface PreExtractionServiceLike {
   ): unknown;
 }
 
+interface SpotifyDirectExtractorLike {
+  isConfigured(): boolean;
+  extractAudio(trackId: string, meta: { title: string; durationSec?: number }): Promise<{
+    title: string;
+    audioUrl: string;
+    duration: number;
+    cached: true;
+    extractedAt: string;
+  }>;
+}
+
 interface RadioServiceLike {
   isEnabled(guildId: GuildId): boolean;
   isOnBreak(guildId: GuildId): boolean;
@@ -84,6 +95,8 @@ class PlayerService extends EventEmitter {
   private radioService: RadioServiceLike | null;
   /** /annoying anti-disconnect mode, attached post-construction by the composition root. */
   private annoyingService: AnnoyingServiceLike | null;
+  /** Direct Spotify extraction sidecar (Project B), attached post-construction — null when SPOTIFY_DIRECT_ENABLED=false. */
+  private spotifyDirectExtractor: SpotifyDirectExtractorLike | null;
 
   constructor({
     audioManager,
@@ -103,6 +116,7 @@ class PlayerService extends EventEmitter {
     this._hachimiControllers = new Map();
     this.radioService = null;
     this.annoyingService = null;
+    this.spotifyDirectExtractor = null;
   }
 
   setRadioService(radioService: RadioServiceLike): void {
@@ -119,6 +133,15 @@ class PlayerService extends EventEmitter {
 
   getAnnoyingService(): AnnoyingServiceLike | null {
     return this.annoyingService;
+  }
+
+  setSpotifyDirectExtractor(extractor: SpotifyDirectExtractorLike | null): void {
+    this.spotifyDirectExtractor = extractor;
+  }
+
+  /** Public accessor for the Spotify direct extractor (null when unconfigured/disabled). */
+  getSpotifyDirectExtractor(): SpotifyDirectExtractorLike | null {
+    return this.spotifyDirectExtractor;
   }
 
   _setHachimiController(guildId: GuildId, controller: AbortController): void {
