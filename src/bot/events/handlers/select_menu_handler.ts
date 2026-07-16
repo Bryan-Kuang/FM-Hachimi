@@ -11,6 +11,7 @@ import ButtonBuilders = require('../../../ui/buttons');
 import SearchService = require('../../../search/search_service');
 import SearchSessionStore = require('../../../search/search_session_store');
 import PlaybackCoordinator = require('../../../playback/playback_coordinator');
+import { resolveSpotifyPlayback } from '../../../spotify/playback_resolver';
 import { createInteractionStageReporter } from '../../../playback/stage_feedback';
 import {
   RADIO_ONLY_STOP_MESSAGE,
@@ -393,6 +394,39 @@ async function playDirectSelection(interaction: any, playerService: any, selecti
 }
 
 // ---------------------------------------------------------------------------
+// Spotify selection (resolves via the resolveSpotifyPlayback seam)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolves a Spotify session entry to a playable target (Project A: always a
+ * YouTube match via `resolveSpotifyPlayback`) and plays it. The entry's
+ * `uploader` field is the artists joined with ", " (see
+ * `search_results_view.ts`'s `createSpotifySessionEntry`), so it's split back
+ * apart for the resolver's `artists: string[]` input.
+ */
+async function resolveAndPlaySpotifyEntry(interaction: any, entry: any, playerService: any): Promise<boolean> {
+  const youtubeExtractor = playerService.getYouTubeExtractor?.();
+  const meta = {
+    id: entry.spotifyId || '',
+    title: entry.title,
+    artists: entry.uploader && entry.uploader !== 'Unknown' ? entry.uploader.split(', ') : [],
+    durationSec: typeof entry.duration === 'number' ? entry.duration : Number(entry.duration) || 0,
+  };
+
+  const target = await resolveSpotifyPlayback(meta, { youtubeExtractor });
+  if (!target) {
+    const errorEmbed = EmbedBuilders.createErrorEmbed(
+      'Video Not Found', '找不到对应的 YouTube 视频。',
+      { suggestion: 'Please try a different search.' },
+    );
+    await interaction.editReply({ embeds: [errorEmbed] });
+    return false;
+  }
+
+  return playYouTubeSelection(interaction, playerService, target.url, target.title);
+}
+
+// ---------------------------------------------------------------------------
 // Search Select (Components V2, paginated)
 // ---------------------------------------------------------------------------
 
@@ -425,6 +459,29 @@ async function handleSearchSelectV2(interaction: any, customId: string, playerSe
     return;
   }
 
+  const expiredEmbed = () => EmbedBuilders.createErrorEmbed(
+    'Search Expired', '搜索已过期，请重新搜索。',
+    { suggestion: 'Please perform a new search.' },
+  );
+
+  if (selectedValue.startsWith('spot:')) {
+    const spotifyId = selectedValue.slice('spot:'.length);
+    const token = customId.slice('search_select_v2_'.length);
+    const session = SearchSessionStore.get(token);
+    const entry = session?.entries.find((e: any) => e.platform === 'spotify' && e.spotifyId === spotifyId);
+    if (!entry) {
+      return await interaction.editReply({ embeds: [expiredEmbed()] });
+    }
+
+    const played = await resolveAndPlaySpotifyEntry(interaction, entry, playerService);
+    if (!played) return;
+    logger.info('Video added to queue from paginated search results (Spotify)', {
+      user:  user.username,
+      guild: interaction.guild?.name,
+    });
+    return;
+  }
+
   const indexMatch = selectedValue.match(/^idx_(\d+)$/);
   if (!indexMatch) {
     return await editInvalidSelection(interaction);
@@ -433,12 +490,22 @@ async function handleSearchSelectV2(interaction: any, customId: string, playerSe
   const token = customId.slice('search_select_v2_'.length);
   const session = SearchSessionStore.get(token);
   const entry = session?.entries[parseInt(indexMatch[1], 10)];
-  if (!entry || !entry.url) {
-    const errorEmbed = EmbedBuilders.createErrorEmbed(
-      'Search Expired', '搜索已过期，请重新搜索。',
-      { suggestion: 'Please perform a new search.' },
-    );
-    return await interaction.editReply({ embeds: [errorEmbed] });
+  if (!entry) {
+    return await interaction.editReply({ embeds: [expiredEmbed()] });
+  }
+
+  if (entry.platform === 'spotify') {
+    const played = await resolveAndPlaySpotifyEntry(interaction, entry, playerService);
+    if (!played) return;
+    logger.info('Video added to queue from paginated search results (Spotify, index fallback)', {
+      user:  user.username,
+      guild: interaction.guild?.name,
+    });
+    return;
+  }
+
+  if (!entry.url) {
+    return await interaction.editReply({ embeds: [expiredEmbed()] });
   }
 
   const played = entry.platform === 'youtube'

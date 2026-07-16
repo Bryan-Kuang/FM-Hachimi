@@ -71,6 +71,7 @@ export function validateEnv(env: NodeJS.ProcessEnv = process.env): EnvValidation
     "PLAYLIST_PROGRESS_INTERVAL_MS",
     "PLAYLIST_RESOLVE_TIMEOUT_MS",
     "PLAYLIST_MULTIPART_DETECT_TIMEOUT_MS",
+    "SEARCH_LIMIT_PER_PLATFORM",
   ];
   for (const key of intVars) {
     if (!isPositiveInt(env[key])) {

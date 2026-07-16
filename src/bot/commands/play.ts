@@ -19,6 +19,7 @@ import * as logger from '../../services/logger_service';
 import config = require('../../config/config');
 import SpotifyClient = require('../../spotify/client');
 import { findYouTubeMatch } from '../../spotify/resolver';
+import { interleaveRoundRobin } from '../../search/interleave';
 import BilibiliApi = require('../../bilibili/api');
 import BilibiliValidator = require('../../bilibili/validator');
 import { resolvePlaylist } from '../../playlists';
@@ -486,39 +487,48 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         return;
       }
 
-      // ─── Keyword search (Bilibili + YouTube) ─────────────────────────────────
-      await interaction.editReply({ content: `[?] Searching "${query}" on Bilibili & YouTube...` });
+      // ─── Keyword search (Bilibili + YouTube + Spotify) ───────────────────────
+      const searchPlatformsLabel = config.spotify.enabled ? 'Bilibili、YouTube 和 Spotify' : 'Bilibili & YouTube';
+      await interaction.editReply({ content: `[?] Searching "${query}" on ${searchPlatformsLabel}...` });
 
       const ytExtractorForSearch = playbackService.getYouTubeExtractor();
-      const perPlatformLimit = 13;
+      const perPlatformLimit = config.search.limitPerPlatform;
 
       // Bilibili uses the HTTP API here so initial discovery stays fast.
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const bilibiliApi = require('../../bilibili/api') as any;
 
-      const searchResult = await SearchService.searchDualPlatforms({
+      const searchResult = await SearchService.searchTriPlatforms({
         keyword:          query as string,
         limitPerPlatform: perPlatformLimit,
         bilibiliApi,
         youtubeExtractor: ytExtractorForSearch,
+        spotifyClient:    config.spotify.enabled ? getSpotifyClient() : null,
       });
-      const biliResults = searchResult.bilibili;
-      const ytResults   = searchResult.youtube;
+      const biliResults    = searchResult.bilibili;
+      const ytResults      = searchResult.youtube;
+      const spotifyResults = searchResult.spotify;
 
-      if (biliResults.length === 0 && ytResults.length === 0) {
+      if (biliResults.length === 0 && ytResults.length === 0 && spotifyResults.length === 0) {
         await interaction.editReply({ content: `No results found for "${query}"` });
         return;
       }
 
-      // Combined 25-entry session: Bilibili first, then YouTube, paginated by
-      // the shared search results view. The startIndex keeps fallback
-      // selection values unique across the two platforms.
-      const biliEntries = SearchResultsView.createSessionEntries(biliResults as any[], 'bilibili');
-      const ytEntries   = SearchResultsView.createSessionEntries(ytResults as any[], 'youtube', biliEntries.length);
+      // Per-platform entries, round-robin interleaved into one numbered list
+      // (bili1, yt1, spotify1, bili2, ...) and paginated by the shared search
+      // results view. Cap at 30 total; the per-page select menu removes any
+      // need for a 25-entry cap (Discord's select-option limit).
+      const biliEntries    = SearchResultsView.createSessionEntries(biliResults as any[], 'bilibili');
+      const ytEntries      = SearchResultsView.createSessionEntries(ytResults as any[], 'youtube', biliEntries.length);
+      const spotifyEntries = SearchResultsView.createSessionEntries(
+        spotifyResults as any[], 'spotify', biliEntries.length + ytEntries.length,
+      );
+      const interleavedEntries = interleaveRoundRobin([biliEntries, ytEntries, spotifyEntries]).slice(0, 30);
+
       const session = {
         keyword: query as string,
-        mode: 'dual' as const,
-        entries: [...biliEntries, ...ytEntries].slice(0, 25),
+        mode: 'mixed' as const,
+        entries: interleavedEntries,
       };
       const token = SearchSessionStore.create(session);
 
@@ -528,7 +538,9 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         ...SearchResultsView.buildSearchResultsMessage(token, { ...session, currentPage: 1 }),
       });
 
-      // Only prewarm the first page's worth per platform; the rest may never be viewed.
+      // Only prewarm the first page's worth per platform; the rest may never
+      // be viewed. Spotify entries have no direct URL, so they can't be
+      // prewarmed.
       playbackService.prewarmBilibiliUrls?.(
         BilibiliUrls.collectBilibiliUrls(biliResults, SearchResultsView.RESULTS_PER_PAGE),
         {
@@ -546,10 +558,11 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         },
       );
 
-      logger.info('Play keyword search: showing dual results', {
+      logger.info('Play keyword search: showing interleaved tri-platform results', {
         query,
-        biliCount: biliResults.length,
-        ytCount: ytResults.length,
+        biliCount:    biliResults.length,
+        ytCount:      ytResults.length,
+        spotifyCount: spotifyResults.length,
         rawBiliCount: searchResult.rawBilibiliCount,
         rawYtCount:   searchResult.rawYouTubeCount,
         user: user.username,

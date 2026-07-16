@@ -230,4 +230,86 @@ describe("SpotifyClient", () => {
     expect(result.tracks.map((t) => t.title)).toEqual(["Song 1", "Song 2"]);
     expect(result.skipped).toBe(3);
   });
+
+  describe("searchTracks", () => {
+    test("builds the query URL with encoding, type=track, limit, and market", async () => {
+      global.fetch = jest.fn(async (url) => {
+        if (url === "https://accounts.spotify.com/api/token") return tokenResponse();
+        expect(url).toBe(
+          "https://api.spotify.com/v1/search?q=hachimi%20%E7%94%B5%E5%8F%B0&type=track&limit=7&market=US",
+        );
+        return jsonResponse({ tracks: { items: [] } });
+      });
+
+      await client.searchTracks("hachimi 电台", 7);
+      expect(global.fetch).toHaveBeenCalledTimes(2); // token + search
+    });
+
+    test("maps id/title/artists/duration/thumbnail, preserving API order", async () => {
+      global.fetch = jest.fn(async (url) => {
+        if (url === "https://accounts.spotify.com/api/token") return tokenResponse();
+        return jsonResponse({
+          tracks: {
+            items: [
+              {
+                id: "track1",
+                name: "Song One",
+                duration_ms: 185000,
+                artists: [{ name: "Artist A" }, { name: "Artist B" }],
+                album: { images: [{ url: "https://img/1.jpg" }] },
+              },
+              {
+                id: "track2",
+                name: "Song Two",
+                duration_ms: 90000,
+                artists: [{ name: "Artist C" }],
+                album: { images: [] },
+              },
+            ],
+          },
+        });
+      });
+
+      const results = await client.searchTracks("song", 2);
+      expect(results).toEqual([
+        {
+          id: "track1",
+          title: "Song One",
+          artists: ["Artist A", "Artist B"],
+          durationSec: 185,
+          thumbnail: "https://img/1.jpg",
+        },
+        {
+          id: "track2",
+          title: "Song Two",
+          artists: ["Artist C"],
+          durationSec: 90,
+          thumbnail: undefined,
+        },
+      ]);
+    });
+
+    test("empty or missing items resolve to []", async () => {
+      global.fetch = jest.fn(async (url) => {
+        if (url === "https://accounts.spotify.com/api/token") return tokenResponse();
+        return jsonResponse({ tracks: { items: [] } });
+      });
+      await expect(client.searchTracks("nothing", 5)).resolves.toEqual([]);
+
+      global.fetch = jest.fn(async (url) => {
+        if (url === "https://accounts.spotify.com/api/token") return tokenResponse();
+        return jsonResponse({});
+      });
+      await expect(client.searchTracks("nothing", 5)).resolves.toEqual([]);
+    });
+
+    test("propagates API errors (caller is responsible for fallback)", async () => {
+      global.fetch = jest.fn(async (url) => {
+        if (url === "https://accounts.spotify.com/api/token") return tokenResponse();
+        return jsonResponse({}, { status: 500 });
+      });
+
+      await expect(client.searchTracks("boom", 5)).rejects.toThrow();
+    });
+  });
 });

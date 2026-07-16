@@ -179,6 +179,11 @@ interface SpotifyConfig {
   enabled: boolean;
 }
 
+interface SearchConfig {
+  /** Results requested per platform for the tri-platform keyword search (/play). */
+  limitPerPlatform: number;
+}
+
 interface PlaylistConfig {
   maxItems: number;
   progressIntervalMs: number;
@@ -207,6 +212,7 @@ interface BotConfig {
   resume: ResumeConfig;
   test: TestConfig;
   spotify: SpotifyConfig;
+  search: SearchConfig;
   playlists: PlaylistConfig;
   attachments: AttachmentConfig;
 }
@@ -503,6 +509,9 @@ const config: BotConfig = {
     enabled: Boolean(
       (process.env.SPOTIFY_CLIENT_ID ?? "").trim() && (process.env.SPOTIFY_CLIENT_SECRET ?? "").trim()
     ),
+  },
+  search: {
+    limitPerPlatform: Math.max(1, parseIntegerEnv(process.env.SEARCH_LIMIT_PER_PLATFORM, 10)),
   },
   playlists: {
     maxItems: Math.max(1, parseIntegerEnv(process.env.PLAYLIST_MAX_ITEMS, 100)),

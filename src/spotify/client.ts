@@ -6,6 +6,7 @@
  */
 
 import * as logger from '../services/logger_service';
+import type { SpotifySearchResult } from './types';
 
 interface SpotifyTrackMeta {
   title: string;
@@ -25,6 +26,7 @@ interface SpotifyCollection {
   /** null-track / is_local / episode entries skipped during pagination. */
   skipped: number;
 }
+
 
 interface CachedToken {
   accessToken: string;
@@ -56,6 +58,18 @@ interface RawSpotifyTrack {
 interface RawPlaylistTrackItem {
   is_local?: boolean;
   track: RawSpotifyTrack | null;
+}
+
+interface RawSpotifySearchTrack {
+  id: string;
+  name: string;
+  duration_ms: number;
+  artists: RawSpotifyArtist[];
+  album?: { images?: RawSpotifyImage[] };
+}
+
+interface RawSpotifySearchResponse {
+  tracks?: { items?: RawSpotifySearchTrack[] };
 }
 
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
@@ -169,6 +183,26 @@ class SpotifyClient {
     }
 
     return { kind: 'playlist', name: meta.name, total: meta.tracks?.total ?? 0, tracks, skipped };
+  }
+
+  /**
+   * Catalog search — used by the tri-platform keyword search (Project A).
+   * Keeps Spotify's own relevance ordering; the caller ranks/interleaves it
+   * against the other platforms. Empty/missing items resolve to `[]` rather
+   * than throwing so the caller's Promise.allSettled fallback stays simple.
+   */
+  async searchTracks(keyword: string, limit: number): Promise<SpotifySearchResult[]> {
+    const query = encodeURIComponent(keyword);
+    const path = `/search?q=${query}&type=track&limit=${limit}&market=${this.market}`;
+    const data = await this.apiGet(path) as RawSpotifySearchResponse;
+    const items = data.tracks?.items ?? [];
+    return items.map((track) => ({
+      id: track.id,
+      title: track.name,
+      artists: (track.artists || []).map((a) => a.name),
+      durationSec: Math.round((track.duration_ms || 0) / 1000),
+      thumbnail: track.album?.images?.[0]?.url,
+    }));
   }
 
   private async getAccessToken(): Promise<string> {
