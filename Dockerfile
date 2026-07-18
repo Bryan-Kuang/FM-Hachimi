@@ -37,29 +37,6 @@ RUN pip3 install --no-cache-dir --break-system-packages --upgrade \
     echo "--js-runtimes node" > /home/node/.config/yt-dlp/config && \
     chown -R node:node /home/node/.config
 
-# zotify (direct Spotify extraction sidecar, Project B — see
-# src/spotify/direct_extractor.ts + OPERATIONS.md "Spotify direct playback").
-# Pinned to a release tag for reproducibility; only used when
-# SPOTIFY_DIRECT_ENABLED=true (a dedicated Spotify account's OAuth login must
-# still be bootstrapped manually on the deploy host — this install alone
-# does not enable playback). Community-maintained fork of the original
-# zotify-dev project — chosen over the official librespot-org/librespot
-# binary because that binary is a Spotify Connect *receiver* (needs a phone/
-# desktop client to remote-control it) and can't be driven as a plain
-# "fetch this track id and exit" subprocess the way zotify can.
-#
-# Alpine build deps: Pillow (album art) needs libjpeg/zlib headers + a C
-# compiler to build from source on musl (no manylinux wheels apply here);
-# removed again after install to keep the image lean. protobuf/librespot-python
-# install as pure-Python/sdist and don't need them, but harmless to have
-# present during the same install step.
-RUN apk add --no-cache --virtual .zotify-build-deps \
-        git gcc musl-dev python3-dev zlib-dev jpeg-dev libffi-dev && \
-    apk add --no-cache zlib libjpeg-turbo libffi && \
-    pip3 install --no-cache-dir --break-system-packages \
-        "git+https://github.com/Googolplexed0/zotify.git@v0.17.0" && \
-    apk del .zotify-build-deps
-
 WORKDIR /app
 
 # Prod-only deps — no typescript / @types / jest etc.

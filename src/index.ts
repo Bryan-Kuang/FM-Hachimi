@@ -10,7 +10,6 @@ import BilibiliExtractor = require('./bilibili/extractor');
 import YouTubeExtractor = require('./youtube/extractor');
 import MediaCache = require('./audio/media_cache');
 import YouTubeCookieRefreshService = require('./youtube/cookie_refresh_service');
-import SpotifyDirectExtractor = require('./spotify/direct_extractor');
 import SessionManager = require('./session/session_manager');
 import AudioManager = require('./session/audio_manager');
 import ResumeService = require('./session/resume_service');
@@ -149,26 +148,6 @@ class BilibiliDiscordBot {
       // it via playerService.getRadioService().
       const radioService = new RadioService(playerService as any, bilibiliApi);
       playerService.setRadioService(radioService as any);
-
-      // Direct Spotify audio extraction (Project B) — only constructed when
-      // explicitly enabled. Off by default: it requires a one-time manual
-      // login bootstrap on the deploy host (OPERATIONS.md, "Spotify direct
-      // playback") that doesn't exist in CI/dev, and every consumer already
-      // falls back to the YouTube-match path when this is absent/unconfigured
-      // (spotify/playback_resolver.ts).
-      if (config.spotify.direct.enabled) {
-        const spotifyDirectExtractor = new SpotifyDirectExtractor({
-          credentialsDir: config.spotify.direct.credentialsDir,
-          cacheDir: config.spotify.direct.cacheDir,
-          sidecarCommand: config.spotify.direct.sidecarCommand,
-          timeoutMs: config.spotify.direct.timeoutMs,
-        });
-        playerService.setSpotifyDirectExtractor(spotifyDirectExtractor as any);
-        logger.info('Spotify direct extraction enabled', {
-          configured: spotifyDirectExtractor.isConfigured(),
-          credentialsDir: config.spotify.direct.credentialsDir,
-        });
-      }
 
       const dailyHachimiService = new DailyHachimiService(config as any, preExtractionService);
 
