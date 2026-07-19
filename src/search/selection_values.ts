@@ -1,10 +1,8 @@
 /**
  * Search Selection Values
  * Encodes search results into select-menu option values that carry the
- * platform and video identity (e.g. "bili:BV1abc", "yt:dQw4w9WgXcQ",
- * "spot:3n3Ppam7vgaVa1iaRUc9Lp"), so selection handlers can reconstruct the
- * video URL (or, for Spotify, look up the entry to resolve playback) without
- * re-searching.
+ * platform and video identity (e.g. "bili:BV1abc", "yt:dQw4w9WgXcQ"), so
+ * selection handlers can reconstruct the video URL without re-searching.
  */
 
 interface SelectableResult {
@@ -18,7 +16,7 @@ interface SelectableResult {
   [key: string]: unknown;
 }
 
-type SearchPlatform = 'bilibili' | 'youtube' | 'spotify';
+type SearchPlatform = 'bilibili' | 'youtube';
 
 function extractBilibiliIdentity(result: SelectableResult): string | null {
   if (typeof result.bvid === 'string' && result.bvid.trim()) return result.bvid.trim();
@@ -58,30 +56,20 @@ function extractYouTubeIdentity(result: SelectableResult): string | null {
   return null;
 }
 
-/** Spotify track IDs are opaque base62 strings — used as-is, no URL parsing. */
-function extractSpotifyIdentity(result: SelectableResult): string | null {
-  if (typeof result.id === 'string' && result.id.trim()) return result.id.trim();
-  return null;
-}
-
 const PLATFORM_PREFIX: Record<SearchPlatform, string> = {
   bilibili: 'bili',
   youtube: 'yt',
-  spotify: 'spot',
 };
 
 function createSelectionValue(platform: SearchPlatform, result: SelectableResult, fallback: string): string {
   const identity = platform === 'youtube'
     ? extractYouTubeIdentity(result)
-    : platform === 'spotify'
-      ? extractSpotifyIdentity(result)
-      : extractBilibiliIdentity(result);
+    : extractBilibiliIdentity(result);
   return identity ? `${PLATFORM_PREFIX[platform]}:${identity}` : fallback;
 }
 
 export = {
   extractBilibiliIdentity,
   extractYouTubeIdentity,
-  extractSpotifyIdentity,
   createSelectionValue,
 };

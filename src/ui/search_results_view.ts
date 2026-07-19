@@ -2,7 +2,7 @@
  * Search Results View
  * Renders paginated search results as a compact two-column embed: plain
  * `1.`-`N.` numbering over consecutive entries, 10 per page (`RESULTS_PER_PAGE`
- * rows × 2 columns). Single-platform searches (`/search`) and the tri-platform
+ * rows × 2 columns). Single-platform searches (`/search`) and the dual-platform
  * interleaved keyword search (`/play`, mode `'mixed'`) share this layout — the
  * caller decides ordering (interleaved or not) before the entries land here.
  * A select menu over the *current page's* entries and page buttons sit below
@@ -25,7 +25,7 @@ const RESULTS_PER_PAGE = 5;
 const SEARCH_ACCENT_COLOR = 0x00ae86;
 const COLUMN_TITLE_LENGTH = 35;
 
-type SearchSessionPlatform = 'bilibili' | 'youtube' | 'spotify';
+type SearchSessionPlatform = 'bilibili' | 'youtube';
 type SearchSessionMode = SearchSessionPlatform | 'mixed';
 
 interface RawSearchResult {
@@ -39,10 +39,6 @@ interface RawSearchResult {
   bvid?: string;
   aid?: string | number;
   url?: string;
-  /** Spotify: artist names, joined into `uploader` for display. */
-  artists?: string[];
-  /** Spotify: track duration in seconds. */
-  durationSec?: number;
   [key: string]: unknown;
 }
 
@@ -54,8 +50,6 @@ interface SearchSessionEntry {
   viewCount?: number;
   url: string | null;
   selectionValue: string;
-  /** Set for Spotify entries — resolved to playback via resolveSpotifyPlayback. */
-  spotifyId?: string;
 }
 
 interface SearchSessionLike {
@@ -63,21 +57,6 @@ interface SearchSessionLike {
   mode: SearchSessionMode;
   entries: SearchSessionEntry[];
   currentPage: number;
-}
-
-function createSpotifySessionEntry(result: RawSearchResult, startIndex: number, i: number): SearchSessionEntry {
-  const artists = Array.isArray(result.artists) ? result.artists.filter((a) => typeof a === 'string') : [];
-  const spotifyId = typeof result.id === 'string' && result.id ? result.id : undefined;
-  return {
-    platform: 'spotify',
-    title: result.title || 'Unknown',
-    uploader: artists.length > 0 ? artists.join(', ') : 'Unknown',
-    duration: result.durationSec,
-    viewCount: undefined,
-    url: null,
-    spotifyId,
-    selectionValue: SelectionValues.createSelectionValue('spotify', result, `idx_${startIndex + i}`),
-  };
 }
 
 /**
@@ -95,10 +74,6 @@ function createSessionEntries(
   startIndex = 0,
 ): SearchSessionEntry[] {
   return results.map((result, i) => {
-    if (platform === 'spotify') {
-      return createSpotifySessionEntry(result, startIndex, i);
-    }
-
     const viewCount = Number(result.viewCount ?? result.view);
     return {
       platform,
@@ -158,7 +133,6 @@ function buildFieldGrid(session: SearchSessionLike, page: number): EmbedFieldDat
 
 function platformLabel(platform: SearchSessionPlatform): string {
   if (platform === 'youtube') return 'YouTube';
-  if (platform === 'spotify') return 'Spotify';
   return 'Bilibili';
 }
 
@@ -177,8 +151,8 @@ function formatOptionDescription(entry: SearchSessionEntry, mixed: boolean): str
  * A fallback ("idx_<n>") value is always recomputed against that absolute
  * position rather than trusting whatever was baked in at entry-creation
  * time, since the caller may have reordered entries afterward (round-robin
- * interleaving) — only a resolvable platform identity ("bili:"/"yt:"/
- * "spot:") is stable across such reordering.
+ * interleaving) — only a resolvable platform identity ("bili:"/"yt:") is
+ * stable across such reordering.
  */
 function buildSelectRow(token: string, session: SearchSessionLike, page: number): ActionRowBuilder<StringSelectMenuBuilder> {
   const mixed = session.mode === 'mixed';

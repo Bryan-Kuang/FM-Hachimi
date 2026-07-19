@@ -4,12 +4,12 @@ describe("interleaveRoundRobin", () => {
   test("interleaves three uneven lists in round-robin order, list-array order as tie-break", () => {
     const bili = ["b1", "b2"];
     const yt = ["y1"];
-    const spotify = ["s1", "s2", "s3"];
+    const extra = ["e1", "e2", "e3"];
 
-    expect(interleaveRoundRobin([bili, yt, spotify])).toEqual([
-      "b1", "y1", "s1",
-      "b2", "s2",
-      "s3",
+    expect(interleaveRoundRobin([bili, yt, extra])).toEqual([
+      "b1", "y1", "e1",
+      "b2", "e2",
+      "e3",
     ]);
   });
 

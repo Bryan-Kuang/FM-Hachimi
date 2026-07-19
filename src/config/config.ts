@@ -171,16 +171,8 @@ interface TestConfig {
   guildId: string | undefined;
 }
 
-interface SpotifyConfig {
-  clientId: string | undefined;
-  clientSecret: string | undefined;
-  market: string;
-  /** True only when both clientId and clientSecret are set (after trim). */
-  enabled: boolean;
-}
-
 interface SearchConfig {
-  /** Results requested per platform for the tri-platform keyword search (/play). */
+  /** Results requested per platform for the keyword search (/play). */
   limitPerPlatform: number;
 }
 
@@ -211,7 +203,6 @@ interface BotConfig {
   annoying: AnnoyingConfig;
   resume: ResumeConfig;
   test: TestConfig;
-  spotify: SpotifyConfig;
   search: SearchConfig;
   playlists: PlaylistConfig;
   attachments: AttachmentConfig;
@@ -501,14 +492,6 @@ const config: BotConfig = {
   test: {
     mode: process.env.TEST_MODE === "true",
     guildId: process.env.TEST_GUILD_ID,
-  },
-  spotify: {
-    clientId: process.env.SPOTIFY_CLIENT_ID,
-    clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
-    market: process.env.SPOTIFY_MARKET || "US",
-    enabled: Boolean(
-      (process.env.SPOTIFY_CLIENT_ID ?? "").trim() && (process.env.SPOTIFY_CLIENT_SECRET ?? "").trim()
-    ),
   },
   search: {
     limitPerPlatform: Math.max(1, parseIntegerEnv(process.env.SEARCH_LIMIT_PER_PLATFORM, 10)),

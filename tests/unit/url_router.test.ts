@@ -128,40 +128,6 @@ describe('routeQuery', () => {
     });
   });
 
-  // ─── Spotify ────────────────────────────────────────────────────────────────
-  describe('Spotify', () => {
-    test('open.spotify.com track URL → spotify', () => {
-      const url = 'https://open.spotify.com/track/6rqhFgbbKwnb9MLmUQDhG6';
-      const result = routeQuery(url);
-      expect(result.kind).toBe('spotify');
-      expect(result.isUrl).toBe(true);
-      expect(result.spotify).toEqual({ type: 'track', id: '6rqhFgbbKwnb9MLmUQDhG6' });
-      expect(result.normalizedUrl).toBe('https://open.spotify.com/track/6rqhFgbbKwnb9MLmUQDhG6');
-    });
-
-    test('intl-prefixed Spotify URL → spotify', () => {
-      const url = 'https://open.spotify.com/intl-de/track/6rqhFgbbKwnb9MLmUQDhG6';
-      const result = routeQuery(url);
-      expect(result.kind).toBe('spotify');
-      expect(result.spotify).toEqual({ type: 'track', id: '6rqhFgbbKwnb9MLmUQDhG6' });
-    });
-
-    test('spotify: URI → spotify (isUrl true)', () => {
-      const uri = 'spotify:track:6rqhFgbbKwnb9MLmUQDhG6';
-      const result = routeQuery(uri);
-      expect(result.kind).toBe('spotify');
-      expect(result.isUrl).toBe(true);
-      expect(result.spotify).toEqual({ type: 'track', id: '6rqhFgbbKwnb9MLmUQDhG6' });
-    });
-
-    test('album and playlist kinds parsed', () => {
-      const album = routeQuery('https://open.spotify.com/album/6rqhFgbbKwnb9MLmUQDhG6');
-      expect(album.spotify?.type).toBe('album');
-      const playlist = routeQuery('https://open.spotify.com/playlist/6rqhFgbbKwnb9MLmUQDhG6');
-      expect(playlist.spotify?.type).toBe('playlist');
-    });
-  });
-
   // ─── Discord attachments ────────────────────────────────────────────────────
   describe('Discord CDN attachment links', () => {
     test('cdn.discordapp.com → attachment', () => {

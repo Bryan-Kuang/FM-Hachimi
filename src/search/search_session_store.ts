@@ -7,8 +7,8 @@
 
 import crypto = require('crypto');
 
-type SearchSessionPlatform = 'bilibili' | 'youtube' | 'spotify';
-/** 'mixed' = tri-platform round-robin interleaved (/play keyword search). */
+type SearchSessionPlatform = 'bilibili' | 'youtube';
+/** 'mixed' = dual-platform round-robin interleaved (/play keyword search). */
 type SearchSessionMode = SearchSessionPlatform | 'mixed';
 
 interface SearchSessionEntry {
@@ -18,12 +18,10 @@ interface SearchSessionEntry {
   /** Duration in seconds, or a preformatted string from the search source. */
   duration?: string | number;
   viewCount?: number;
-  /** Direct video URL used when the selection value is an index fallback. Null for Spotify entries. */
+  /** Direct video URL used when the selection value is an index fallback. */
   url: string | null;
-  /** Select-menu option value: "bili:<id>" / "yt:<id>" / "spot:<id>" / "idx_<n>" fallback. */
+  /** Select-menu option value: "bili:<id>" / "yt:<id>" / "idx_<n>" fallback. */
   selectionValue: string;
-  /** Set for Spotify entries — resolved to playback via resolveSpotifyPlayback. */
-  spotifyId?: string;
 }
 
 interface SearchSession {

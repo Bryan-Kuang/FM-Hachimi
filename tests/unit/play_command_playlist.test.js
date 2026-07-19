@@ -1,8 +1,8 @@
 /**
  * /play command — playlist ingestion wiring (Task 2.9): YouTube playlist /
- * Bilibili fav / Bilibili collection / Spotify album&playlist route to the
- * resolver + bulk-enqueue coordinator; Bilibili multipart (分P) detection on
- * plain video URLs; final reply messages incl. truncation and error mapping.
+ * Bilibili fav / Bilibili collection route to the resolver + bulk-enqueue
+ * coordinator; Bilibili multipart (分P) detection on plain video URLs; final
+ * reply messages incl. truncation and error mapping.
  */
 
 jest.mock("discord.js", () => ({

@@ -25,7 +25,7 @@ function pageButtons(message) {
 }
 
 describe("search results view select menu values", () => {
-  test("mixed-platform entries use direct identities across Bilibili, YouTube, and Spotify", () => {
+  test("mixed-platform entries use direct identities across Bilibili and YouTube", () => {
     const entries = [
       ...SearchResultsView.createSessionEntries(
         [
@@ -39,11 +39,6 @@ describe("search results view select menu values", () => {
         "youtube",
         2,
       ),
-      ...SearchResultsView.createSessionEntries(
-        [{ title: "Spot", id: "3n3Ppam7vgaVa1iaRUc9Lp", artists: ["D"], durationSec: 200 }],
-        "spotify",
-        3,
-      ),
     ];
 
     const message = SearchResultsView.buildSearchResultsMessage(TOKEN, makeSession(entries, "mixed"));
@@ -52,21 +47,18 @@ describe("search results view select menu values", () => {
       "bili:BV1abc",
       "bili:12345",
       "yt:dQw4w9WgXcQ",
-      "spot:3n3Ppam7vgaVa1iaRUc9Lp",
     ]);
     // Mixed mode numbers plainly across the whole interleaved session.
     expect(selectMenu(message).options.map(option => option.label)).toEqual([
       "1. Bili BV",
       "2. Bili av",
       "3. YT",
-      "4. Spot",
     ]);
     // Mixed mode prefixes the description with the platform to disambiguate.
     expect(selectMenu(message).options.map(option => option.description)).toEqual([
       "Bilibili | A | --:--",
       "Bilibili | B | --:--",
       "YouTube | C | --:--",
-      "Spotify | D | 00:03:20",
     ]);
     expect(selectMenu(message).custom_id).toBe(`search_select_v2_${TOKEN}`);
   });
@@ -109,27 +101,6 @@ describe("search results view select menu values", () => {
     ]);
   });
 
-  test("Spotify entries use the track id as their identity", () => {
-    const entries = SearchResultsView.createSessionEntries(
-      [
-        { title: "Spot A", id: "3n3Ppam7vgaVa1iaRUc9Lp", artists: ["Artist A", "Artist B"], durationSec: 125 },
-        { title: "Spot B", artists: ["Artist C"], durationSec: 90 },
-      ],
-      "spotify",
-    );
-
-    const message = SearchResultsView.buildSearchResultsMessage(TOKEN, makeSession(entries, "spotify"));
-
-    expect(selectMenu(message).options.map(option => option.value)).toEqual([
-      "spot:3n3Ppam7vgaVa1iaRUc9Lp",
-      "idx_1",
-    ]);
-    expect(entries[0].uploader).toBe("Artist A, Artist B");
-    expect(entries[0].spotifyId).toBe("3n3Ppam7vgaVa1iaRUc9Lp");
-    expect(entries[1].spotifyId).toBeUndefined();
-    expect(entries[0].url).toBeNull();
-  });
-
   test("falls back to session index values when a direct identity is unavailable", () => {
     const entries = [
       ...SearchResultsView.createSessionEntries([{ title: "No ID", uploader: "A" }], "bilibili"),
@@ -144,11 +115,11 @@ describe("search results view select menu values", () => {
   test("fallback values are recomputed against the entry's final position, not the creation-time offset", () => {
     // Simulates round-robin interleaving: these entries were created with
     // startIndex offsets that no longer match their position in `entries`
-    // once reordered (bili created at 0, spotify created at 1, but spotify
-    // ends up first here).
+    // once reordered (bili created at 0, yt created at 1, but yt ends up
+    // first here).
     const bili = SearchResultsView.createSessionEntries([{ title: "No ID Bili" }], "bilibili", 0);
-    const spotify = SearchResultsView.createSessionEntries([{ title: "No ID Spot" }], "spotify", 1);
-    const reordered = [...spotify, ...bili]; // spotify (created idx_1) now at position 0
+    const yt = SearchResultsView.createSessionEntries([{ title: "No ID YT" }], "youtube", 1);
+    const reordered = [...yt, ...bili]; // yt (created idx_1) now at position 0
 
     const message = SearchResultsView.buildSearchResultsMessage(TOKEN, makeSession(reordered, "mixed"));
 

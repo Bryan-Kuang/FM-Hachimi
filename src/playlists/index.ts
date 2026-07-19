@@ -11,7 +11,6 @@ import type { RouteResult } from '../utils/url_router';
 import type { ResolvedPlaylist, PlaylistProgress } from './types';
 import { resolveYouTubePlaylist } from './youtube_playlist_resolver';
 import { resolveBilibiliFav, resolveBilibiliCollection } from './bilibili_playlist_resolver';
-import { resolveSpotifyCollection } from './spotify_playlist_resolver';
 
 interface YouTubeExtractorLike {
   listPlaylistItems(playlistUrl: string, limit: number): Promise<{
@@ -46,15 +45,9 @@ interface BilibiliApiLike {
   }>;
 }
 
-interface SpotifyClientLike {
-  getAlbum(id: string, maxItems: number): Promise<{ name: string; total: number; tracks: Array<{ title: string; artists: string[]; durationSec: number; thumbnail?: string }> }>;
-  getPlaylist(id: string, maxItems: number): Promise<{ name: string; total: number; tracks: Array<{ title: string; artists: string[]; durationSec: number; thumbnail?: string }> }>;
-}
-
 export interface ResolvePlaylistDeps {
   youtubeExtractor?: YouTubeExtractorLike | null;
   bilibiliApi?: BilibiliApiLike | null;
-  spotifyClient?: SpotifyClientLike | null;
   maxItems: number;
   onProgress?: PlaylistProgress;
 }
@@ -93,19 +86,6 @@ export async function resolvePlaylist(route: RouteResult, deps: ResolvePlaylistD
         api: deps.bilibiliApi,
         maxItems: deps.maxItems,
         onProgress: deps.onProgress,
-      });
-    }
-
-    case 'spotify': {
-      if (!route.spotify || route.spotify.type === 'track') {
-        throw new Error('Not a bulk Spotify album/playlist route');
-      }
-      if (!deps.spotifyClient) throw new Error('Spotify support is not available');
-      return resolveSpotifyCollection({
-        type: route.spotify.type,
-        id: route.spotify.id,
-        client: deps.spotifyClient,
-        maxItems: deps.maxItems,
       });
     }
 

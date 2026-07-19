@@ -64,24 +64,6 @@ describe("SearchService", () => {
     expect(SearchRanker.rankAndLimitSearchResults).toHaveBeenCalledTimes(2);
   });
 
-  test("provider failures return empty result arrays instead of throwing", async () => {
-    const SearchService = require("../../src/search/search_service");
-
-    const result = await SearchService.searchDualPlatforms({
-      keyword: "hachimi",
-      limitPerPlatform: 5,
-      bilibiliApi: { searchVideos: jest.fn().mockRejectedValue(new Error("bili down")) },
-      youtubeExtractor: { searchVideos: jest.fn().mockRejectedValue(new Error("yt down")) },
-    });
-
-    expect(result).toEqual({
-      bilibili: [],
-      youtube: [],
-      rawBilibiliCount: 0,
-      rawYouTubeCount: 0,
-    });
-  });
-
   test("single-platform search accepts object and array response shapes", async () => {
     const SearchService = require("../../src/search/search_service");
     const extractor = {
@@ -100,97 +82,25 @@ describe("SearchService", () => {
       .resolves.toEqual([expect.objectContaining({ bvid: "BV2" })]);
   });
 
-  describe("searchTriPlatforms", () => {
-    test("searches all three platforms concurrently and ranks/limits bili+yt", async () => {
-      const SearchService = require("../../src/search/search_service");
-      const bilibiliApi = {
-        searchVideos: jest.fn().mockResolvedValue([
-          { title: "other", bvid: "BVother", author: "Bili Uploader", view: 100 },
-          { title: "hachimi", bvid: "BVtarget", author: "Target Uploader", view: 500 },
-        ]),
-      };
-      const youtubeExtractor = {
-        searchVideos: jest.fn().mockResolvedValue({
-          success: true,
-          results: [{ title: "hachimi", id: "yttarget001" }],
-        }),
-      };
-      const spotifyResults = [{ id: "spot1", title: "hachimi", artists: ["A"], durationSec: 100 }];
-      const spotifyClient = { searchTracks: jest.fn().mockResolvedValue(spotifyResults) };
+  test("Bilibili and YouTube failures fall back to [] independently (Promise.allSettled) and log a warning", async () => {
+    const SearchService = require("../../src/search/search_service");
 
-      const result = await SearchService.searchTriPlatforms({
-        keyword: "hachimi",
-        limitPerPlatform: 1,
-        bilibiliApi,
-        youtubeExtractor,
-        spotifyClient,
-      });
-
-      expect(bilibiliApi.searchVideos).toHaveBeenCalledWith("hachimi", 1, 1);
-      expect(youtubeExtractor.searchVideos).toHaveBeenCalledWith("hachimi", 1);
-      expect(spotifyClient.searchTracks).toHaveBeenCalledWith("hachimi", 1);
-      expect(result.bilibili).toEqual([
-        expect.objectContaining({ title: "hachimi", bvid: "BVtarget", uploader: "Target Uploader", viewCount: 500 }),
-      ]);
-      expect(result.youtube).toEqual([expect.objectContaining({ title: "hachimi", id: "yttarget001" })]);
-      expect(result.spotify).toEqual(spotifyResults);
-      expect(result.rawBilibiliCount).toBe(2);
-      expect(result.rawYouTubeCount).toBe(1);
+    const result = await SearchService.searchDualPlatforms({
+      keyword: "hachimi",
+      limitPerPlatform: 5,
+      bilibiliApi: { searchVideos: jest.fn().mockRejectedValue(new Error("bili down")) },
+      youtubeExtractor: { searchVideos: jest.fn().mockRejectedValue(new Error("yt down")) },
     });
 
-    test("a null Spotify client (disabled) contributes an empty list without calling anything", async () => {
-      const SearchService = require("../../src/search/search_service");
-
-      const result = await SearchService.searchTriPlatforms({
-        keyword: "hachimi",
-        limitPerPlatform: 5,
-        bilibiliApi: { searchVideos: jest.fn().mockResolvedValue([]) },
-        youtubeExtractor: { searchVideos: jest.fn().mockResolvedValue({ success: true, results: [] }) },
-        spotifyClient: null,
-      });
-
-      expect(result.spotify).toEqual([]);
-    });
-
-    test("Spotify search failure (Promise.allSettled) falls back to [] and logs a warning, without affecting bili/yt", async () => {
-      const SearchService = require("../../src/search/search_service");
-      const bilibiliApi = { searchVideos: jest.fn().mockResolvedValue([{ title: "b", bvid: "BV1" }]) };
-      const youtubeExtractor = {
-        searchVideos: jest.fn().mockResolvedValue({ success: true, results: [{ title: "y", id: "ytid0000001" }] }),
-      };
-      const spotifyClient = { searchTracks: jest.fn().mockRejectedValue(new Error("spotify down")) };
-
-      const result = await SearchService.searchTriPlatforms({
-        keyword: "hachimi",
-        limitPerPlatform: 5,
-        bilibiliApi,
-        youtubeExtractor,
-        spotifyClient,
-      });
-
-      expect(result.spotify).toEqual([]);
-      expect(result.bilibili).toHaveLength(1);
-      expect(result.youtube).toHaveLength(1);
-      expect(logger.warn).toHaveBeenCalledWith(
-        "Spotify search failed during tri-platform search",
-        expect.objectContaining({ keyword: "hachimi", error: "spotify down" }),
-      );
-    });
-
-    test("Bilibili and YouTube failures also fall back to [] independently (Promise.allSettled)", async () => {
-      const SearchService = require("../../src/search/search_service");
-
-      const result = await SearchService.searchTriPlatforms({
-        keyword: "hachimi",
-        limitPerPlatform: 5,
-        bilibiliApi: { searchVideos: jest.fn().mockRejectedValue(new Error("bili down")) },
-        youtubeExtractor: { searchVideos: jest.fn().mockRejectedValue(new Error("yt down")) },
-        spotifyClient: { searchTracks: jest.fn().mockResolvedValue([{ id: "s1", title: "s", artists: [], durationSec: 1 }]) },
-      });
-
-      expect(result.bilibili).toEqual([]);
-      expect(result.youtube).toEqual([]);
-      expect(result.spotify).toHaveLength(1);
-    });
+    expect(result.bilibili).toEqual([]);
+    expect(result.youtube).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Bilibili search failed during dual-platform search",
+      expect.objectContaining({ keyword: "hachimi", error: "bili down" }),
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      "YouTube search failed during dual-platform search",
+      expect.objectContaining({ keyword: "hachimi", error: "yt down" }),
+    );
   });
 });
