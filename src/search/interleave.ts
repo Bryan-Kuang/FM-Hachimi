@@ -1,7 +1,7 @@
 /**
  * Round-robin interleaving of multiple ranked lists into one ordered list,
- * used to combine per-platform search results (Bilibili / YouTube / Spotify)
- * into a single numbered list without any platform dominating the front.
+ * used to combine per-platform search results (Bilibili / YouTube) into a
+ * single numbered list without any platform dominating the front.
  */
 
 /**
@@ -10,8 +10,8 @@
  * within a round. Exhausted lists are skipped (no gaps/placeholders).
  *
  * @example
- * interleaveRoundRobin([[b1, b2], [y1], [s1, s2, s3]])
- * // → [b1, y1, s1, b2, s2, s3]
+ * interleaveRoundRobin([[b1, b2], [y1, y2, y3]])
+ * // → [b1, y1, b2, y2, y3]
  */
 export function interleaveRoundRobin<T>(lists: T[][]): T[] {
   const result: T[] = [];

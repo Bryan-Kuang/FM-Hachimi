@@ -7,7 +7,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import BilibiliValidator = require('../bilibili/validator');
 import YouTubeValidator = require('../youtube/validator');
-import SpotifyValidator = require('../spotify/validator');
 import * as logger from '../services/logger_service';
 
 export type Platform = 'bilibili' | 'youtube' | 'unknown';
@@ -18,7 +17,6 @@ export type RouteKind =
   | 'youtube-playlist'
   | 'bilibili-fav'
   | 'bilibili-collection'
-  | 'spotify'
   | 'attachment'
   | 'unknown-url'
   | 'keyword';
@@ -30,9 +28,8 @@ export interface RouteResult {
   normalizedUrl: string | null;
   /** Original input */
   raw: string;
-  /** Fine-grained classification beyond `platform` (playlists, attachments, Spotify, …). */
+  /** Fine-grained classification beyond `platform` (playlists, attachments, …). */
   kind: RouteKind;
-  spotify?: { type: 'track' | 'album' | 'playlist'; id: string };
   youtubePlaylist?: { listId: string };
   bilibiliFav?: { mediaId: string };
   bilibiliCollection?: { mid: string; seasonId: string; listType: 'season' | 'series' };
@@ -67,22 +64,6 @@ export function routeQuery(query: string): RouteResult {
       raw: trimmed,
       kind: 'attachment',
     };
-  }
-
-  // Spotify track/album/playlist link or URI. Must precede the generic
-  // https? fallback below since spotify: URIs don't match that prefix.
-  if (SpotifyValidator.isSpotifyUrl(trimmed)) {
-    const parsed = SpotifyValidator.parse(trimmed);
-    if (parsed) {
-      return {
-        platform: 'unknown',
-        isUrl: true,
-        normalizedUrl: `https://open.spotify.com/${parsed.kind}/${parsed.id}`,
-        raw: trimmed,
-        kind: 'spotify',
-        spotify: { type: parsed.kind, id: parsed.id },
-      };
-    }
   }
 
   // Bilibili favorites folder (收藏夹).

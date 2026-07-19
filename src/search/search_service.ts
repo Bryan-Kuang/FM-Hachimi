@@ -1,6 +1,5 @@
 import SearchRanker = require('../utils/search_ranker');
 import * as logger from '../services/logger_service';
-import type { SpotifySearchResult } from '../spotify/types';
 
 interface SearchVideo {
   id?: string;
@@ -48,26 +47,6 @@ interface DualSearchOptions {
 interface DualSearchResult {
   bilibili: SearchVideo[];
   youtube: SearchVideo[];
-  rawBilibiliCount: number;
-  rawYouTubeCount: number;
-}
-
-interface SpotifySearcherLike {
-  searchTracks(keyword: string, limit: number): Promise<SpotifySearchResult[]>;
-}
-
-interface TriSearchOptions {
-  keyword: string;
-  limitPerPlatform: number;
-  bilibiliApi?: SearcherLike | null;
-  youtubeExtractor?: SearcherLike | null;
-  spotifyClient?: SpotifySearcherLike | null;
-}
-
-interface TriSearchResult {
-  bilibili: SearchVideo[];
-  youtube: SearchVideo[];
-  spotify: SpotifySearchResult[];
   rawBilibiliCount: number;
   rawYouTubeCount: number;
 }
@@ -121,74 +100,35 @@ async function searchYouTube({
   }
 }
 
+/**
+ * Concurrent dual-platform keyword search (Bilibili + YouTube).
+ * `Promise.allSettled` so one platform's failure never blocks the other — a
+ * rejected platform simply contributes an empty list, logged at warn.
+ */
 async function searchDualPlatforms({
   keyword,
   limitPerPlatform,
   bilibiliApi,
   youtubeExtractor,
 }: DualSearchOptions): Promise<DualSearchResult> {
-  const [bilibiliRaw, youtubeRaw] = await Promise.all([
-    (async () => {
-      try {
-        return responseToArray(await bilibiliApi?.searchVideos(keyword, 1, limitPerPlatform)).map(normalizeBilibiliResult);
-      } catch {
-        return [];
-      }
-    })(),
-    (async () => {
-      try {
-        return responseToArray(await youtubeExtractor?.searchVideos(keyword, limitPerPlatform));
-      } catch {
-        return [];
-      }
-    })(),
-  ]);
-
-  return {
-    bilibili: rankAndLimit(bilibiliRaw, keyword, limitPerPlatform),
-    youtube: rankAndLimit(youtubeRaw, keyword, limitPerPlatform),
-    rawBilibiliCount: bilibiliRaw.length,
-    rawYouTubeCount: youtubeRaw.length,
-  };
-}
-
-/**
- * Concurrent tri-platform keyword search (Bilibili + YouTube + Spotify).
- * `Promise.allSettled` so one platform's failure (or `null`/absent client,
- * e.g. Spotify disabled) never blocks the others — a rejected/absent
- * platform simply contributes an empty list, logged at warn.
- */
-async function searchTriPlatforms({
-  keyword,
-  limitPerPlatform,
-  bilibiliApi,
-  youtubeExtractor,
-  spotifyClient,
-}: TriSearchOptions): Promise<TriSearchResult> {
-  const [bilibiliOutcome, youtubeOutcome, spotifyOutcome] = await Promise.allSettled([
+  const [bilibiliOutcome, youtubeOutcome] = await Promise.allSettled([
     (async () => responseToArray(await bilibiliApi?.searchVideos(keyword, 1, limitPerPlatform)).map(normalizeBilibiliResult))(),
     (async () => responseToArray(await youtubeExtractor?.searchVideos(keyword, limitPerPlatform)))(),
-    (async () => (spotifyClient ? spotifyClient.searchTracks(keyword, limitPerPlatform) : []))(),
   ]);
 
   const bilibiliRaw = bilibiliOutcome.status === 'fulfilled' ? bilibiliOutcome.value : [];
   const youtubeRaw = youtubeOutcome.status === 'fulfilled' ? youtubeOutcome.value : [];
-  const spotifyRaw = spotifyOutcome.status === 'fulfilled' ? spotifyOutcome.value : [];
 
   if (bilibiliOutcome.status === 'rejected') {
-    logger.warn('Bilibili search failed during tri-platform search', { keyword, error: (bilibiliOutcome.reason as Error)?.message });
+    logger.warn('Bilibili search failed during dual-platform search', { keyword, error: (bilibiliOutcome.reason as Error)?.message });
   }
   if (youtubeOutcome.status === 'rejected') {
-    logger.warn('YouTube search failed during tri-platform search', { keyword, error: (youtubeOutcome.reason as Error)?.message });
-  }
-  if (spotifyOutcome.status === 'rejected') {
-    logger.warn('Spotify search failed during tri-platform search', { keyword, error: (spotifyOutcome.reason as Error)?.message });
+    logger.warn('YouTube search failed during dual-platform search', { keyword, error: (youtubeOutcome.reason as Error)?.message });
   }
 
   return {
     bilibili: rankAndLimit(bilibiliRaw, keyword, limitPerPlatform),
     youtube: rankAndLimit(youtubeRaw, keyword, limitPerPlatform),
-    spotify: spotifyRaw.slice(0, limitPerPlatform),
     rawBilibiliCount: bilibiliRaw.length,
     rawYouTubeCount: youtubeRaw.length,
   };
@@ -200,5 +140,4 @@ export = {
   searchBilibili,
   searchYouTube,
   searchDualPlatforms,
-  searchTriPlatforms,
 };

@@ -1,7 +1,6 @@
 /**
  * Playlist resolvers (Task 2.6) — YouTube playlist mapping, Bilibili fav/
- * collection pagination + progress, multipart mapping, Spotify → ytsearch1:
- * lazy URLs.
+ * collection pagination + progress, multipart mapping.
  */
 
 jest.mock("../../src/services/logger_service", () => ({
@@ -17,7 +16,6 @@ const {
   resolveBilibiliCollection,
   resolveBilibiliMultipart,
 } = require("../../src/playlists/bilibili_playlist_resolver");
-const { resolveSpotifyCollection } = require("../../src/playlists/spotify_playlist_resolver");
 
 describe("resolveYouTubePlaylist", () => {
   test("maps entries into PlaylistItems", async () => {
@@ -225,54 +223,5 @@ describe("resolveBilibiliMultipart", () => {
 
     expect(result.items).toHaveLength(2);
     expect(result.truncated).toBe(true);
-  });
-});
-
-describe("resolveSpotifyCollection", () => {
-  test("album: maps tracks into lazy ytsearch1: URLs", async () => {
-    const client = {
-      getAlbum: jest.fn().mockResolvedValue({
-        name: "My Album",
-        total: 2,
-        tracks: [
-          { title: "Track A", artists: ["Artist A"], durationSec: 200, thumbnail: "thumb-a" },
-          { title: "Track B", artists: ["Artist B"], durationSec: 210, thumbnail: "thumb-b" },
-        ],
-      }),
-      getPlaylist: jest.fn(),
-    };
-
-    const result = await resolveSpotifyCollection({ type: "album", id: "abc", client, maxItems: 100 });
-
-    expect(client.getAlbum).toHaveBeenCalledWith("abc", 100);
-    expect(client.getPlaylist).not.toHaveBeenCalled();
-    expect(result.kind).toBe("spotify-album");
-    expect(result.title).toBe("My Album");
-    expect(result.items[0]).toEqual({
-      url: "ytsearch1:Artist A Track A",
-      title: "Track A",
-      durationSec: 200,
-      platform: "youtube",
-      author: "Artist A",
-      thumbnail: "thumb-a",
-    });
-    expect(result.truncated).toBe(false);
-  });
-
-  test("playlist: calls getPlaylist and marks kind spotify-playlist", async () => {
-    const client = {
-      getAlbum: jest.fn(),
-      getPlaylist: jest.fn().mockResolvedValue({
-        name: "My Playlist",
-        total: 5,
-        tracks: [{ title: "Only Track", artists: ["Solo Artist"], durationSec: 100 }],
-      }),
-    };
-
-    const result = await resolveSpotifyCollection({ type: "playlist", id: "xyz", client, maxItems: 1 });
-
-    expect(client.getPlaylist).toHaveBeenCalledWith("xyz", 1);
-    expect(result.kind).toBe("spotify-playlist");
-    expect(result.truncated).toBe(true); // 1 item returned vs. total: 5
   });
 });

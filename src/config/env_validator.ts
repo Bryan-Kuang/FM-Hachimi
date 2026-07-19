@@ -90,14 +90,6 @@ export function validateEnv(env: NodeJS.ProcessEnv = process.env): EnvValidation
     warnings.push(`Unrecognized LOG_LEVEL "${env.LOG_LEVEL}"; Winston will fall back to info`);
   }
 
-  const hasSpotifyId = isNonEmptyString(env.SPOTIFY_CLIENT_ID);
-  const hasSpotifySecret = isNonEmptyString(env.SPOTIFY_CLIENT_SECRET);
-  if (hasSpotifyId !== hasSpotifySecret) {
-    warnings.push(
-      "Only one of SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET is set; Spotify support stays disabled until both are provided"
-    );
-  }
-
   if (errors.length > 0) {
     return { ok: false, errors, warnings };
   }

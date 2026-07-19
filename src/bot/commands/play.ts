@@ -17,30 +17,12 @@ import { playPlaylist, playAttachment } from '../../playback/playlist_coordinato
 import { validateAttachment, buildAttachmentTrackData, type AttachmentInput } from '../../playback/attachment_track';
 import * as logger from '../../services/logger_service';
 import config = require('../../config/config');
-import SpotifyClient = require('../../spotify/client');
-import { findYouTubeMatch } from '../../spotify/resolver';
 import { interleaveRoundRobin } from '../../search/interleave';
 import BilibiliApi = require('../../bilibili/api');
 import BilibiliValidator = require('../../bilibili/validator');
 import { resolvePlaylist } from '../../playlists';
 import { resolveBilibiliMultipart } from '../../playlists/bilibili_playlist_resolver';
 import type { ResolvedPlaylist, PlaylistProgress } from '../../playlists/types';
-
-// Lazily constructed on first Spotify link — mirrors the
-// `require('../../bilibili/api')` singleton-on-demand precedent below.
-// No composition-root wiring needed since the client is stateless besides
-// its own token cache.
-let spotifyClient: SpotifyClient | null = null;
-function getSpotifyClient(): SpotifyClient {
-  if (!spotifyClient) {
-    spotifyClient = new SpotifyClient({
-      clientId: config.spotify.clientId || '',
-      clientSecret: config.spotify.clientSecret || '',
-      market: config.spotify.market,
-    });
-  }
-  return spotifyClient;
-}
 
 /** Rejects with `timeoutError` if `promise` doesn't settle within `ms`. */
 function withTimeout<T>(promise: Promise<T>, ms: number, timeoutError: string): Promise<T> {
@@ -55,11 +37,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, timeoutError: string): 
 
 /**
  * Shared resolve → bulk-enqueue → report flow for every playlist source
- * (YouTube playlist, Bilibili fav/collection/multipart, Spotify album/
- * playlist). `resolve` does the source-specific fetch (and may itself throw,
- * e.g. BILIBILI_FAV_PRIVATE) while everything after that — progress
- * throttling, queueing via playPlaylist, and the final reply — is identical
- * across sources.
+ * (YouTube playlist, Bilibili fav/collection/multipart). `resolve` does the
+ * source-specific fetch (and may itself throw, e.g. BILIBILI_FAV_PRIVATE)
+ * while everything after that — progress throttling, queueing via
+ * playPlaylist, and the final reply — is identical across sources.
  */
 async function runPlaylistFlow(
   interaction: ChatInputCommandInteraction<'cached'>,
@@ -161,10 +142,7 @@ async function runAttachmentFlow(
 
 /** Whether route.kind represents a bulk playlist source (Task 2.9). */
 function isPlaylistRoute(route: RouteResult): boolean {
-  if (route.kind === 'youtube-playlist' || route.kind === 'bilibili-fav' || route.kind === 'bilibili-collection') {
-    return true;
-  }
-  return route.kind === 'spotify' && Boolean(route.spotify) && route.spotify!.type !== 'track';
+  return route.kind === 'youtube-playlist' || route.kind === 'bilibili-fav' || route.kind === 'bilibili-collection';
 }
 
 const createPlayCommand = (playbackService: any, _queueService: any) => ({
@@ -363,111 +341,17 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         return;
       }
 
-      // ─── Spotify track link ─────────────────────────────────────────────────
-      // Album/playlist Spotify routes (route.spotify.type !== 'track') fall
-      // through to the playlist branch below instead (Task 2.9).
-      if (route.kind === 'spotify' && route.spotify && route.spotify.type === 'track') {
-        if (!config.spotify.enabled) {
-          await interaction.editReply({ content: '[!] Spotify 支持未配置（缺少 SPOTIFY_CLIENT_ID/SECRET）' });
-          return;
-        }
-
-        const ytExtractorForSpotify = playbackService.getYouTubeExtractor();
-        if (!ytExtractorForSpotify) {
-          await interaction.editReply({ content: '[!] YouTube support is not available' });
-          return;
-        }
-
-        await interaction.editReply({ content: '正在解析 Spotify 曲目...' });
-
-        const spotify = getSpotifyClient();
-        let trackMeta: Awaited<ReturnType<typeof spotify.getTrack>>;
-        try {
-          trackMeta = await spotify.getTrack(route.spotify.id);
-        } catch (err: unknown) {
-          const msg = (err as Error).message;
-          if (msg === 'SPOTIFY_NOT_FOUND') {
-            await interaction.editReply({ content: '[!] 曲目不存在或不公开' });
-          } else if (msg === 'SPOTIFY_AUTH_FAILED') {
-            await interaction.editReply({ content: '[!] Spotify 凭据无效' });
-          } else {
-            await interaction.editReply({ content: `[!] Spotify 曲目解析失败: ${msg.substring(0, 100)}` });
-          }
-          logger.error('Spotify track lookup failed in play command', {
-            spotifyId: route.spotify.id,
-            error: msg,
-            user: user.username,
-          });
-          return;
-        }
-
-        const match = await findYouTubeMatch(trackMeta, ytExtractorForSpotify);
-        if (!match) {
-          const artist = trackMeta.artists[0] ?? '';
-          await interaction.editReply({
-            content: `[!] 找不到对应的 YouTube 视频: ${artist} - ${trackMeta.title}`,
-          });
-          return;
-        }
-
-        const spotifyStageReporter = createInteractionStageReporter(interaction, 'YouTube');
-        const spotifyResult = await PlaybackCoordinator.playUrl('youtube', {
-          interaction,
-          playerService: playbackService,
-          url: match.url,
-          onStage: spotifyStageReporter,
-        });
-        await spotifyStageReporter.finish();
-        if (!spotifyResult.success) {
-          const msg = spotifyResult.error || '';
-          const lowerMsg = msg.toLowerCase();
-          if (lowerMsg.includes('auth/bot check') || lowerMsg.includes('automatic cookie refresh') || lowerMsg.includes('cookies expired')) {
-            await interaction.editReply({
-              content: '[✗] YouTube auth check failed after automatic cookie refresh. The bot account may need a fresh VPS browser login.',
-            });
-          } else if (msg.includes('unavailable') || msg.includes('private')) {
-            await interaction.editReply({ content: '[!] Video is unavailable or private' });
-          } else if (msg.includes('Age-restricted')) {
-            await interaction.editReply({ content: '[!] Age-restricted video (login required)' });
-          } else {
-            await interaction.editReply({ content: `[!] YouTube extraction failed: ${msg.substring(0, 100)}` });
-          }
-          logger.error('YouTube extraction failed in play command (Spotify)', {
-            url: match.url,
-            error: msg,
-            user: user.username,
-          });
-          return;
-        }
-
-        await interaction.editReply({ content: `>> 已添加: ${trackMeta.title}（Spotify → YouTube）` });
-        logger.info('Play command completed (Spotify → YouTube)', {
-          query,
-          spotifyId: route.spotify.id,
-          url: match.url,
-          title: trackMeta.title,
-          user: user.username,
-        });
-        return;
-      }
-
       // ─── Playlist ingestion (YouTube playlist / Bilibili fav / Bilibili
-      // collection / Spotify album & playlist) ────────────────────────────────
-      // Replaces the Task 1.3 Spotify album/playlist stub.
+      // collection) ─────────────────────────────────────────────────────────
       if (isPlaylistRoute(route)) {
         if (route.kind === 'youtube-playlist' && !playbackService.getYouTubeExtractor()) {
           await interaction.editReply({ content: '[!] YouTube support is not available' });
-          return;
-        }
-        if (route.kind === 'spotify' && !config.spotify.enabled) {
-          await interaction.editReply({ content: '[!] Spotify 支持未配置（缺少 SPOTIFY_CLIENT_ID/SECRET）' });
           return;
         }
 
         await runPlaylistFlow(interaction, playbackService, (onProgress) => resolvePlaylist(route, {
           youtubeExtractor: playbackService.getYouTubeExtractor(),
           bilibiliApi: BilibiliApi,
-          spotifyClient: config.spotify.enabled ? getSpotifyClient() : null,
           maxItems: config.playlists.maxItems,
           onProgress,
         }));
@@ -487,9 +371,8 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         return;
       }
 
-      // ─── Keyword search (Bilibili + YouTube + Spotify) ───────────────────────
-      const searchPlatformsLabel = config.spotify.enabled ? 'Bilibili、YouTube 和 Spotify' : 'Bilibili & YouTube';
-      await interaction.editReply({ content: `[?] Searching "${query}" on ${searchPlatformsLabel}...` });
+      // ─── Keyword search (Bilibili + YouTube) ─────────────────────────────────
+      await interaction.editReply({ content: `[?] Searching "${query}" on Bilibili & YouTube...` });
 
       const ytExtractorForSearch = playbackService.getYouTubeExtractor();
       const perPlatformLimit = config.search.limitPerPlatform;
@@ -498,32 +381,27 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const bilibiliApi = require('../../bilibili/api') as any;
 
-      const searchResult = await SearchService.searchTriPlatforms({
+      const searchResult = await SearchService.searchDualPlatforms({
         keyword:          query as string,
         limitPerPlatform: perPlatformLimit,
         bilibiliApi,
         youtubeExtractor: ytExtractorForSearch,
-        spotifyClient:    config.spotify.enabled ? getSpotifyClient() : null,
       });
-      const biliResults    = searchResult.bilibili;
-      const ytResults      = searchResult.youtube;
-      const spotifyResults = searchResult.spotify;
+      const biliResults = searchResult.bilibili;
+      const ytResults    = searchResult.youtube;
 
-      if (biliResults.length === 0 && ytResults.length === 0 && spotifyResults.length === 0) {
+      if (biliResults.length === 0 && ytResults.length === 0) {
         await interaction.editReply({ content: `No results found for "${query}"` });
         return;
       }
 
       // Per-platform entries, round-robin interleaved into one numbered list
-      // (bili1, yt1, spotify1, bili2, ...) and paginated by the shared search
+      // (bili1, yt1, bili2, yt2, ...) and paginated by the shared search
       // results view. Cap at 30 total; the per-page select menu removes any
       // need for a 25-entry cap (Discord's select-option limit).
-      const biliEntries    = SearchResultsView.createSessionEntries(biliResults as any[], 'bilibili');
-      const ytEntries      = SearchResultsView.createSessionEntries(ytResults as any[], 'youtube', biliEntries.length);
-      const spotifyEntries = SearchResultsView.createSessionEntries(
-        spotifyResults as any[], 'spotify', biliEntries.length + ytEntries.length,
-      );
-      const interleavedEntries = interleaveRoundRobin([biliEntries, ytEntries, spotifyEntries]).slice(0, 30);
+      const biliEntries = SearchResultsView.createSessionEntries(biliResults as any[], 'bilibili');
+      const ytEntries   = SearchResultsView.createSessionEntries(ytResults as any[], 'youtube', biliEntries.length);
+      const interleavedEntries = interleaveRoundRobin([biliEntries, ytEntries]).slice(0, 30);
 
       const session = {
         keyword: query as string,
@@ -539,8 +417,7 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
       });
 
       // Only prewarm the first page's worth per platform; the rest may never
-      // be viewed. Spotify entries have no direct URL, so they can't be
-      // prewarmed.
+      // be viewed.
       playbackService.prewarmBilibiliUrls?.(
         BilibiliUrls.collectBilibiliUrls(biliResults, SearchResultsView.RESULTS_PER_PAGE),
         {
@@ -558,11 +435,10 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         },
       );
 
-      logger.info('Play keyword search: showing interleaved tri-platform results', {
+      logger.info('Play keyword search: showing interleaved dual-platform results', {
         query,
         biliCount:    biliResults.length,
         ytCount:      ytResults.length,
-        spotifyCount: spotifyResults.length,
         rawBiliCount: searchResult.rawBilibiliCount,
         rawYtCount:   searchResult.rawYouTubeCount,
         user: user.username,

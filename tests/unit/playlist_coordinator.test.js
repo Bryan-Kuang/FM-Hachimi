@@ -59,21 +59,6 @@ describe("buildPendingTrackData", () => {
     expect(data.platform).toBe("bilibili");
   });
 
-  test("ytsearch1: pseudo-URL is kept out of the url field but present in normalizedUrl/originalUrl", () => {
-    const item = {
-      url: "ytsearch1:Artist Name Track Title",
-      title: "Track Title",
-      durationSec: 180,
-      platform: "youtube",
-    };
-
-    const data = buildPendingTrackData(item);
-
-    expect(data.url).toBeUndefined();
-    expect(data.normalizedUrl).toBe("ytsearch1:Artist Name Track Title");
-    expect(data.originalUrl).toBe("ytsearch1:Artist Name Track Title");
-  });
-
   test("extractedAt is pinned to the Unix epoch (always-expired pending marker)", () => {
     const data = buildPendingTrackData({
       url: "https://www.bilibili.com/video/BV1", title: "T", durationSec: 0, platform: "bilibili",

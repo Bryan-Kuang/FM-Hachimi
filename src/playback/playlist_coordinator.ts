@@ -25,11 +25,6 @@ const CHROME_USER_AGENT =
  * moment this track is about to play.
  */
 export function buildPendingTrackData(item: PlaylistItem): ExtractedTrackData {
-  // Pseudo-URLs (ytsearch1:...) resolved lazily from Spotify items aren't
-  // real links — keep them out of the `url` field so nothing renders them as
-  // a clickable link in the UI.
-  const isPseudoUrl = item.url.startsWith('ytsearch');
-
   return {
     title: item.title,
     audioUrl: '',
@@ -37,7 +32,7 @@ export function buildPendingTrackData(item: PlaylistItem): ExtractedTrackData {
     platform: item.platform,
     normalizedUrl: item.url,
     originalUrl: item.url,
-    url: isPseudoUrl ? undefined : item.url,
+    url: item.url,
     // Epoch → Track.isExpired() is always true → play-time refresh always
     // fires. Do not change this to `new Date().toISOString()` — that would
     // silently disable lazy extraction for up to urlRefreshThreshold (20 min).
