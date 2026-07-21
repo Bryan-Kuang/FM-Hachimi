@@ -104,6 +104,7 @@ export interface InterfaceUpdaterLike {
   clearContext(guildId: GuildId): void;
   hasContext(guildId: GuildId): boolean;
   getContext(guildId: GuildId): { channelId: string; messageId: string } | null;
+  repostNowPlaying(guildId: GuildId): Promise<void>;
 }
 
 // ─── Extractor duck-type ──────────────────────────────────────────────────

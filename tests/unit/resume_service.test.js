@@ -278,7 +278,9 @@ describe('ResumeService', () => {
       expect(player.pause).toHaveBeenCalled();
     });
 
-    test('rejoins a channel with no human listeners but does not resume playback', async () => {
+    test('resumes playback even with no human listeners (radio-station behavior)', async () => {
+      // Option A: the bot is a station, not on-demand — an empty channel no
+      // longer suppresses playback.
       persistSnapshot();
       const { deps, player } = makeDeps({ voiceChannel: makeVoiceChannel({ humans: 0 }) });
 
@@ -286,7 +288,7 @@ describe('ResumeService', () => {
 
       expect(result).toEqual({ restored: 1, skipped: 0 });
       expect(player.joinVoiceChannel).toHaveBeenCalled();
-      expect(player.playCurrentTrack).not.toHaveBeenCalled();
+      expect(player.playCurrentTrack).toHaveBeenCalledWith({ startAtSeconds: 42 });
     });
 
     test('resumes when occupants exist but their members are not cached yet', async () => {
@@ -304,7 +306,7 @@ describe('ResumeService', () => {
       expect(player.playCurrentTrack).toHaveBeenCalledWith({ startAtSeconds: 42 });
     });
 
-    test('rejoins without playback when only the bot itself remains and members are uncached', async () => {
+    test('resumes playback when only the bot remains and members are uncached (radio-station behavior)', async () => {
       persistSnapshot();
       const { deps, player } = makeDeps({
         voiceChannel: makeVoiceChannel({ humans: 0, membersCached: false }),
@@ -314,7 +316,7 @@ describe('ResumeService', () => {
 
       expect(result).toEqual({ restored: 1, skipped: 0 });
       expect(player.joinVoiceChannel).toHaveBeenCalled();
-      expect(player.playCurrentTrack).not.toHaveBeenCalled();
+      expect(player.playCurrentTrack).toHaveBeenCalledWith({ startAtSeconds: 42 });
     });
 
     test('skips when the voice channel no longer exists', async () => {

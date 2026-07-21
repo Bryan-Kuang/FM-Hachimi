@@ -260,23 +260,22 @@ class ResumeService {
     const { guildId, textChannelId, roomWasEmpty } = ctx;
     const state = payload ?? EMPTY_PAYLOAD;
 
-    // Don't resume PLAYBACK in a channel nobody is listening in — but always
-    // rejoin it: the bot's presence must survive every deploy (the 2026-07-09
-    // incident: deploy landed while the bot played to an emptied-out channel,
-    // the old empty-channel skip left it evicted for good).
+    // Radio-station behavior: resume/keep playing regardless of who is
+    // listening. An empty room no longer downgrades playback — the bot always
+    // rejoins (so the 2026-07-09 eviction incident stays fixed) and now also
+    // plays. Emptiness only affects the log line.
     if (roomWasEmpty) {
-      logger.info('Resume: voice channel is empty, rejoining without playback', {
+      logger.info('Resume: voice channel is empty, resuming playback anyway (radio-station behavior)', {
         guildId,
         channelId: voiceChannel.id,
       });
     }
 
-    // Presence-only snapshot (the bot was parked with nothing live), or a
-    // playback snapshot downgraded because the room is empty: rejoin instead
-    // of resuming a track. Radio only restarts when someone is listening.
-    if (roomWasEmpty || !state.tracks || state.tracks.length === 0) {
+    // Presence-only snapshot (the bot was parked with nothing live): rejoin and
+    // restart radio if it was armed. Playback snapshots fall through and resume.
+    if (!state.tracks || state.tracks.length === 0) {
       return this.restorePresence(deps, guildId, textChannelId, state, voiceChannel, {
-        restartRadio: !roomWasEmpty,
+        restartRadio: true,
       });
     }
 
@@ -350,16 +349,15 @@ class ResumeService {
   }
 
   /**
-   * Rejoin a voice channel without resuming a track — either the bot was
-   * merely parked there, or it was playing but the room is empty now. No
-   * announcement and no inactivity timer: the pre-restart session was
-   * already past (or outside) its idle countdown, and evicting the bot right
-   * after it fought its way back would defeat the point. With restartRadio, a
-   * radio-mode snapshot (armed rotation, or SIGTERM landed between rotation
-   * tracks) restarts the rotation from scratch via radioService.start(),
-   * which seeds and plays a fresh track — resume() can't be used here since
-   * it assumes a restored track is already playing. Callers pass
-   * restartRadio: false for an empty room so radio doesn't stream to nobody.
+   * Rejoin a voice channel without resuming a track — the bot was merely parked
+   * there (presence-only snapshot, no live tracks). No announcement and no
+   * inactivity timer: the pre-restart session was already past (or outside) its
+   * idle countdown, and evicting the bot right after it fought its way back
+   * would defeat the point. With restartRadio, a radio-mode snapshot (armed
+   * rotation, or SIGTERM landed between rotation tracks) restarts the rotation
+   * from scratch via radioService.start(), which seeds and plays a fresh track —
+   * resume() can't be used here since it assumes a restored track is already
+   * playing. Radio-station behavior: restart even in an empty channel.
    */
   private async restorePresence(
     deps: RestoreDeps,

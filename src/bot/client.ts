@@ -18,6 +18,7 @@ import config = require('../config/config');
 import Debug = require('../utils/debug');
 import CommandRegistry = require('./commands');
 import * as TestingAccess from './testing_access';
+import { isFirstListenerJoin } from './voice_presence';
 
 // Augment discord.js Client with bot-specific properties
 declare module 'discord.js' {
@@ -160,6 +161,17 @@ class BotClient {
         oldChannel: oldState.channelId,
         newChannel: newState.channelId,
       });
+
+      // A listener arrived in the channel the bot is playing to alone: repost
+      // the now-playing card so it isn't buried under later chat. Only fires on
+      // the empty→occupied transition (first human), and is throttled inside
+      // repostNowPlaying so join/leave flapping can't spam the channel.
+      const botUserId = this.client.user?.id;
+      if (botUserId && isFirstListenerJoin(oldState as any, newState as any, botUserId)) {
+        playerService.repostNowPlaying?.(newState.guild.id)?.catch((err: Error) => {
+          logger.warn('Failed to repost now-playing card on listener join', { error: err.message });
+        });
+      }
 
       const annoyingService = playerService.getAnnoyingService?.();
 
