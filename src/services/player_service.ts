@@ -396,6 +396,11 @@ class PlayerService extends EventEmitter {
     return this.interfaceUpdater.getContext(guildId);
   }
 
+  /** Repost the now-playing card to the bottom of the text channel. */
+  repostNowPlaying(guildId: GuildId): Promise<void> {
+    return this.interfaceUpdater.repostNowPlaying(guildId);
+  }
+
   // ---------------------------------------------------------------------------
   // High-level playback entry point
   // ---------------------------------------------------------------------------

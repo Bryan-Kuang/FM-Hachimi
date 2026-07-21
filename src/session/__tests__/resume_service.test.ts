@@ -310,7 +310,9 @@ describe('ResumeService radio mode', () => {
       expect(radioService.resume).not.toHaveBeenCalled();
     });
 
-    it('rejoins an empty channel too, but without restarting radio', async () => {
+    it('restarts radio in an empty channel too (radio-station behavior)', async () => {
+      // Option A: a presence-only radio snapshot re-arms rotation regardless of
+      // who is listening — the bot is a station, not an on-demand player.
       const svc = new ResumeService(opts());
       svc.persist(makeSessionManager(idlePlayer({ radioMode: true })));
 
@@ -338,13 +340,14 @@ describe('ResumeService radio mode', () => {
 
       expect(result.restored).toBe(1);
       expect(player.joinVoiceChannel).toHaveBeenCalledWith(voiceChannel);
-      // Nobody listening — don't stream radio to an empty room.
-      expect(radioService.start).not.toHaveBeenCalled();
+      // Empty room no longer suppresses radio.
+      expect(radioService.start).toHaveBeenCalledWith('guild-1', voiceChannel, 'text-1');
     });
 
-    it('downgrades a playback snapshot to a presence rejoin when the channel is empty', async () => {
-      // The 2026-07-09 04:09 UTC incident: bot playing at deploy time, channel
-      // empty at restart — it must still come back, just silently.
+    it('resumes a playback snapshot even when the channel is empty (radio-station behavior)', async () => {
+      // Option A supersedes the old 2026-07-09 downgrade: the bot still always
+      // rejoins (eviction stays fixed), but now also resumes playback instead of
+      // coming back silently.
       const svc = new ResumeService(opts());
       svc.persist(makeSessionManager(makePlayer({ radioMode: true })));
 
@@ -377,11 +380,11 @@ describe('ResumeService radio mode', () => {
 
       expect(result.restored).toBe(1);
       expect(player.joinVoiceChannel).toHaveBeenCalledWith(voiceChannel);
-      expect(player.playCurrentTrack).not.toHaveBeenCalled();
-      expect(radioService.start).not.toHaveBeenCalled();
-      expect(radioService.resume).not.toHaveBeenCalled();
+      // Playback resumes, and radio re-arms via resume() (track already playing).
+      expect(player.playCurrentTrack).toHaveBeenCalledWith({ startAtSeconds: 42 });
+      expect(radioService.resume).toHaveBeenCalledWith('guild-1', 'text-1');
       await new Promise((resolve) => setImmediate(resolve));
-      expect(textChannel.send).not.toHaveBeenCalled();
+      expect(textChannel.send).toHaveBeenCalledWith(expect.stringContaining('基米永不灭'));
     });
   });
 

@@ -13,6 +13,7 @@ interface DiscordMessage {
 interface DiscordChannel {
   messages: {
     edit(messageId: string, options: unknown): Promise<DiscordMessage>;
+    delete(messageId: string): Promise<void>;
   };
   send(options: unknown): Promise<DiscordMessage>;
 }
@@ -33,6 +34,9 @@ class InterfaceUpdater {
   private sessionManager: SessionManager;
   private progressTracker: ProgressTracker;
   private audioManager: AudioManager;
+  /** Last repost time per guild — throttles the first-listener repost. */
+  private lastRepostAt: Map<string, number>;
+  private readonly repostCooldownMs = 10_000;
 
   constructor(
     sessionManager: SessionManager,
@@ -43,6 +47,7 @@ class InterfaceUpdater {
     this.sessionManager = sessionManager;
     this.progressTracker = progressTracker;
     this.audioManager = audioManager;
+    this.lastRepostAt = new Map();
   }
 
   setClient(client: DiscordClient): void {
@@ -181,6 +186,47 @@ class InterfaceUpdater {
       }
     } catch (e: unknown) {
       logger.error('Interface update failed', { guildId, error: (e as Error).message });
+    }
+  }
+
+  /**
+   * Repost the now-playing card to the bottom of the text channel. Called when
+   * the first listener joins a channel the bot has been playing to alone, so a
+   * card buried under later chat becomes reachable again. Deletes the old card
+   * and lets handleUpdate() send a fresh one (delete-and-repost). No-op when no
+   * live card exists, nothing is playing, or the guild is inside the cooldown.
+   */
+  async repostNowPlaying(guildId: string): Promise<void> {
+    const now = Date.now();
+    const last = this.lastRepostAt.get(guildId) ?? 0;
+    if (now - last < this.repostCooldownMs) return;
+
+    const session = this.sessionManager.get(guildId);
+    const ctx = session.uiContext as { channelId: string; messageId: string } | null;
+    if (!ctx || !ctx.channelId || !ctx.messageId) return; // no live card to move
+
+    const state = this._getPlayerState(guildId);
+    if (!state || !state.currentTrack) return; // nothing playing to advertise
+
+    const client = this.client;
+    if (!client) return;
+
+    this.lastRepostAt.set(guildId, now);
+
+    try {
+      const channel = (client.channels.cache.get(ctx.channelId) ??
+        await client.channels.fetch(ctx.channelId)) as DiscordChannel;
+      // Best-effort delete of the buried card; it may already be gone.
+      const oldMessageId = ctx.messageId;
+      try {
+        await channel.messages.delete(oldMessageId);
+      } catch (_) { /* already deleted */ }
+      // Drop the messageId so handleUpdate() takes the send-fresh path and
+      // repoints uiContext at the new message.
+      session.uiContext = { channelId: ctx.channelId, messageId: '' };
+      await this.handleUpdate(guildId, state);
+    } catch (e: unknown) {
+      logger.error('Now-playing card repost failed', { guildId, error: (e as Error).message });
     }
   }
 
