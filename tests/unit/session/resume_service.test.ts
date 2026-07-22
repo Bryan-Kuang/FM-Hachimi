@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-jest.mock('../../services/logger_service', () => ({
+jest.mock('../../../src/services/logger_service', () => ({
   info: jest.fn(),
   warn: jest.fn(),
   error: jest.fn(),
@@ -18,7 +18,7 @@ jest.mock('../../services/logger_service', () => ({
 }));
 
 // Track is only used to rehydrate snapshot rows; a thin stand-in is enough.
-jest.mock('../../models/track', () => {
+jest.mock('../../../src/models/track', () => {
   return class FakeTrack {
     [k: string]: any;
     constructor(raw: any, requestedBy: any) {
@@ -28,7 +28,7 @@ jest.mock('../../models/track', () => {
   };
 });
 
-import ResumeService = require('../resume_service');
+import ResumeService = require('../../../src/session/resume_service');
 
 function makePlayer(overrides: any = {}): any {
   return {

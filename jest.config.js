@@ -11,9 +11,9 @@ module.exports = {
     "^.+\\.jsx?$": "babel-jest",
   },
   moduleFileExtensions: ["js", "jsx", "ts", "tsx", "json", "node"],
+  // All tests live under tests/ (unit/, regression/, integration/) — src/ stays test-free.
   testMatch: [
-    "**/__tests__/**/*.[jt]s?(x)",
-    "**/?(*.)+(spec|test).[jt]s?(x)",
+    "<rootDir>/tests/**/?(*.)+(spec|test).[jt]s?(x)",
   ],
   collectCoverageFrom: [
     "src/**/*.{js,ts}",
@@ -26,12 +26,14 @@ module.exports = {
   setupFilesAfterEnv: ["<rootDir>/tests/setup.js"],
   verbose: true,
   collectCoverage: false,
+  // Ratchet: ~5 points below actual coverage (2026-07: statements 68%,
+  // branches 59%, functions 71%, lines 69%). Raise as coverage grows.
   coverageThreshold: {
     global: {
-      branches: 15,
-      functions: 15,
-      lines: 15,
-      statements: 15,
+      branches: 54,
+      functions: 66,
+      lines: 64,
+      statements: 63,
     },
   },
 };

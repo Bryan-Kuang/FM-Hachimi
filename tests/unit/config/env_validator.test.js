@@ -1,4 +1,4 @@
-const { validateEnv } = require("../env_validator");
+const { validateEnv } = require("../../../src/config/env_validator");
 
 function baseEnv(overrides = {}) {
   return { DISCORD_TOKEN: "token", CLIENT_ID: "client", ...overrides };

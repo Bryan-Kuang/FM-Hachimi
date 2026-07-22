@@ -1,4 +1,4 @@
-const { Registry, counter, histogram, snapshot, reset } = require("../metrics");
+const { Registry, counter, histogram, snapshot, reset } = require("../../../src/observability/metrics");
 
 describe("metrics Gauge", () => {
   test("set stores the latest value and get reads it", () => {

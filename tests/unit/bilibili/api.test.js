@@ -7,8 +7,8 @@
  * call, and merge both result sets before filtering.
  */
 
-const api = require("../api");
-const config = require("../../config/config");
+const api = require("../../../src/bilibili/api");
+const config = require("../../../src/config/config");
 
 function makeVideo(bvid, title, overrides = {}) {
   return {
