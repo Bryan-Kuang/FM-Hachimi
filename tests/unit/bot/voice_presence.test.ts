@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { isFirstListenerJoin } from '../voice_presence';
+import { isFirstListenerJoin } from '../../../src/bot/voice_presence';
 
 const BOT = 'bot-1';
 
