@@ -4,9 +4,14 @@ Runbook for deploying and operating F.M. Hachimi on the VPS.
 
 ## Cheat sheet — the five commands you actually run
 
+The VPS address, user, and key are deliberately not written down here (public
+repo — CI keeps them in the `DEPLOY_HOST`/`DEPLOY_USER`/`DEPLOY_SSH_KEY`
+secrets). Add a `Host fm-hachimi-vps` alias to your local `~/.ssh/config` once,
+then:
+
 ```bash
 # SSH to the VPS
-ssh -i ~/.ssh/oracle-bilibili.key ubuntu@40.233.105.255
+ssh fm-hachimi-vps
 
 # Tail the bot's logs (on the VPS)
 docker logs -f bilibili-discord-bot --tail 100
