@@ -211,6 +211,22 @@ responding after `WORLD_CUP_END`.
 - A degraded source logs `WorldCup poll failed; commands remain available as fallback`
   and `/worldcup status` reports `⚠️ Auto-updates degraded`.
 
+## Detecting problems
+
+Three layers, from most to least automated:
+
+1. **`/status` slash command** — the fastest health check, no SSH. Shows uptime,
+   deployed commit (`GIT_SHA`, baked into the image by CI), voice sessions,
+   per-platform media-cache usage, and cookie-refresh ages. Run it in any server.
+2. **Discord error alerts** — set `ERROR_WEBHOOK_URL` in `.env` and every
+   error-level log posts to that webhook (deduped 1/message/10 min, capped 5/min;
+   webhook failures are swallowed so alerting can't crash the bot). This is the
+   only path that surfaces *runtime* errors — deploy failures and cookie staleness
+   already alert via their own workflows. Leave unset in local dev.
+3. **The `ops:*` scripts and quick checks below** — for when you need to be on the
+   box. The `ops:*` scripts (`npm run ops:logs`, `ops:health`, `ops:deploy`,
+   `ops:ssh`) assume a `Host fm-hachimi-vps` entry in your `~/.ssh/config`.
+
 ## Quick checks
 
 ```bash

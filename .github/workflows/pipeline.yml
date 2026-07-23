@@ -98,6 +98,8 @@ jobs:
           tags: |
             ${{ steps.img.outputs.name }}:latest
             ${{ steps.img.outputs.name }}:${{ github.sha }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           # Scheduled rebuilds exist to pick up a fresh yt-dlp — layer caching
           # would defeat that (the pip install layer would be a cache hit), so
           # force a clean build on schedule.
