@@ -2,6 +2,30 @@
 
 Runbook for deploying and operating F.M. Hachimi on the VPS.
 
+## Cheat sheet — the five commands you actually run
+
+The VPS address, user, and key are deliberately not written down here (public
+repo — CI keeps them in the `DEPLOY_HOST`/`DEPLOY_USER`/`DEPLOY_SSH_KEY`
+secrets). Add a `Host fm-hachimi-vps` alias to your local `~/.ssh/config` once,
+then:
+
+```bash
+# SSH to the VPS
+ssh fm-hachimi-vps
+
+# Tail the bot's logs (on the VPS)
+docker logs -f bilibili-discord-bot --tail 100
+
+# Health check (on the VPS): container status + app healthz
+docker ps --format '{{.Names}}: {{.Status}}' && curl -s 127.0.0.1:9090/healthz
+
+# Trigger a deploy and watch it (local; any pushed main commit also deploys)
+gh workflow run pipeline.yml && gh run watch
+
+# Register/refresh slash commands manually (local; normally automatic post-deploy)
+npm run deploy:commands
+```
+
 ## Topology
 
 - **Host:** Oracle Cloud Ubuntu VPS, repo at `/home/ubuntu/bilibili-bot`, tracks `main`.

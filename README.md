@@ -92,3 +92,5 @@ npm start
 ```
 
 The full deployment, cookie, and monitoring runbook lives in `OPERATIONS.md`.
+An architecture overview with module, playback, and deploy-pipeline diagrams
+lives in [`docs/architecture.md`](docs/architecture.md).

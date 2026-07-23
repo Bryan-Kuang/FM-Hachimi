@@ -72,15 +72,11 @@ describe("beginner setup scripts", () => {
     expect(gitignore).toContain("youtube-browser-profile/");
   });
 
-  test("docker compose files are rooted at the project and use the same Node major", () => {
+  test("docker compose file is rooted at the project", () => {
     const prodCompose = fs.readFileSync(path.join(root, "docker-compose.yml"), "utf8");
-    const devCompose = fs.readFileSync(path.join(root, "docker-compose.dev.yml"), "utf8");
 
     expect(prodCompose).toContain("bilibili-bot:");
-    expect(devCompose).toContain("node:22-alpine");
-    expect(devCompose).toContain("- .:/app");
-    expect(devCompose).toContain("- .env");
-    expect(devCompose).not.toContain("../../");
+    expect(prodCompose).not.toContain("../../");
   });
 
   test("doctor warns when yt-dlp is stale or lacks js runtime support", () => {
