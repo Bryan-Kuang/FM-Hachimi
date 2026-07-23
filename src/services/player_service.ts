@@ -28,6 +28,7 @@ import type {
   ActionResult,
   PlayResult,
   QueueInfo,
+  SessionStatistics,
   StateChangedEvent,
 } from './types';
 
@@ -364,6 +365,10 @@ class PlayerService extends EventEmitter {
 
   getPlayer(guildId: GuildId): AudioPlayerLike {
     return this.audioManager.getPlayer(guildId);
+  }
+
+  getStatistics(): SessionStatistics | null {
+    return this.audioManager.getStatistics?.() ?? null;
   }
 
   getCurrentTrack(guildId: GuildId): Track | null {

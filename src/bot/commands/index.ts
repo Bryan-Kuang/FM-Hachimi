@@ -14,6 +14,7 @@ import radio = require('./radio');
 import annoying = require('./annoying');
 import dailyHachimi = require('./daily_hachimi');
 import worldCup = require('./world_cup');
+import status = require('./status');
 
 interface CommandDefinition {
   data: { name: string; toJSON?: () => unknown };
@@ -46,6 +47,7 @@ const commandFactories: CommandFactory[] = [
   annoying,
   dailyHachimi,
   worldCup,
+  status,
 ];
 
 const TESTING_DESCRIPTION_PREFIX = '[Testing] ';

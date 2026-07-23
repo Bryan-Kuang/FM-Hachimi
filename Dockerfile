@@ -50,6 +50,11 @@ COPY --from=builder /app/dist ./dist
 RUN chown -R node:node /app
 USER node
 
+# Deployed commit, injected by CI (docker/build-push-action build-args).
+# Surfaced by the /status command so Discord shows which build is live.
+ARG GIT_SHA=""
+ENV GIT_SHA=$GIT_SHA
+
 ENV NODE_ENV=production \
     METRICS_ENABLED=true \
     METRICS_HOST=127.0.0.1 \
