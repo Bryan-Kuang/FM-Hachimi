@@ -20,7 +20,6 @@ graph TD
         services["services<br/>(player, radio, daily hachimi, annoying)"]
         search["search<br/>(keyword search + interleave)"]
         playlists["playlists<br/>(bulk enqueue resolvers)"]
-        world_cup["world_cup"]
     end
 
     subgraph Playback engine
@@ -45,7 +44,6 @@ graph TD
     commands --> playback
     commands --> search
     commands --> playlists
-    commands --> world_cup
     commands --> ui
     events --> ui
     events --> playback
@@ -138,7 +136,6 @@ flowchart LR
 | `src/search/` | Keyword search across platforms, result interleaving, session store |
 | `src/playlists/` | Playlist URL resolvers for bulk enqueue |
 | `src/ui/` | Embeds, button rows, progress bars, search result views |
-| `src/world_cup/` | Song world-cup bracket feature |
 | `src/config/` | Env parsing + validation, all tunables |
 | `src/observability/` | Metrics registry + loopback HTTP server (`/healthz`, `/metrics`) |
 | `src/utils/` | Small shared helpers (formatting, locks, URL routing, history) |

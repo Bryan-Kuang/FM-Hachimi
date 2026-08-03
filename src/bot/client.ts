@@ -49,7 +49,6 @@ interface BotStats {
 class BotClient {
   private playerService:       any;
   private dailyHachimiService: any;
-  private worldCupService:     any;
   public  client:    Client;
   public  isReady:   boolean;
   private startTime: Date | null;
@@ -57,12 +56,10 @@ class BotClient {
   /**
    * @param playerService        - PlayerService (unified playback + queue)
    * @param dailyHachimiService  - DailyHachimiService instance (optional)
-   * @param worldCupService      - WorldCupService instance (optional)
    */
-  constructor(playerService: any, dailyHachimiService?: any, worldCupService?: any) {
+  constructor(playerService: any, dailyHachimiService?: any) {
     this.playerService       = playerService;
     this.dailyHachimiService = dailyHachimiService ?? null;
-    this.worldCupService     = worldCupService ?? null;
 
     // Initialize Discord client with required intents
     this.client = new Client({
@@ -336,7 +333,7 @@ class BotClient {
    * Load slash commands.
    */
   async loadCommands(): Promise<void> {
-    const commands = CommandRegistry.createCommands(this.playerService, this.dailyHachimiService, this.worldCupService);
+    const commands = CommandRegistry.createCommands(this.playerService, this.dailyHachimiService);
 
     for (const command of commands) {
       try {
