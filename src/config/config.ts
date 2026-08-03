@@ -116,29 +116,6 @@ interface DailyHachimiConfig {
   defaultCount: number;
 }
 
-interface WorldCupConfig {
-  enabled: boolean;
-  /** Inclusive tournament start date (YYYY-MM-DD, UTC). */
-  startDate: string;
-  /** Exclusive tournament end date (YYYY-MM-DD, UTC) — feature inert from here on. */
-  endDate: string;
-  /** ESPN public scoreboard endpoint (no auth). `?dates=YYYYMMDD` is appended. */
-  sourceUrl: string;
-  /** Free live-stream destination linked from messages (empty disables the link). */
-  streamUrl: string;
-  /** Display name for the watch-live link (e.g. "88看球"). */
-  streamLabel: string;
-  /** Poll cadence while any match is live. */
-  livePollMs: number;
-  /** Poll cadence when no match is live (and the back-off cadence on repeated failure). */
-  idlePollMs: number;
-  requestTimeoutMs: number;
-  /** Dir for subscriptions.json + state.json (under the persisted data/ mount). */
-  dataDir: string;
-  /** Display timezone for kickoff times. */
-  timezone: string;
-}
-
 interface AnnoyingConfig {
   /**
    * Discord user (numeric ID or username) allowed to disconnect/move the bot
@@ -199,7 +176,6 @@ interface BotConfig {
   youtube: YouTubeConfig;
   radio: RadioConfig;
   dailyHachimi: DailyHachimiConfig;
-  worldCup: WorldCupConfig;
   annoying: AnnoyingConfig;
   resume: ResumeConfig;
   test: TestConfig;
@@ -437,30 +413,6 @@ const config: BotConfig = {
       || path.join(process.cwd(), "data", "daily_hachimi_history.json"),
     defaultTimezone: "America/Toronto",
     defaultCount: 1,
-  },
-  worldCup: {
-    // Temporal feature: only active during the 2026 FIFA World Cup window.
-    enabled: process.env.WORLD_CUP_ENABLED !== "false",
-    startDate: process.env.WORLD_CUP_START || "2026-06-11",
-    // Exclusive. Final is Jul 19; Jul 21 leaves margin so a late-finishing final
-    // (past UTC midnight) still gets its full-time push before the feature sleeps.
-    endDate: process.env.WORLD_CUP_END || "2026-07-21",
-    sourceUrl: process.env.WORLD_CUP_SOURCE_URL
-      || "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard",
-    // 88看球 (88kanqiu) streams the World Cup free without a VPN; /match/3/live is
-    // its dedicated World Cup hub, so messages link there as the primary watch-live
-    // destination (ESPN match pages serve as stats links). The site has no public
-    // API and blocks bots, so we link to the World Cup hub rather than per-match
-    // pages (those aren't reliably mappable from our match data).
-    // ?? not ||: setting the env var to "" deliberately disables the link.
-    streamUrl: process.env.WORLD_CUP_STREAM_URL ?? "https://www.88kanqiu.tw/match/3/live",
-    // Display name for the watch-live link, paired with streamUrl.
-    streamLabel: process.env.WORLD_CUP_STREAM_LABEL || "88看球",
-    livePollMs: Math.max(15000, parseIntegerEnv(process.env.WORLD_CUP_LIVE_POLL_MS, 15 * 1000)),
-    idlePollMs: Math.max(60000, parseIntegerEnv(process.env.WORLD_CUP_IDLE_POLL_MS, 10 * 60 * 1000)),
-    requestTimeoutMs: Math.max(1000, parseIntegerEnv(process.env.WORLD_CUP_REQUEST_TIMEOUT_MS, 10000)),
-    dataDir: process.env.WORLD_CUP_DATA_DIR || path.join(process.cwd(), "data", "world_cup"),
-    timezone: process.env.WORLD_CUP_TIMEZONE || "America/Toronto",
   },
   annoying: {
     // /annoying anti-disconnect mode. The exempt user may still disconnect/move
