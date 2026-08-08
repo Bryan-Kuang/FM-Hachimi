@@ -26,6 +26,30 @@ gh workflow run pipeline.yml && gh run watch
 npm run deploy:commands
 ```
 
+## Which image is running
+
+`docker-compose.yml` resolves `ghcr.io/bryan-kuang/fm-hachimi:${IMAGE_TAG:-latest}`, and
+`remote-deploy.sh` writes the deployed commit SHA into `.env` as `IMAGE_TAG=`. **Leave that
+line alone** — it is what makes a manual `docker compose up -d` restart the version that is
+actually deployed.
+
+Before that line existed, `IMAGE_TAG` was only exported inside the deploy script, so any
+manual restart fell through to `latest` — and `latest` on the VPS means "whatever was last
+pulled under that name", not "newest". Since the deploy only ever pulls by SHA, the local
+`latest` went stale and manual restarts silently rolled production back. On 2026-08-08 that
+reverted prod by five days, three times in one afternoon, with no error anywhere: the
+container came up healthy, just running old code, and every fix under test looked broken.
+
+```bash
+# what is actually running (belt and braces — env, image ref, and resolved config)
+docker exec bilibili-discord-bot printenv GIT_SHA
+docker inspect bilibili-discord-bot --format '{{.Config.Image}}'
+cd ~/bilibili-bot && docker compose config | grep -m1 'image: ghcr'
+```
+
+If `GIT_SHA` disagrees with the newest green pipeline run, prod is not on the code you think
+it is — re-run the deploy rather than debugging the app.
+
 ## Topology
 
 - **Host:** Oracle Cloud Ubuntu VPS, repo at `/home/ubuntu/bilibili-bot`, tracks `main`.

@@ -30,6 +30,25 @@ chmod 600 secrets/bilibili_cookies.txt secrets/youtube_cookies.txt
 # package — a public package pulls without auth.
 export IMAGE_TAG="${IMAGE_TAG:-latest}"
 
+# Persist the tag into .env, because compose reads `${IMAGE_TAG:-latest}` and an
+# exported-only value dies with this script. Without this line, the ordinary
+# "edit .env, then `docker compose up -d`" restart resolves to `latest` — and
+# `latest` on the VPS is not "newest", it is "whatever was last pulled under
+# that name". Since this script only ever pulls by SHA, the local `latest` goes
+# stale and a manual restart silently rolls production back to it. That happened
+# three times on 2026-08-08 (production quietly reverted five days, to an image
+# without the fixes being debugged), and every symptom looked like a code bug.
+# Writing it down also makes .env a readable record of what is running.
+if grep -q '^IMAGE_TAG=' .env 2>/dev/null; then
+  sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=${IMAGE_TAG}|" .env
+else
+  # A hand-edited .env may not end in a newline; appending blind would splice
+  # IMAGE_TAG onto the previous line and break both variables.
+  if [ -s .env ] && [ -n "$(tail -c1 .env)" ]; then printf '\n' >> .env; fi
+  printf 'IMAGE_TAG=%s\n' "${IMAGE_TAG}" >> .env
+fi
+echo "[deploy] pinned IMAGE_TAG=${IMAGE_TAG} in .env"
+
 if [ -n "${GHCR_TOKEN:-}" ]; then
   echo "[deploy] logging in to GHCR..."
   echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-x}" --password-stdin
