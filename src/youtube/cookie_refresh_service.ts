@@ -6,9 +6,11 @@
  * cooldown, in-flight dedup, redaction) live upstream.
  */
 
+import { spawn } from 'child_process';
 import cookieKeeper = require('ytdlp-cookie-keeper');
 import logger = require('../services/logger_service');
 import metrics = require('../observability/metrics');
+import ytdlpArgs = require('./ytdlp_args');
 
 interface CookieRefreshContext {
   reason?: string;
@@ -49,6 +51,15 @@ class YouTubeCookieRefreshService {
       refreshIntervalMs: options.refreshIntervalMs,
       cooldownMs: options.cooldownMs,
       tmpDir: options.tmpDir,
+      // The package spawns bare `yt-dlp`, so without this the validator would
+      // certify a configuration the extractor never uses — and reject good
+      // cookies whenever YouTube's default clients regress (2026-08-07: the
+      // SABR/GVS PO-token experiment froze rotation for 27h while playback
+      // was fine). Append the extractor's own args so a validation pass means
+      // "the bot can extract this video the way the bot extracts videos".
+      // Inert on the export invocation, which hits the `youtubetab` extractor.
+      spawnFn: (command, args) =>
+        spawn(command, [...args, ...ytdlpArgs.potProviderArgs(), ...ytdlpArgs.playerClientArgs()]),
     });
 
     this.keeper.on('refresh:start', (event) => {

@@ -43,7 +43,7 @@ jobs:
             AGE=$(( $(date +%s) - $(stat -c %Y "$FILE") ))
             echo "cookie age: ${AGE}s (threshold ${MAX_AGE}s)"
             if [ "$AGE" -gt "$MAX_AGE" ]; then
-              echo "STALE: in-app refresh appears to be failing — the VPS browser profile likely needs re-login."
+              echo "STALE: in-app refresh is failing. Run step 0 of the OPERATIONS.md decision tree before assuming the browser session is dead — a broken yt-dlp client set fails validation with perfectly good cookies."
               exit 3
             fi
             echo "OK: cookies are fresh."
@@ -53,4 +53,4 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
-            -d "{\"embeds\":[{\"title\":\"YouTube cookies stale or missing\",\"color\":15105570,\"description\":\"The in-app YouTube cookie refresh has not produced a fresh \`youtube_cookies.txt\` within the threshold. The VPS browser profile session likely needs a manual re-login (see OPERATIONS.md).\\n[View run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\"}]}"
+            -d "{\"embeds\":[{\"title\":\"YouTube cookies stale or missing\",\"color\":15105570,\"description\":\"The in-app YouTube cookie refresh has not produced a fresh \`youtube_cookies.txt\` within the threshold. **Run step 0 of the OPERATIONS.md decision tree first** — extract a canary with the live cookie file and read the error. A dead browser session and a broken yt-dlp client set look identical from here, and only one of them needs a re-login.\\n[View run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\"}]}"

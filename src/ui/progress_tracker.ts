@@ -91,6 +91,16 @@ function computeProgressSignature(embed: unknown): number {
   return hashString(progress + '' + description);
 }
 
+/**
+ * Discord-side failures that resolve themselves on a later tick: gateway 5xx
+ * and rate limits. Nothing to act on, so they don't earn an error-level line.
+ */
+function isTransientDiscordFailure(err: { status?: number; message?: string }): boolean {
+  if (err.status && [429, 500, 502, 503, 504].includes(err.status)) return true;
+  return /service unavailable|internal server error|bad gateway|gateway timeout|rate limit/i
+    .test(err.message ?? '');
+}
+
 class ProgressTracker {
   private sessionManager: SessionManager;
 
@@ -279,7 +289,10 @@ class ProgressTracker {
           tracker.cooldownUntil = Date.now() + cooldownDuration;
           tracker.lastCooldownEndedAt = tracker.cooldownUntil;
           tracker.consecutiveSlowEdits = 0;
-          logger.warn('Progress tracker entering cooldown (edit back-pressure)', {
+          // Debug, not warn: this is the control loop doing its job, not an
+          // anomaly. At warn it was 95% of all warn/error lines in production
+          // (1252 of 1321 over 96h) and buried everything worth reading.
+          logger.debug('Progress tracker entering cooldown (edit back-pressure)', {
             guild: guildId,
             editDuration,
             cooldownMs: cooldownDuration,
@@ -304,13 +317,17 @@ class ProgressTracker {
         editDuration,
       });
     } catch (error: unknown) {
-      logger.error('Failed to update progress', {
+      const err = error as { code?: number; status?: number; message?: string };
+      // Discord-side blips (503 storms are routine) aren't ours to fix and
+      // self-heal on the next tick — log them at warn so real failures stay
+      // visible at error.
+      const log = isTransientDiscordFailure(err) ? logger.warn : logger.error;
+      log('Failed to update progress', {
         guild: guildId,
         error: (error as Error).message,
       });
 
       // Stop tracking if message no longer exists or is inaccessible.
-      const err = error as { code?: number };
       if (err.code === 10008 || err.code === 50001) {
         this.stopTracking(guildId);
       }
