@@ -323,6 +323,23 @@ class BotClient {
       Debug.error('client.event.error', error);
     });
 
+    // Gateway/shard transport errors. Without a listener here they escape to
+    // process-level `uncaughtException`, whose handler shuts the bot down — a
+    // Cloudflare 521 during a routine gateway reconnect killed the process
+    // mid-playback on 2026-08-08. discord.js reconnects on its own, so these
+    // are noted and left alone.
+    this.client.on('shardError', (error: Error, shardId: number) => {
+      logger.warn('Discord shard error; discord.js will reconnect', {
+        shardId, error: error.message,
+      });
+      Debug.error('client.event.shardError', error);
+    });
+    // Note: this is not proven to catch the 2026-08-08 crash. That error came
+    // from ws's handshake (websocket.js:913) and escaped despite the 'error'
+    // listener above, so it may originate below the shard layer entirely. If
+    // it recurs, the absence of a 'Discord shard error' line right before the
+    // uncaught exception is the signal that a different hook is needed.
+
     this.client.on('warn', (warning: string) => {
       logger.warn('Discord client warning', { warning });
       Debug.trace('client.event.warn', { warning });

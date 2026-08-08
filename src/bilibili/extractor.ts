@@ -11,6 +11,7 @@ import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage
 import config = require('../config/config');
 import ExpiringCache = require('../utils/expiring_cache');
 import MediaCache = require('../audio/media_cache');
+import * as streamProbe from '../playback/stream_probe';
 import UrlValidator = require('./validator');
 
 interface VideoMetadata {
@@ -337,6 +338,17 @@ class BilibiliExtractor {
           const nativePayload = await this.nativeExtractor.extract(normalizedUrl);
           const result = this.createExtractedAudioFromNativePayload(url, normalizedUrl, nativePayload);
 
+          // The native path talks to Bilibili's playurl API, which can hand
+          // back a CDN link that refuses the actual request. Confirm the URL
+          // serves bytes before committing it; a dead one falls through to the
+          // yt-dlp path below rather than reaching FFmpeg.
+          if (!await streamProbe.probeOrWarn(result.audioUrl, result.streamHeaders, {
+            platform: 'bilibili:native',
+            sourceUrl: normalizedUrl,
+          })) {
+            throw new Error('native stream URL failed reachability probe');
+          }
+
           this.extractionCache.set(normalizedUrl, result);
           // Fire-and-forget: download the audio so future plays hit the local
           // file (no extract, no signed-URL expiry). Stores the full metadata.
@@ -411,6 +423,14 @@ class BilibiliExtractor {
           userAgent: this.userAgent,
         },
       };
+
+      // Last extraction path for Bilibili — nothing left to fall back to, so a
+      // failed probe is logged (by probeOrWarn) and the URL still goes through
+      // to the player's CDN-retry path rather than failing the track outright.
+      await streamProbe.probeOrWarn(result.audioUrl, result.streamHeaders, {
+        platform: 'bilibili:ytdlp',
+        sourceUrl: normalizedUrl,
+      });
 
       this.extractionCache.set(normalizedUrl, result);
       // Fire-and-forget: download the audio so future plays hit the local file

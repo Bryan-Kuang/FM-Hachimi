@@ -102,6 +102,16 @@ When cookies go stale, work down this list; each step is the fallback for the on
      https://www.youtube.com/watch?v=dQw4w9WgXcQ
    ```
 
+   > **`--print id` succeeding does not mean YouTube works.** It proves yt-dlp found a
+   > format, not that the stream URL serves bytes. On 2026-08-08 the `mweb` client printed
+   > ids for every video while every URL answered 403, and that mistake shipped a "fixed"
+   > YouTube that could not play a single track for a day. Whenever you are judging a
+   > *player client*, use the end-to-end check in the next block instead.
+   >
+   > Note also that `yt-dlp --cookies <file>` **writes the refreshed jar back to that file**.
+   > Point ad-hoc commands at a copy if you do not want to mutate the live one; the bot
+   > already copies to a temp file for this reason (`src/youtube/extractor.ts`).
+
    | Error | Meaning | Go to |
    |---|---|---|
    | `Sign in to confirm you're not a bot` | The session really is dead. | step 1 |
@@ -111,22 +121,32 @@ When cookies go stale, work down this list; each step is the fallback for the on
    pot-provider sidecar (`docker exec bilibili-discord-bot wget -qO- http://pot-provider:4416/ping`),
    then find a client that works and set it in `~/bilibili-bot/.env`:
 
+   **Judge each client by whether the stream URL answers 200**, not by whether extraction
+   succeeds:
+
    ```bash
-   for c in default mweb web_embedded tv; do
-     echo "-- $c"; docker exec bilibili-discord-bot yt-dlp --cookies /app/secrets/youtube_cookies.txt \
-       --skip-download --no-playlist --no-warnings --extractor-args "youtube:player_client=$c" \
-       --print id https://www.youtube.com/watch?v=jNQXAC9IVRw 2>&1 | tail -1
-   done
+   docker exec bilibili-discord-bot sh -c '
+   for c in web_embedded mweb default tv; do
+     printf "%-14s " "$c"
+     U=$(timeout 120 yt-dlp --no-warnings \
+       --extractor-args youtubepot-bgutilhttp:base_url=http://pot-provider:4416 \
+       --extractor-args "youtube:player_client=$c" \
+       --cookies /app/secrets/youtube_cookies.txt -f bestaudio --get-url \
+       "https://www.youtube.com/watch?v=jNQXAC9IVRw" 2>/dev/null | head -1)
+     [ -z "$U" ] && { echo "extraction failed"; continue; }
+     timeout 45 wget --spider -S "$U" 2>&1 | grep -o "HTTP/1.1 [0-9]*" | tail -1
+   done'
    ```
 
-   Prefer an **additive** spec (`YOUTUBE_PLAYER_CLIENT=default,mweb`) over a hard pin — it
-   keeps yt-dlp's own client selection and just adds a fallback. Then `docker compose up -d`.
+   Set the winner as `YOUTUBE_PLAYER_CLIENT` in `~/bilibili-bot/.env`, then
+   `docker compose up -d`. Prefer leaving it empty (yt-dlp's own selection) whenever that
+   still produces 200s; pin only while a rollout is actively breaking the default.
 
    Worked examples: **2026-07-01** — pinned `tv` started returning 403 stream URLs when
-   YouTube extended GVS PO-token enforcement to it. **2026-08-07** — YouTube's "bind GVS PO
-   token to video ID" experiment forced SABR streaming on `web_safari`, so every https format
-   was skipped and validation failed on one canary while playback of other videos was fine;
-   rotation stayed frozen 27h. Fixed with `default,mweb`.
+   YouTube extended GVS PO-token enforcement to it. **2026-08-07/08** — the "bind GVS PO
+   token to video ID" experiment forced SABR streaming on `web_safari`; yt-dlp's default set
+   extracted nothing, `mweb` extracted fine but served 403s, and only `web_embedded` returned
+   200 end-to-end. Fixed with `YOUTUBE_PLAYER_CLIENT=web_embedded`.
 1. **In-app auto-refresh** (automatic, tier 1 below) — normally nothing to do.
 2. **Automated login repair**: `bash scripts/ops/youtube-cookie-login-repair.sh` on the VPS
    (uses stored credentials; fails closed on CAPTCHA/2FA).
@@ -234,7 +254,9 @@ echo $(( $(date +%s) - $(stat -c %Y ~/bilibili-bot/secrets/youtube_cookies.txt) 
 # metrics over the loopback binding
 curl -s 127.0.0.1:9090/metrics | jq '.gauges, .counters.youtube_cookie_refresh_total'
 
-# validate the live YouTube cookie file end-to-end (prints the video id on success)
+# validate the live YouTube cookie file end-to-end (prints the video id on success).
+# NOTE: this only proves a format was found. For "can we actually play?", use the
+# 200-check in the decision tree above — see the 2026-08-08 note on why.
 docker exec bilibili-discord-bot yt-dlp \
   --js-runtimes node \
   --cookies /app/secrets/youtube_cookies.txt \
@@ -242,4 +264,22 @@ docker exec bilibili-discord-bot yt-dlp \
   --format 'bestaudio[vcodec=none][acodec!=none]/best[height<=360][acodec!=none]/worst[acodec!=none]' \
   --print id \
   'https://www.youtube.com/watch?v=AUfXW1EdLew'
+
+# playback smoothness, grouped by platform (added 2026-08-08). Each stream logs
+# one summary line; gapsOver* count sampled stalls in the FFmpeg output.
+docker logs bilibili-discord-bot --since 24h 2>&1 | grep "Playback stream health"
 ```
+
+## Playback tuning knobs
+
+`.env.example` documents the full set; these were added 2026-08-08 and are the ones you
+reach for when YouTube changes under you or playback gets choppy.
+
+| Env | Default | What it does |
+|-----|---------|--------------|
+| `YOUTUBE_PLAYER_CLIENT` | *(empty)* | Pin yt-dlp's player client. Currently `web_embedded` in prod — see the decision tree. |
+| `YOUTUBE_PLAYER_CLIENT_FALLBACKS` | `web_embedded,mweb,default` | Tried in order when the primary client's URL fails the stream probe. |
+| `YOUTUBE_EXTRACTION_TIMEOUT_MS` | `30000` | yt-dlp kill timer per extraction. Raise if extraction is legitimately slow on a loaded host. |
+| `STREAM_PROBE_ENABLED` | `true` | Byte-range check on extracted URLs before caching/playing. Turn off only to isolate a probe bug. |
+| `STREAM_PROBE_TIMEOUT_MS` | `2000` | Probe timeout. Too low turns slow-but-fine CDNs into false failures. |
+| `STREAM_HEALTH_SAMPLE_MS` | `500` | Stall sampling rate. The `ffmpegInactive*` warn/kill thresholds are separate and unchanged. |
