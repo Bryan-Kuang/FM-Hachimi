@@ -67,6 +67,42 @@ in [`docs/testing-features.md`](docs/testing-features.md).
 
 When cookies go stale, work down this list; each step is the fallback for the one above:
 
+0. **Triage first — do not skip.** A stale cookie file does *not* imply a dead Google
+   session, and steps 1–3 are an hour of wasted VNC work if it isn't. Extract a canary with
+   the live cookie file and read the error:
+
+   ```bash
+   docker exec bilibili-discord-bot yt-dlp \
+     --cookies /app/secrets/youtube_cookies.txt \
+     --skip-download --no-playlist --print id \
+     https://www.youtube.com/watch?v=dQw4w9WgXcQ
+   ```
+
+   | Error | Meaning | Go to |
+   |---|---|---|
+   | `Sign in to confirm you're not a bot` | The session really is dead. | step 1 |
+   | `The page needs to be reloaded` / `No video formats found` | Cookies are **fine**; yt-dlp's client set is broken against YouTube. | see below |
+
+   For the second row, the fix is a yt-dlp client/PO-token change, not a re-login. Check the
+   pot-provider sidecar (`docker exec bilibili-discord-bot wget -qO- http://pot-provider:4416/ping`),
+   then find a client that works and set it in `~/bilibili-bot/.env`:
+
+   ```bash
+   for c in default mweb web_embedded tv; do
+     echo "-- $c"; docker exec bilibili-discord-bot yt-dlp --cookies /app/secrets/youtube_cookies.txt \
+       --skip-download --no-playlist --no-warnings --extractor-args "youtube:player_client=$c" \
+       --print id https://www.youtube.com/watch?v=jNQXAC9IVRw 2>&1 | tail -1
+   done
+   ```
+
+   Prefer an **additive** spec (`YOUTUBE_PLAYER_CLIENT=default,mweb`) over a hard pin — it
+   keeps yt-dlp's own client selection and just adds a fallback. Then `docker compose up -d`.
+
+   Worked examples: **2026-07-01** — pinned `tv` started returning 403 stream URLs when
+   YouTube extended GVS PO-token enforcement to it. **2026-08-07** — YouTube's "bind GVS PO
+   token to video ID" experiment forced SABR streaming on `web_safari`, so every https format
+   was skipped and validation failed on one canary while playback of other videos was fine;
+   rotation stayed frozen 27h. Fixed with `default,mweb`.
 1. **In-app auto-refresh** (automatic, tier 1 below) — normally nothing to do.
 2. **Automated login repair**: `bash scripts/ops/youtube-cookie-login-repair.sh` on the VPS
    (uses stored credentials; fails closed on CAPTCHA/2FA).
@@ -77,7 +113,10 @@ When cookies go stale, work down this list; each step is the fallback for the on
 startup, every 6h, and on auth-failure. It exports cookies from the mounted Chrome profile
 (`yt-dlp --cookies-from-browser chrome+basictext:/app/youtube-browser-profile`), validates
 against `validateUrls`, then atomically writes `secrets/youtube_cookies.txt` (mode 600) **only
-on success**. So the file's mtime = time of last *successful* refresh.
+on success**. So the file's mtime = time of last *successful* refresh. Validation runs yt-dlp
+with the extractor's own args (`src/youtube/ytdlp_args.ts`, injected via the keeper's
+`spawnFn`) so a pass means "the bot can extract this the way the bot extracts" — validating a
+config the bot never runs is what froze rotation on 2026-08-07.
 
 - Metrics on `/metrics`: `youtube_cookie_last_refresh_success_timestamp_seconds` (gauge),
   `youtube_cookie_refresh_total{result=success|failure}` (counter).

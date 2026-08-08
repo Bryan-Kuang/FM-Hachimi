@@ -13,6 +13,7 @@ import config = require('../config/config');
 import ExpiringCache = require('../utils/expiring_cache');
 import MediaCache = require('../audio/media_cache');
 import YouTubeValidator = require('./validator');
+import ytdlpArgs = require('./ytdlp_args');
 import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage_feedback';
 
 interface VideoMetadata {
@@ -254,30 +255,14 @@ class YouTubeExtractor {
     ];
   }
 
-  /**
-   * bgutil PO-token provider selector. When YTDLP_POT_PROVIDER_URL points at
-   * a bgutil-ytdlp-pot-provider sidecar, yt-dlp (with the matching plugin
-   * installed in the image) fetches GVS PO tokens on demand — required by a
-   * growing set of YouTube clients for stream URLs to not 403.
-   */
+  /** @see ytdlp_args.potProviderArgs — shared with the cookie-refresh validator. */
   private _potProviderArgs(): string[] {
-    const base = config.youtube.potProviderUrl;
-    if (!base) return [];
-    return ['--extractor-args', `youtubepot-bgutilhttp:base_url=${base}`];
+    return ytdlpArgs.potProviderArgs();
   }
 
-  /**
-   * Player-client selector. Empty spec (the default) lets yt-dlp pick its own
-   * clients and solve the nsig player JS via node — yt-dlp's maintainers track
-   * YouTube's per-client PO-token enforcement, so this stays working across
-   * rollouts. A pinned spec (e.g. 'tv,ios') returns pre-signed stream URLs and
-   * skips the JS solve (faster), but breaks when YouTube tightens that client:
-   * pinned 'tv' began returning 403 stream URLs on 2026-07-01.
-   */
+  /** @see ytdlp_args.playerClientArgs — shared with the cookie-refresh validator. */
   private _playerClientArgs(): string[] {
-    const spec = config.youtube.playerClient;
-    if (!spec) return ['--js-runtimes', 'node'];
-    return ['--extractor-args', `youtube:player_client=${spec}`];
+    return ytdlpArgs.playerClientArgs();
   }
 
   /**
