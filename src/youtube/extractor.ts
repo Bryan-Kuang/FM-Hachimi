@@ -14,6 +14,7 @@ import ExpiringCache = require('../utils/expiring_cache');
 import MediaCache = require('../audio/media_cache');
 import YouTubeValidator = require('./validator');
 import ytdlpArgs = require('./ytdlp_args');
+import * as streamProbe from '../playback/stream_probe';
 import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage_feedback';
 
 interface VideoMetadata {
@@ -244,11 +245,11 @@ class YouTubeExtractor {
   }
 
   /** Common yt-dlp args shared across all invocations. */
-  private _baseArgs(): string[] {
+  private _baseArgs(playerClientOverride?: string): string[] {
     return [
       '--no-check-certificate',
       '--no-warnings',
-      ...this._playerClientArgs(),
+      ...this._playerClientArgs(playerClientOverride),
       ...this._potProviderArgs(),
       '--user-agent', this.userAgent,
       ...this._getCookieArgs(),
@@ -261,8 +262,8 @@ class YouTubeExtractor {
   }
 
   /** @see ytdlp_args.playerClientArgs — shared with the cookie-refresh validator. */
-  private _playerClientArgs(): string[] {
-    return ytdlpArgs.playerClientArgs();
+  private _playerClientArgs(override?: string): string[] {
+    return ytdlpArgs.playerClientArgs(override);
   }
 
   /**
@@ -407,8 +408,9 @@ class YouTubeExtractor {
     options: ResolvedExtractionOptions,
   ): Promise<ExtractedAudio> {
     try {
+      const payload = await this.extractMetadataAndUrlWithCookieRefresh(normalizedUrl, options);
       const { metadata, audioUrl, selectedFormat, ytdlpMs, parseMs } =
-        await this.extractMetadataAndUrlWithCookieRefresh(normalizedUrl, options);
+        await this.reextractIfUnplayable(normalizedUrl, payload);
 
       const result: ExtractedAudio = {
         ...metadata,
@@ -519,7 +521,7 @@ class YouTubeExtractor {
         ytdlp.kill('SIGTERM');
         setTimeout(() => { if (!ytdlp.killed) ytdlp.kill('SIGKILL'); }, 2000);
         reject(new Error('YouTube audio URL extraction timeout'));
-      }, 30000).unref();
+      }, config.youtube.extractionTimeoutMs).unref();
 
       ytdlp.on('close', () => clearTimeout(timeoutId));
       ytdlp.on('error', () => clearTimeout(timeoutId));
@@ -745,6 +747,66 @@ class YouTubeExtractor {
     }
   }
 
+  /**
+   * yt-dlp reporting success only means it found a format — YouTube can still
+   * refuse to serve the URL it handed back. On 2026-08-08 the mweb client did
+   * exactly that (200 from yt-dlp, 403 from googlevideo), and playback only
+   * found out when FFmpeg died mid-track and burned three CDN retries.
+   *
+   * Probe the URL, and if it is dead re-extract with each fallback client until
+   * one produces a URL that actually answers. If none do, return the original
+   * payload untouched: the downstream CDN-retry path is still a better place to
+   * fail than throwing away a track we might yet play.
+   */
+  private async reextractIfUnplayable(
+    normalizedUrl: string,
+    payload: ExtractionPayload,
+  ): Promise<ExtractionPayload> {
+    const streamHeaders: StreamHeaders = {
+      referer: 'https://www.youtube.com/',
+      userAgent: this.userAgent,
+    };
+
+    if (await streamProbe.probeOrWarn(payload.audioUrl, streamHeaders, {
+      platform: 'youtube',
+      sourceUrl: normalizedUrl,
+    })) {
+      return payload;
+    }
+
+    for (const client of ytdlpArgs.fallbackPlayerClients()) {
+      logger.info('Re-extracting YouTube audio with a fallback player client', {
+        url: normalizedUrl,
+        playerClient: client,
+      });
+      try {
+        const retryPayload = await this.extractMetadataAndUrl(normalizedUrl, client);
+        if (await streamProbe.probeOrWarn(retryPayload.audioUrl, streamHeaders, {
+          platform: `youtube:${client}`,
+          sourceUrl: normalizedUrl,
+        })) {
+          logger.info('Fallback player client produced a playable URL', {
+            url: normalizedUrl,
+            playerClient: client,
+          });
+          return retryPayload;
+        }
+      } catch (error: unknown) {
+        logger.debug('Fallback player client failed to extract', {
+          url: normalizedUrl,
+          playerClient: client,
+          error: (error as Error).message,
+        });
+      }
+    }
+
+    logger.warn('No player client produced a playable URL; falling back to the original', {
+      url: normalizedUrl,
+      tried: ytdlpArgs.fallbackPlayerClients(),
+    });
+    return payload;
+  }
+
   private async refreshCookiesForAuthFailure(source: string): Promise<void> {
     if (!this._cookieRefreshService) {
       throw new Error('YouTube auth/bot check failed; automatic cookie refresh is not configured.');
@@ -805,7 +867,10 @@ class YouTubeExtractor {
     return `yt-dlp exited with code ${code}`;
   }
 
-  private async extractMetadataAndUrl(normalizedUrl: string): Promise<ExtractionPayload> {
+  private async extractMetadataAndUrl(
+    normalizedUrl: string,
+    playerClientOverride?: string,
+  ): Promise<ExtractionPayload> {
     return new Promise((resolve, reject) => {
       const ytdlpStartedAt = Date.now();
       const args = [
@@ -813,7 +878,7 @@ class YouTubeExtractor {
         '--format', AUDIO_FORMAT_SELECTOR,
         '--no-download',
         '--no-playlist',
-        ...this._baseArgs(),
+        ...this._baseArgs(playerClientOverride),
         normalizedUrl,
       ];
 
@@ -879,7 +944,7 @@ class YouTubeExtractor {
         ytdlp.kill('SIGTERM');
         setTimeout(() => { if (!ytdlp.killed) ytdlp.kill('SIGKILL'); }, 2000);
         reject(new Error('YouTube extraction timeout'));
-      }, 30000).unref();
+      }, config.youtube.extractionTimeoutMs).unref();
 
       ytdlp.on('close', () => clearTimeout(timeoutId));
       ytdlp.on('error', () => clearTimeout(timeoutId));

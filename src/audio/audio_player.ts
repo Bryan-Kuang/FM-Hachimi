@@ -729,10 +729,29 @@ class AudioPlayer {
         let lastDataTime = Date.now();
         let isProcessActive = true;
 
+        // Stall accounting. The warn/kill thresholds below only fire at 30s/60s,
+        // so every gap short enough to merely be *heard* as a stutter (~0.2-3s)
+        // used to leave no trace at all — "the logs are clean" meant "nothing
+        // was measuring". Sampling at streamHealthSampleMs makes those visible.
+        const streamStartedAt = Date.now();
+        const health = { maxGapMs: 0, over200: 0, over500: 0, over1000: 0, samples: 0 };
+        let lastSampleAt = Date.now();
+
         const activityMonitor = setInterval(() => {
           const timeSinceLastData = Date.now() - lastDataTime;
           const warningThreshold = config.audio.ffmpegInactiveWarningThreshold;
           const killThreshold = config.audio.ffmpegInactiveKillThreshold;
+
+          // Only count a gap once it has actually elapsed since the previous
+          // sample, so one long stall isn't counted once per tick.
+          if (Date.now() - lastSampleAt >= config.playback.streamHealthSampleMs) {
+            lastSampleAt = Date.now();
+            health.samples += 1;
+            if (timeSinceLastData > health.maxGapMs) health.maxGapMs = timeSinceLastData;
+            if (timeSinceLastData > 1000) health.over1000 += 1;
+            else if (timeSinceLastData > 500) health.over500 += 1;
+            else if (timeSinceLastData > 200) health.over200 += 1;
+          }
 
           if (timeSinceLastData > warningThreshold && isProcessActive) {
             logger.warn('FFmpeg process appears inactive, checking status', {
@@ -755,7 +774,25 @@ class AudioPlayer {
               this._cdnRetryPending = true;
             }
           }
-        }, config.audio.ffmpegActivityCheckInterval);
+        }, Math.min(config.playback.streamHealthSampleMs, config.audio.ffmpegActivityCheckInterval));
+
+        // One summary line per stream. Grouped by platform, this is the data
+        // that decides whether reported stutter is a pull-side problem at all.
+        const logStreamHealth = (reason: string): void => {
+          if (health.samples === 0) return;
+          logger.info('Playback stream health', {
+            reason,
+            platform: this.currentTrack?.platform ?? 'unknown',
+            track: this.currentTrack?.title,
+            streamMs: Date.now() - streamStartedAt,
+            samples: health.samples,
+            maxGapMs: health.maxGapMs,
+            gapsOver200ms: health.over200,
+            gapsOver500ms: health.over500,
+            gapsOver1s: health.over1000,
+            guild: this.currentGuild,
+          });
+        };
 
         ffmpegProcess.stderr!.on('data', (data: Buffer) => {
           stderr += data.toString();
@@ -778,6 +815,7 @@ class AudioPlayer {
         ffmpegProcess.on('close', (code) => {
           clearInterval(activityMonitor);
           isProcessActive = false;
+          logStreamHealth(`close:${code}`);
 
           if (this.ffmpegProcess === ffmpegProcess) this.ffmpegProcess = null;
 

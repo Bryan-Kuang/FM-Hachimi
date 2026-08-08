@@ -82,7 +82,8 @@ async function searchBilibili({
       : await extractor?.searchVideos(keyword, limit);
     const normalized = responseToArray(response).map(normalizeBilibiliResult);
     return rankAndLimit(normalized, keyword, limit);
-  } catch {
+  } catch (error: unknown) {
+    logger.warn('Bilibili search failed', { keyword, source, error: (error as Error)?.message });
     return [];
   }
 }
@@ -95,7 +96,10 @@ async function searchYouTube({
   try {
     const response = await youtubeExtractor?.searchVideos(keyword, limit);
     return rankAndLimit(responseToArray(response), keyword, limit);
-  } catch {
+  } catch (error: unknown) {
+    // Swallowing this silently is why the 2026-08-08 outage presented as
+    // "YouTube results just disappeared" with nothing in the logs to chase.
+    logger.warn('YouTube search failed', { keyword, error: (error as Error)?.message });
     return [];
   }
 }

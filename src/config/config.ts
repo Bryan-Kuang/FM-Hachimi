@@ -81,7 +81,9 @@ interface YouTubeConfig {
   preextractEnabled: boolean;
   preextractConcurrency: number;
   preextractMaxPerCardSet: number;
+  extractionTimeoutMs: number;
   playerClient: string;
+  playerClientFallbacks: string[];
   potProviderUrl: string;
   mediaCacheEnabled: boolean;
   mediaCacheDir: string;
@@ -165,6 +167,14 @@ interface AttachmentConfig {
   maxBytes: number;
 }
 
+interface PlaybackConfig {
+  /** Probe extracted stream URLs before caching/playing them. */
+  streamProbeEnabled: boolean;
+  streamProbeTimeoutMs: number;
+  /** How often the FFmpeg activity monitor samples the output stream. */
+  streamHealthSampleMs: number;
+}
+
 interface BotConfig {
   discord: DiscordConfig;
   audio: AudioConfig;
@@ -182,6 +192,7 @@ interface BotConfig {
   search: SearchConfig;
   playlists: PlaylistConfig;
   attachments: AttachmentConfig;
+  playback: PlaybackConfig;
 }
 
 function parseIntegerEnv(value: string | undefined, fallback: number): number {
@@ -358,14 +369,36 @@ const config: BotConfig = {
     preextractEnabled: process.env.YOUTUBE_PREEXTRACT_ENABLED !== "false",
     preextractConcurrency: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_PREEXTRACT_CONCURRENCY, 1)),
     preextractMaxPerCardSet: Math.max(1, parseIntegerEnv(process.env.YOUTUBE_PREEXTRACT_MAX_PER_CARD_SET, 3)),
-    // yt-dlp player_client(s) used for extraction. Empty (default) lets yt-dlp
-    // pick its own clients — its maintainers track YouTube's rollout of
-    // PO-token enforcement per client, so pinning is a liability: the pinned
+    // yt-dlp kill timer for a single extraction. Was hardcoded at 30s; the
+    // 2026-08-08 incident pushed extraction to ~21s (mixed player clients on a
+    // 2-vCPU host) and started tripping it, so it needs to be tunable without
+    // a deploy.
+    extractionTimeoutMs: Math.max(5000, parseIntegerEnv(process.env.YOUTUBE_EXTRACTION_TIMEOUT_MS, 30000)),
+    // yt-dlp player_client(s) used for extraction. Empty lets yt-dlp pick its
+    // own clients — its maintainers track YouTube's rollout of PO-token
+    // enforcement per client, so pinning is normally a liability: the pinned
     // 'tv' client started returning 403 stream URLs on 2026-07-01 (no GVS PO
-    // token). Set explicitly (e.g. 'tv,ios') only for experiments; pinned
-    // clients skip the nsig JS solve and extract faster, but break whenever
-    // YouTube tightens that client.
+    // token).
+    //
+    // Currently pinned to 'web_embedded' in production. On 2026-08-08 YouTube's
+    // "bind GVS PO token to video ID" experiment forced SABR streaming on
+    // web_safari, so yt-dlp's default set extracted nothing at all and the
+    // whole platform was unplayable — pinning went from liability to the only
+    // thing that worked. Judge candidates by whether the *stream URL* answers
+    // 200, not by whether extraction succeeds: 'mweb' passed `--print id` while
+    // serving 403s, which is exactly how this shipped broken for a day.
+    // Revisit (and empty this out) once yt-dlp catches up with the rollout.
     playerClient: (process.env.YOUTUBE_PLAYER_CLIENT ?? "").trim(),
+    // Tried in order when the primary client returns a URL that fails the
+    // stream probe. Ordered by what survived the 2026-08-08 SABR experiment:
+    // web_embedded served 200s on every test video, mweb produced 403s, and
+    // yt-dlp's own default set could not extract at all — but all three flip
+    // as YouTube's rollout moves, so keep the list broad and let the probe pick.
+    playerClientFallbacks: parseListEnv(process.env.YOUTUBE_PLAYER_CLIENT_FALLBACKS, [
+      "web_embedded",
+      "mweb",
+      "default",
+    ]),
     // bgutil PO-token provider (sidecar container). When set, every yt-dlp
     // invocation carries the bgutil-http extractor arg so stream URLs come
     // back PO-token'd — YouTube enforces GVS PO tokens per client and
@@ -456,6 +489,19 @@ const config: BotConfig = {
   },
   attachments: {
     maxBytes: Math.max(1, parseIntegerEnv(process.env.ATTACHMENT_MAX_BYTES, 50 * 1024 * 1024)),
+  },
+  playback: {
+    // An extracted URL is not a playable URL. yt-dlp's mweb client returned
+    // 403-ing googlevideo links on 2026-08-08 while reporting success, and the
+    // first symptom was FFmpeg dying mid-track. One byte-range request before
+    // we commit to a URL turns that into a silent re-extract.
+    streamProbeEnabled: process.env.STREAM_PROBE_ENABLED !== "false",
+    streamProbeTimeoutMs: Math.max(100, parseIntegerEnv(process.env.STREAM_PROBE_TIMEOUT_MS, 2000)),
+    // The stall watchdog samples at this rate. It has to be well under the
+    // gaps we care about: audible stutter is ~0.2-3s, and the old 10s sampling
+    // could not see any of it (audio.ffmpegInactive* thresholds are unchanged
+    // and still govern the warn/kill decisions).
+    streamHealthSampleMs: Math.max(50, parseIntegerEnv(process.env.STREAM_HEALTH_SAMPLE_MS, 500)),
   },
 };
 

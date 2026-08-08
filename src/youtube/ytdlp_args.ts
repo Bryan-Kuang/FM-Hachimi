@@ -37,10 +37,20 @@ function potProviderArgs(): string[] {
  * experiment forced SABR streaming on web_safari and every https format got
  * skipped ("The page needs to be reloaded").
  */
-function playerClientArgs(): string[] {
-  const spec = config.youtube.playerClient;
+function playerClientArgs(override?: string): string[] {
+  const spec = override ?? config.youtube.playerClient;
   if (!spec) return ['--js-runtimes', 'node'];
   return ['--extractor-args', `youtube:player_client=${spec}`];
 }
 
-export = { potProviderArgs, playerClientArgs };
+/**
+ * Clients to re-extract with when the primary one hands back a URL that does
+ * not actually serve bytes (see playback/stream_probe.ts). The primary is
+ * filtered out so a failure never retries the identical command.
+ */
+function fallbackPlayerClients(): string[] {
+  const primary = config.youtube.playerClient;
+  return config.youtube.playerClientFallbacks.filter((c) => c !== primary);
+}
+
+export = { potProviderArgs, playerClientArgs, fallbackPlayerClients };
