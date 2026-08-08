@@ -15,7 +15,7 @@ const {
   isCdnFailure,
   computeCdnBackoffMs,
   sleep,
-} = require("../cdn_retry");
+} = require("../../../src/audio/cdn_retry");
 
 describe("cdn_retry.isCdnFailure", () => {
   describe("retryable (code + pattern match)", () => {

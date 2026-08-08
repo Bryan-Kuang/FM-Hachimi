@@ -1,10 +1,10 @@
-jest.mock("../../services/logger_service", () => ({
+jest.mock("../../../src/services/logger_service", () => ({
   info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn(),
 }));
 
 const http = require("http");
-const { createMetricsServer } = require("../metrics_server");
-const { counter, histogram, reset } = require("../metrics");
+const { createMetricsServer } = require("../../../src/observability/metrics_server");
+const { counter, histogram, reset } = require("../../../src/observability/metrics");
 
 function fetchJson(port, path) {
   return new Promise((resolve, reject) => {

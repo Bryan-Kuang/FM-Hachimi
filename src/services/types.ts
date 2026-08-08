@@ -93,6 +93,14 @@ export interface AudioManagerLike {
   shuffleQueue(guildId: GuildId): ActionResult;
   setLoopMode(guildId: GuildId, mode: string): ActionResult;
   getQueue(guildId: GuildId): QueueInfo;
+  getStatistics?(): SessionStatistics;
+}
+
+export interface SessionStatistics {
+  totalGuilds: number;
+  activeConnections: number;
+  totalTracks: number;
+  playingGuilds: number;
 }
 
 // ─── InterfaceUpdater duck-type ──────────────────────────────────────────

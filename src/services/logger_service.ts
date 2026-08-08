@@ -1,6 +1,7 @@
 import winston from 'winston';
 import fs from 'fs';
 import path from 'path';
+import discordAlert = require('./discord_alert_service');
 
 const logsDir = path.join(process.cwd(), 'logs');
 if (!fs.existsSync(logsDir)) {
@@ -57,5 +58,9 @@ function log(level: string, message: string, context?: LogContext): void {
 export function debug(message: string, context?: LogContext): void { log('debug', message, context); }
 export function info(message: string, context?: LogContext): void  { log('info',  message, context); }
 export function warn(message: string, context?: LogContext): void  { log('warn',  message, context); }
-export function error(message: string, context?: LogContext): void { log('error', message, context); }
-export function fatal(message: string, context?: LogContext): void { log('error', message, context); }
+export function error(message: string, context?: LogContext): void {
+  log('error', message, context);
+  // Fire-and-forget Discord alert (no-op unless ERROR_WEBHOOK_URL is set).
+  discordAlert.alerter.report(message, context);
+}
+export function fatal(message: string, context?: LogContext): void { error(message, context); }

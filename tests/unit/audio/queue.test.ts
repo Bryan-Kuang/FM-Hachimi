@@ -3,11 +3,11 @@
  * except for the logger (which Queue imports for info/warn logging).
  */
 
-import Queue from '../queue';
-import type { TrackData } from '../../types';
+import Queue from '../../../src/audio/queue';
+import type { TrackData } from '../../../src/types';
 
 // Suppress logger output during tests
-jest.mock('../../services/logger_service', () => ({
+jest.mock('../../../src/services/logger_service', () => ({
   info: jest.fn(),
   warn: jest.fn(),
   error: jest.fn(),

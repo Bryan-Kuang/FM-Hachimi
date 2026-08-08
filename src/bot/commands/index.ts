@@ -13,7 +13,7 @@ import hachimi = require('./hachimi');
 import radio = require('./radio');
 import annoying = require('./annoying');
 import dailyHachimi = require('./daily_hachimi');
-import worldCup = require('./world_cup');
+import status = require('./status');
 
 interface CommandDefinition {
   data: { name: string; toJSON?: () => unknown };
@@ -27,7 +27,6 @@ type CommandFactory = (
   playerService: unknown,
   queueService: unknown,
   dailyHachimiService?: unknown,
-  worldCupService?: unknown,
 ) => CommandDefinition;
 
 const commandFactories: CommandFactory[] = [
@@ -45,7 +44,7 @@ const commandFactories: CommandFactory[] = [
   radio,
   annoying,
   dailyHachimi,
-  worldCup,
+  status,
 ];
 
 const TESTING_DESCRIPTION_PREFIX = '[Testing] ';
@@ -101,10 +100,9 @@ function withTestingDescription(command: CommandDefinition): CommandDefinition {
 function createCommands(
   playerService: unknown,
   dailyHachimiService?: unknown,
-  worldCupService?: unknown,
 ): CommandDefinition[] {
   return commandFactories
-    .map((factory) => factory(playerService, playerService, dailyHachimiService, worldCupService))
+    .map((factory) => factory(playerService, playerService, dailyHachimiService))
     .map(ensureDMPermission)
     .map(withTestingDescription);
 }
@@ -119,16 +117,16 @@ function getTestingCommandsFrom(commands: CommandDefinition[]): CommandDefinitio
     .map(withTestingDescription);
 }
 
-function getGlobalCommands(playerService: unknown, dailyHachimiService?: unknown, worldCupService?: unknown): CommandDefinition[] {
-  return getStableCommandsFrom(createCommands(playerService, dailyHachimiService, worldCupService));
+function getGlobalCommands(playerService: unknown, dailyHachimiService?: unknown): CommandDefinition[] {
+  return getStableCommandsFrom(createCommands(playerService, dailyHachimiService));
 }
 
-function getTestingCommands(playerService: unknown, dailyHachimiService?: unknown, worldCupService?: unknown): CommandDefinition[] {
-  return getTestingCommandsFrom(createCommands(playerService, dailyHachimiService, worldCupService));
+function getTestingCommands(playerService: unknown, dailyHachimiService?: unknown): CommandDefinition[] {
+  return getTestingCommandsFrom(createCommands(playerService, dailyHachimiService));
 }
 
-function getGuildCommandsForTestServer(playerService: unknown, dailyHachimiService?: unknown, worldCupService?: unknown): CommandDefinition[] {
-  return getTestingCommands(playerService, dailyHachimiService, worldCupService);
+function getGuildCommandsForTestServer(playerService: unknown, dailyHachimiService?: unknown): CommandDefinition[] {
+  return getTestingCommands(playerService, dailyHachimiService);
 }
 
 export = {

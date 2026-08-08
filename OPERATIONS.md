@@ -2,6 +2,30 @@
 
 Runbook for deploying and operating F.M. Hachimi on the VPS.
 
+## Cheat sheet — the five commands you actually run
+
+The VPS address, user, and key are deliberately not written down here (public
+repo — CI keeps them in the `DEPLOY_HOST`/`DEPLOY_USER`/`DEPLOY_SSH_KEY`
+secrets). Add a `Host fm-hachimi-vps` alias to your local `~/.ssh/config` once,
+then:
+
+```bash
+# SSH to the VPS
+ssh fm-hachimi-vps
+
+# Tail the bot's logs (on the VPS)
+docker logs -f bilibili-discord-bot --tail 100
+
+# Health check (on the VPS): container status + app healthz
+docker ps --format '{{.Names}}: {{.Status}}' && curl -s 127.0.0.1:9090/healthz
+
+# Trigger a deploy and watch it (local; any pushed main commit also deploys)
+gh workflow run pipeline.yml && gh run watch
+
+# Register/refresh slash commands manually (local; normally automatic post-deploy)
+npm run deploy:commands
+```
+
 ## Topology
 
 - **Host:** Oracle Cloud Ubuntu VPS, repo at `/home/ubuntu/bilibili-bot`, tracks `main`.
@@ -182,49 +206,21 @@ budget ~1 GB, split evenly:
   `*.m4a`/`*.webm`) are now orphaned — delete the loose root files once:
   `find ~/bilibili-bot/cache -maxdepth 1 -type f -delete` (leaves the two subdirs).
 
-## World Cup (temporal feature)
+## Detecting problems
 
-A time-boxed feature that pushes **live World Cup updates** (kickoff / goal /
-full-time) to a subscribed channel and answers on-demand `/worldcup` queries. It
-is **inert outside the tournament window** and needs no teardown — it simply stops
-responding after `WORLD_CUP_END`.
+Three layers, from most to least automated:
 
-- **Data source:** ESPN's public scoreboard JSON (`fifa.world`) — no login, no key,
-  the same data backing a public site. Wrapped behind `src/world_cup/source.ts` so
-  the crawl target is swappable. `src/world_cup/world_cup_service.ts` polls it
-  (adaptive cadence: ~`livePollMs` while a match is live or a kickoff is due; when
-  idle it wakes for the next scheduled kickoff, else `idlePollMs`), diffs successive
-  polls, and posts only the changes.
-- **Commands** (`/worldcup`): `subscribe #channel` / `unsubscribe` (Manage Server),
-  `today`, `schedule date:YYYY-MM-DD`, `status`. The `today`/`schedule` commands
-  fetch **independently of the poller** — they are the reliable manual fallback when
-  live updates are degraded. `status` shows updater health.
-- **Day boundaries:** "today" and `schedule` dates are calendar days in
-  `WORLD_CUP_TIMEZONE` (default `America/Toronto` — matches venue-evening dates in
-  official listings). ESPN groups its scoreboard by US-Eastern day, so the service
-  fetches adjacent boards and filters by each match's own kickoff time; late
-  kickoffs near midnight UTC are not dropped (e.g. a 22:00 ET match is 02:00 UTC
-  the next day).
-- **State** lives under the persisted `data/` mount (no new mount): `data/world_cup/`
-  with `subscriptions.json` (per-guild channel) and `state.json` (last match scores
-  for diffing — reloaded on boot so a restart never re-posts past events).
-- **Links:** message titles and a `📺 Watch live on 88看球` line point to the free
-  stream (`WORLD_CUP_STREAM_URL`, default `https://www.88kanqiu.tw/match/3/live` — 88看球
-  streams the World Cup free without a VPN; `/match/3/live` is its World Cup hub). The
-  link label is `WORLD_CUP_STREAM_LABEL` (default `88看球`). The ESPN match page stays as
-  the `📊 Match stats` link. Set `WORLD_CUP_STREAM_URL=` (empty) to drop the stream link.
-  Note: 88看球 has no public API and blocks bots, so links target the World Cup hub page
-  rather than individual-match pages (those aren't reliably mappable from our match data).
-- **Env:** `WORLD_CUP_ENABLED` (default true), `WORLD_CUP_START` (`2026-06-11`),
-  `WORLD_CUP_END` (`2026-07-21`, exclusive — margin past the Jul 19 final),
-  `WORLD_CUP_SOURCE_URL`, `WORLD_CUP_STREAM_URL`, `WORLD_CUP_STREAM_LABEL`,
-  `WORLD_CUP_LIVE_POLL_MS` (15000, min 15000), `WORLD_CUP_IDLE_POLL_MS` (600000),
-  `WORLD_CUP_REQUEST_TIMEOUT_MS` (10000), `WORLD_CUP_TIMEZONE`, `WORLD_CUP_DATA_DIR`.
-- **Reset:** `rm -rf ~/bilibili-bot/data/world_cup/*` (re-seeds on next poll;
-  subscriptions are lost). To disable mid-tournament: set `WORLD_CUP_ENABLED=false`
-  and redeploy.
-- A degraded source logs `WorldCup poll failed; commands remain available as fallback`
-  and `/worldcup status` reports `⚠️ Auto-updates degraded`.
+1. **`/status` slash command** — the fastest health check, no SSH. Shows uptime,
+   deployed commit (`GIT_SHA`, baked into the image by CI), voice sessions,
+   per-platform media-cache usage, and cookie-refresh ages. Run it in any server.
+2. **Discord error alerts** — set `ERROR_WEBHOOK_URL` in `.env` and every
+   error-level log posts to that webhook (deduped 1/message/10 min, capped 5/min;
+   webhook failures are swallowed so alerting can't crash the bot). This is the
+   only path that surfaces *runtime* errors — deploy failures and cookie staleness
+   already alert via their own workflows. Leave unset in local dev.
+3. **The `ops:*` scripts and quick checks below** — for when you need to be on the
+   box. The `ops:*` scripts (`npm run ops:logs`, `ops:health`, `ops:deploy`,
+   `ops:ssh`) assume a `Host fm-hachimi-vps` entry in your `~/.ssh/config`.
 
 ## Quick checks
 

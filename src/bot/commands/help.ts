@@ -45,7 +45,7 @@ const createHelpCommand = (_playbackService: any) => ({
             name: 'Features',
             value:
               '`/hachimi` - 自动添加哈基米精选视频\n`/daily-hachimi` - 配置每日哈基米推荐\n' +
-              '`/radio` - 电台模式：无限随机播放哈基米歌曲\n`/worldcup` - 2026 世界杯实时比分与赛程\n' +
+              '`/radio` - 电台模式：无限随机播放哈基米歌曲\n' +
               '`/annoying` - 烦人模式：被踢出语音也会立刻回来继续播放',
             inline: false,
           },

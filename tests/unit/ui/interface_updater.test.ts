@@ -1,20 +1,20 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-jest.mock('../../services/logger_service', () => ({
+jest.mock('../../../src/services/logger_service', () => ({
   info: jest.fn(),
   warn: jest.fn(),
   error: jest.fn(),
   debug: jest.fn(),
 }));
 
-jest.mock('../embeds', () => ({
+jest.mock('../../../src/ui/embeds', () => ({
   createNowPlayingEmbed: jest.fn(() => ({ embed: true })),
 }));
-jest.mock('../buttons', () => ({
+jest.mock('../../../src/ui/buttons', () => ({
   createPlaybackControls: jest.fn(() => []),
 }));
 
-import InterfaceUpdater = require('../interface_updater');
+import InterfaceUpdater = require('../../../src/ui/interface_updater');
 
 function setup(overrides: any = {}) {
   const session: any = {
