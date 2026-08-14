@@ -4,6 +4,14 @@ name: Cookie Health
 # YouTube cookies every ~6h, rewriting secrets/youtube_cookies.txt only on
 # success. If the VPS browser-profile Google session dies, refreshes silently
 # fail and the file goes stale — this catches that before playback breaks.
+#
+# The check reports its verdict as a COOKIE_STATUS line on stdout and always
+# exits 0, so "the cookies are stale" stays distinguishable from "the check
+# never ran". Alerting on the job's exit status conflated the two: on
+# 2026-08-12 the ssh action could not download its own binary (six retries, all
+# HTTP 503 from GitHub releases) and Discord was told the cookies were stale
+# while they were four hours old and rotating normally. A monitor that cannot
+# tell "broken" from "unknown" trains you to ignore it.
 
 on:
   schedule:
@@ -23,6 +31,11 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Check YouTube cookie freshness on the VPS
+        id: check
+        # Swallowed so the verdict comes from COOKIE_STATUS below, not from the
+        # step's exit status — which also goes red when the action itself fails
+        # to start. The job is still failed explicitly at the end.
+        continue-on-error: true
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -30,27 +43,56 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           timeout: 30s
           command_timeout: 2m
+          capture_stdout: true
           script: |
             set -euo pipefail
             FILE=~/bilibili-bot/secrets/youtube_cookies.txt
             MAX_AGE=$((13 * 3600))   # ~2 missed 6h cycles; avoids flapping on a single transient miss
 
             if [ ! -f "$FILE" ]; then
-              echo "youtube_cookies.txt is MISSING at $FILE"
-              exit 2
+              echo "COOKIE_STATUS=missing path=$FILE"
+              exit 0
             fi
 
             AGE=$(( $(date +%s) - $(stat -c %Y "$FILE") ))
-            echo "cookie age: ${AGE}s (threshold ${MAX_AGE}s)"
             if [ "$AGE" -gt "$MAX_AGE" ]; then
-              echo "STALE: in-app refresh is failing. Run step 0 of the OPERATIONS.md decision tree before assuming the browser session is dead — a broken yt-dlp client set fails validation with perfectly good cookies."
-              exit 3
+              echo "COOKIE_STATUS=stale age=${AGE}s threshold=${MAX_AGE}s"
+            else
+              echo "COOKIE_STATUS=fresh age=${AGE}s threshold=${MAX_AGE}s"
             fi
-            echo "OK: cookies are fresh."
+            exit 0
+
+      - name: Report verdict
+        id: verdict
+        env:
+          OUT: ${{ steps.check.outputs.stdout }}
+        run: |
+          echo "$OUT"
+          if echo "$OUT" | grep -q 'COOKIE_STATUS=stale\|COOKIE_STATUS=missing'; then
+            echo "state=bad" >> "$GITHUB_OUTPUT"
+          elif echo "$OUT" | grep -q 'COOKIE_STATUS=fresh'; then
+            echo "state=ok" >> "$GITHUB_OUTPUT"
+          else
+            # No verdict came back: the action failed to start, SSH failed, or
+            # the VPS was unreachable. Nothing is known about the cookies.
+            echo "state=unknown" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Alert Discord on stale/missing cookies
-        if: failure()
+        if: steps.verdict.outputs.state == 'bad'
         run: |
           curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
             -d "{\"embeds\":[{\"title\":\"YouTube cookies stale or missing\",\"color\":15105570,\"description\":\"The in-app YouTube cookie refresh has not produced a fresh \`youtube_cookies.txt\` within the threshold. **Run step 0 of the OPERATIONS.md decision tree first** — extract a canary with the live cookie file and read the error. A dead browser session and a broken yt-dlp client set look identical from here, and only one of them needs a re-login.\\n[View run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\"}]}"
+
+      - name: Fail the job
+        if: steps.verdict.outputs.state != 'ok'
+        run: |
+          if [ "${{ steps.verdict.outputs.state }}" = "unknown" ]; then
+            echo "The check never ran — no COOKIE_STATUS came back. Cookie state is unknown, not necessarily bad."
+            echo "Deliberately not alerting Discord: a single missed run is absorbed by the 13h threshold (2 cycles)."
+            echo "If this repeats across consecutive runs, check the VPS and the ssh action."
+          else
+            echo "Cookies are stale or missing — see the Discord alert and OPERATIONS.md step 0."
+          fi
+          exit 1
