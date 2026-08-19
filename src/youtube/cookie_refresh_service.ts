@@ -33,6 +33,7 @@ interface CookieRefreshOptions {
   refreshIntervalMs?: number;
   cooldownMs?: number;
   tmpDir?: string;
+  validateTimeoutMs?: number;
 }
 
 const DEFAULT_COOKIE_FILE = '/app/secrets/youtube_cookies.txt';
@@ -51,6 +52,7 @@ class YouTubeCookieRefreshService {
       refreshIntervalMs: options.refreshIntervalMs,
       cooldownMs: options.cooldownMs,
       tmpDir: options.tmpDir,
+      processTimeoutMs: options.validateTimeoutMs,
       // The package spawns bare `yt-dlp`, so without this the validator would
       // certify a configuration the extractor never uses — and reject good
       // cookies whenever YouTube's default clients regress (2026-08-07: the

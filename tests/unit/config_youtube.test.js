@@ -28,10 +28,11 @@ describe("YouTube config", () => {
       browserSpec: "chrome+basictext:/app/youtube-browser-profile",
       refreshIntervalMs: 21600000,
       cooldownMs: 300000,
-      validateUrls: [
-        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        "https://www.youtube.com/watch?v=AUfXW1EdLew",
-      ],
+      // Deliberately one canary: validation requires every URL to extract, so
+      // each extra entry multiplies both cost and the chance one flaky video
+      // blocks rotation.
+      validateUrls: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+      validateTimeoutMs: 180000,
     });
   });
 

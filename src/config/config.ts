@@ -99,6 +99,7 @@ interface YouTubeCookieRefreshConfig {
   refreshIntervalMs: number;
   cooldownMs: number;
   validateUrls: string[];
+  validateTimeoutMs: number;
 }
 
 interface RadioConfig {
@@ -419,10 +420,23 @@ const config: BotConfig = {
       browserSpec: process.env.YOUTUBE_COOKIE_BROWSER_SPEC || "chrome+basictext:/app/youtube-browser-profile",
       refreshIntervalMs: Math.max(0, parseIntegerEnv(process.env.YOUTUBE_COOKIE_REFRESH_INTERVAL_MS, 6 * 60 * 60 * 1000)),
       cooldownMs: Math.max(0, parseIntegerEnv(process.env.YOUTUBE_COOKIE_REFRESH_COOLDOWN_MS, 5 * 60 * 1000)),
+      // One canary, not several. Validation requires *every* URL to extract,
+      // so each extra entry multiplies both the cost and the chance that one
+      // flaky video blocks rotation — which is exactly what froze cookies for
+      // 27h on 2026-08-07. Keep this to a single evergreen video.
       validateUrls: parseListEnv(process.env.YOUTUBE_COOKIE_VALIDATE_URLS, [
         "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        "https://www.youtube.com/watch?v=AUfXW1EdLew",
       ]),
+      // Per-yt-dlp-invocation cap for validation. The package's own default is
+      // 90s, which the web_embedded client blows straight through: it pays the
+      // nsig JS solve, measured at 55-86s on this 2-vCPU host, so a moderately
+      // busy moment tips it over and the candidate cookies are discarded as
+      // "failed validation" when nothing is wrong with them (2026-08-19: three
+      // consecutive refreshes lost to `Timed out`, file stuck at 22h).
+      validateTimeoutMs: Math.max(
+        1000,
+        parseIntegerEnv(process.env.YOUTUBE_COOKIE_VALIDATE_TIMEOUT_MS, 180000),
+      ),
     },
   },
   radio: {
