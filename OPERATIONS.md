@@ -191,6 +191,37 @@ config the bot never runs is what froze rotation on 2026-08-07.
 - Alert: the **Cookie Health** workflow checks the file's age every 6h and pings Discord if it
   exceeds ~13h (two missed cycles).
 
+### Validation is slow, and its timeout is the thing that breaks first
+
+While YouTube's SABR/PO-token experiment is running, `web_embedded` is the only
+client whose stream URLs actually serve bytes, and it pays the nsig JS solve:
+**55-86s per extraction** on the 2-vCPU host. Validation runs one such
+extraction per canary URL, each capped by `YOUTUBE_COOKIE_VALIDATE_TIMEOUT_MS`
+(default 180000; the upstream package's own default is 90s, which is *under* the
+observed cost).
+
+So a `Timed out` in `YouTube cookie refresh failed` means the box was busy, not
+that the cookies died:
+
+```
+exported cookies failed validation: \nTimed out
+```
+
+Treat that string as its own branch of step 0 — no canary check needed, and
+certainly no re-login. Re-measure before changing anything:
+
+```bash
+docker exec bilibili-discord-bot sh -c 'cp /app/secrets/youtube_cookies.txt /tmp/v.txt
+  time yt-dlp --cookies /tmp/v.txt --skip-download --no-playlist --no-warnings \
+    --print id https://www.youtube.com/watch?v=dQw4w9WgXcQ \
+    --extractor-args youtubepot-bgutilhttp:base_url=http://pot-provider:4416 \
+    --extractor-args youtube:player_client=web_embedded; rm -f /tmp/v.txt'
+```
+
+Keep `YOUTUBE_COOKIE_VALIDATE_URLS` at **one** video. Validation requires every
+URL to pass, so each extra canary adds a full extraction *and* another chance
+for one flaky video to block rotation entirely — the 2026-08-07 freeze.
+
 **Tier 2 — browser-profile re-login (manual).** The profile's Google session eventually dies
 (bot-check / expiry); Tier 1 then fails and the file goes stale. Recovery is manual via VNC:
 
