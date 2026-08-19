@@ -7,6 +7,7 @@ describe("YouTube config", () => {
   });
 
   afterEach(() => {
+    jest.dontMock("dotenv/config");
     process.env = OLD_ENV;
     jest.resetModules();
   });
@@ -20,18 +21,15 @@ describe("YouTube config", () => {
   });
 
   test("exposes automatic YouTube cookie refresh defaults", () => {
-    // config.ts does `import "dotenv/config"`, and CI runs `cp .env.example .env`
-    // before the suite — so ambient values silently stand in for the code
-    // defaults this test exists to pin. Clear them, or the test asserts
-    // whatever .env.example happens to say (it shipped two validate URLs while
-    // the code default was one: green locally, red only in CI).
-    delete process.env.YOUTUBE_COOKIE_AUTO_REFRESH_ENABLED;
-    delete process.env.YOUTUBE_COOKIES_FILE;
-    delete process.env.YOUTUBE_COOKIE_BROWSER_SPEC;
-    delete process.env.YOUTUBE_COOKIE_REFRESH_INTERVAL_MS;
-    delete process.env.YOUTUBE_COOKIE_REFRESH_COOLDOWN_MS;
-    delete process.env.YOUTUBE_COOKIE_VALIDATE_URLS;
-    delete process.env.YOUTUBE_COOKIE_VALIDATE_TIMEOUT_MS;
+    // config.ts runs `import "dotenv/config"` at require time, and CI does
+    // `cp .env.example .env` before the suite — so the file's values land in
+    // process.env and stand in for the code defaults this test exists to pin.
+    // Deleting the keys first does not help: dotenv simply re-reads them on
+    // require. Stub the side-effecting module instead.
+    jest.doMock("dotenv/config", () => ({}));
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith("YOUTUBE_COOKIE")) delete process.env[key];
+    }
 
     const config = require("../../src/config/config");
 
