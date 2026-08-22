@@ -10,6 +10,13 @@ function makeCommand(name, description) {
 function loadDeployCommands({ testGuildId = "1376318047794761838" } = {}) {
   jest.resetModules();
 
+  // scripts/deploy-commands.js registers ts-node so a plain `node` invocation can
+  // require the TypeScript sources. Under jest that is redundant — ts-jest already
+  // transforms .ts — so registering stands up a second TypeScript compiler inside
+  // the worker on every resetModules(). Neutralise it: five real registrations per
+  // run is the largest allocation source in the suite.
+  jest.doMock("ts-node", () => ({ register: jest.fn() }));
+
   const stableCommand = makeCommand("play", "Play music");
   const testingCommand = makeCommand("experiment", "[Testing] Try experiment");
 
@@ -46,6 +53,7 @@ function loadDeployCommands({ testGuildId = "1376318047794761838" } = {}) {
 
 describe("deploy command payload selection", () => {
   afterEach(() => {
+    jest.dontMock("ts-node");
     jest.dontMock("discord.js");
     jest.dontMock("../../src/config/config");
     jest.dontMock("../../src/bot/commands");
