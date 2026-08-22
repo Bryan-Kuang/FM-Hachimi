@@ -1,6 +1,8 @@
 module.exports = {
   testEnvironment: "node",
-  testPathIgnorePatterns: ["/node_modules/", "/dist/"],
+  // /.claude/worktrees/ holds full checkouts of this repo created by agent
+  // sessions; without this, jest discovers their tests/ trees as well.
+  testPathIgnorePatterns: ["/node_modules/", "/dist/", "/\\.claude/"],
   transform: {
     "^.+\\.tsx?$": [
       "ts-jest",
