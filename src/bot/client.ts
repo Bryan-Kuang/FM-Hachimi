@@ -19,6 +19,7 @@ import Debug = require('../utils/debug');
 import CommandRegistry = require('./commands');
 import * as TestingAccess from './testing_access';
 import { isFirstListenerJoin } from './voice_presence';
+import { GatewayWatchdog, StuckReport } from './gateway_watchdog';
 
 // Augment discord.js Client with bot-specific properties
 declare module 'discord.js' {
@@ -44,6 +45,7 @@ interface BotStats {
   users:     number;
   username?: string;
   id?:       string;
+  gateway?:  { connected: boolean; outageMs: number };
 }
 
 class BotClient {
@@ -52,6 +54,8 @@ class BotClient {
   public  client:    Client;
   public  isReady:   boolean;
   private startTime: Date | null;
+  private watchdog:  GatewayWatchdog;
+  private watchdogTimer: NodeJS.Timeout | null;
 
   /**
    * @param playerService        - PlayerService (unified playback + queue)
@@ -81,6 +85,47 @@ class BotClient {
     // Track bot status
     this.isReady   = false;
     this.startTime = null;
+
+    this.watchdogTimer = null;
+    this.watchdog      = new GatewayWatchdog({
+      stuckTimeoutMs: config.gateway.stuckTimeoutMs,
+      logIntervalMs:  config.gateway.logIntervalMs,
+      onStuck:        (report) => this.onGatewayStuck(report),
+    });
+  }
+
+  /**
+   * The gateway has been down longer than the watchdog allows. discord.js is
+   * still retrying, but a wedged shard never recovers in-process (see
+   * gateway_watchdog.ts), so exit non-zero and let the container's
+   * `restart: unless-stopped` policy bring us back with a fresh session.
+   * Playback resumes from the snapshot the resume service keeps flushing.
+   */
+  private onGatewayStuck(report: StuckReport): void {
+    logger.error('Discord gateway stuck; restarting process to force a fresh session', {
+      outageMs:  report.unhealthyForMs,
+      failures:  report.failures,
+      lastError: report.lastError,
+      shardId:   report.lastShardId,
+    });
+    Debug.error('client.gateway.stuck', new Error(report.lastError ?? 'gateway stuck'));
+    this.stopGatewayWatchdog();
+    process.exit(1);
+  }
+
+  private startGatewayWatchdog(): void {
+    if (this.watchdogTimer) return;
+    this.watchdogTimer = setInterval(
+      () => this.watchdog.check(),
+      config.gateway.checkIntervalMs,
+    );
+    this.watchdogTimer.unref?.();
+  }
+
+  stopGatewayWatchdog(): void {
+    if (!this.watchdogTimer) return;
+    clearInterval(this.watchdogTimer);
+    this.watchdogTimer = null;
   }
 
   /**
@@ -109,6 +154,8 @@ class BotClient {
         logger.error('Failed to bind UI updater', { error: (e as Error).message });
         Debug.error('client.bind.failed', e as Error);
       }
+
+      this.startGatewayWatchdog();
 
       logger.info('Discord bot client initialized successfully');
       Debug.trace('client.initialize.success');
@@ -326,19 +373,38 @@ class BotClient {
     // Gateway/shard transport errors. Without a listener here they escape to
     // process-level `uncaughtException`, whose handler shuts the bot down — a
     // Cloudflare 521 during a routine gateway reconnect killed the process
-    // mid-playback on 2026-08-08. discord.js reconnects on its own, so these
-    // are noted and left alone.
+    // mid-playback on 2026-08-08.
+    //
+    // discord.js retries on its own, but not every failure is one it can retry
+    // its way out of: a 503 handshake leaves it resuming to a dead gateway host
+    // forever (see gateway_watchdog.ts). So these are handed to the watchdog
+    // instead of merely logged — it throttles the logging and restarts the
+    // process if the outage outlives config.gateway.stuckTimeoutMs.
     this.client.on('shardError', (error: Error, shardId: number) => {
-      logger.warn('Discord shard error; discord.js will reconnect', {
-        shardId, error: error.message,
-      });
+      this.watchdog.recordFailure(shardId, error.message);
       Debug.error('client.event.shardError', error);
     });
-    // Note: this is not proven to catch the 2026-08-08 crash. That error came
-    // from ws's handshake (websocket.js:913) and escaped despite the 'error'
-    // listener above, so it may originate below the shard layer entirely. If
-    // it recurs, the absence of a 'Discord shard error' line right before the
-    // uncaught exception is the signal that a different hook is needed.
+    // Note: the shardError hook is not proven to catch the 2026-08-08 crash.
+    // That error came from ws's handshake (websocket.js:913) and escaped
+    // despite the 'error' listener above, so it may originate below the shard
+    // layer entirely. If it recurs, the absence of a gateway-failure line right
+    // before the uncaught exception is the signal that a different hook is
+    // needed.
+
+    this.client.on('shardDisconnect', (event: { code: number }, shardId: number) => {
+      this.watchdog.recordFailure(shardId, `disconnected (code ${event?.code})`);
+      Debug.trace('client.event.shardDisconnect', { shardId, code: event?.code });
+    });
+
+    this.client.on('shardResume', (shardId: number) => {
+      this.watchdog.recordRecovery('shardResume');
+      Debug.trace('client.event.shardResume', { shardId });
+    });
+
+    this.client.on('shardReady', (shardId: number) => {
+      this.watchdog.recordRecovery('shardReady');
+      Debug.trace('client.event.shardReady', { shardId });
+    });
 
     this.client.on('warn', (warning: string) => {
       logger.warn('Discord client warning', { warning });
@@ -438,22 +504,34 @@ class BotClient {
   }
 
   /**
-   * Get bot statistics
+   * Get bot statistics.
+   *
+   * `ready` is a live signal, not a latch. It used to key off `this.isReady`
+   * alone, which is set once on clientReady and never cleared — so during the
+   * 2026-09-01 gateway outage /readyz cheerfully reported ready:true for 50
+   * minutes while the bot was answering nobody. The watchdog's view of shard
+   * connectivity is what makes it honest.
    */
   getStats(): BotStats {
+    const gateway = {
+      connected:     this.watchdog.isHealthy(),
+      outageMs:      this.watchdog.unhealthyForMs(),
+    };
+
     if (!this.isReady) {
-      return { ready: false, uptime: 0, guilds: 0, users: 0 };
+      return { ready: false, uptime: 0, guilds: 0, users: 0, gateway };
     }
 
     const uptime = this.startTime ? Date.now() - this.startTime.getTime() : 0;
 
     return {
-      ready:    true,
+      ready:    gateway.connected,
       uptime:   Math.floor(uptime / 1000),
       guilds:   this.client.guilds.cache.size,
       users:    this.client.users.cache.size,
       username: this.client.user?.username,
       id:       this.client.user?.id,
+      gateway,
     };
   }
 
@@ -462,6 +540,7 @@ class BotClient {
    */
   async shutdown(): Promise<void> {
     logger.info('Shutting down Discord bot');
+    this.stopGatewayWatchdog();
     try {
       if (this.isReady) {
         await this.client.destroy();

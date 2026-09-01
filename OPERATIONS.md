@@ -16,8 +16,10 @@ ssh fm-hachimi-vps
 # Tail the bot's logs (on the VPS)
 docker logs -f bilibili-discord-bot --tail 100
 
-# Health check (on the VPS): container status + app healthz
-docker ps --format '{{.Names}}: {{.Status}}' && curl -s 127.0.0.1:9090/healthz
+# Health check (on the VPS): container status + app readiness.
+# Use /readyz, not /healthz — /healthz is a static 200 that stays green while
+# the gateway is wedged (see "Gateway outages and the watchdog").
+docker ps --format '{{.Names}}: {{.Status}}' && curl -s 127.0.0.1:9090/readyz
 
 # Trigger a deploy and watch it (local; any pushed main commit also deploys)
 gh workflow run pipeline.yml && gh run watch
@@ -296,6 +298,54 @@ Three layers, from most to least automated:
 3. **The `ops:*` scripts and quick checks below** — for when you need to be on the
    box. The `ops:*` scripts (`npm run ops:logs`, `ops:health`, `ops:deploy`,
    `ops:ssh`) assume a `Host fm-hachimi-vps` entry in your `~/.ssh/config`.
+
+## Gateway outages and the watchdog
+
+Added 2026-09-01 after the bot sat wedged for ~50 minutes while Docker reported
+`healthy`.
+
+**What happens.** `@discordjs/ws@1.2.3` classifies only ECONNRESET /
+ECONNREFUSED / ETIMEDOUT / EAI_AGAIN as network errors. An HTTP-level handshake
+failure (`Unexpected server response: 503`) carries no `.code`, so the shard is
+destroyed with `recover: Resume`, which *keeps* the session — and with it the
+stale `resume_gateway_url`. It then retries that same dead host every 500 ms,
+forever, with no backoff and no attempt cap. Discord drains gateway hosts while
+recovering from an incident, which is exactly when this bites: our outage began
+14 seconds after Discord marked a major incident resolved.
+
+**How to recognise it.** `docker logs` shows a steady ~2/s stream of shard
+errors and nothing else moving — playback progress frozen at a fixed
+`currentTime`, no `shardReconnecting` / `shardResume` / `ready` lines. The
+give-away that it is *not* the network: a fresh WebSocket from inside the same
+container connects fine.
+
+```bash
+# is the wedge local to the shard, or is Discord/the network actually down?
+docker exec bilibili-discord-bot node -e '
+const ws = new (require("ws"))("wss://gateway.discord.gg/?v=10&encoding=json");
+ws.on("message", m => { console.log("OK", String(m).slice(0, 80)); process.exit(0); });
+ws.on("error", e => { console.log("ERR", e.message); process.exit(1); });'
+```
+
+If that prints `OK` while the bot keeps logging 503s, the shard is wedged.
+
+**What the bot does about it now.** `src/bot/gateway_watchdog.ts` tracks the
+outage. Failures are logged once, then throttled to one line per 15 s. If the
+gateway stays down past `GATEWAY_STUCK_TIMEOUT_MS` (default 120 s) the process
+exits 1; `restart: unless-stopped` brings it back with a fresh IDENTIFY, and the
+resume snapshot restores playback. A restart is the *only* in-process escape —
+nothing short of dropping the session clears the poisoned resume URL.
+
+**What you do about it.** Normally nothing: expect one restart, then recovery.
+If you catch it before the watchdog does, `docker restart bilibili-discord-bot`
+is the same fix. Knobs: `GATEWAY_STUCK_TIMEOUT_MS` (0 disables the watchdog),
+`GATEWAY_CHECK_INTERVAL_MS`, `GATEWAY_LOG_INTERVAL_MS`.
+
+**Health endpoints.** `/healthz` is a static 200 — it proves the process is
+alive and nothing more, which is why the container looked healthy throughout.
+`/readyz` follows the real gateway state (`botStats.gateway.connected`) and is
+what the Docker healthcheck and any ops alerting should use. An unhealthy
+container is *not* restarted by the restart policy — that is the watchdog's job.
 
 ## Quick checks
 
