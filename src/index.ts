@@ -24,6 +24,7 @@ import PreExtractionService = require('./playback/pre_extraction_service');
 import * as logger from './services/logger_service';
 import TokenPrecheck = require('./utils/token_precheck');
 import Debug = require('./utils/debug');
+import { isOrphanedGatewayHandshakeError } from './bot/gateway_handshake_error';
 import { startMetricsServerFromEnv } from './observability/metrics_server';
 import config = require('./config/config');
 
@@ -291,6 +292,22 @@ process.on('unhandledRejection', (reason: any) => {
 });
 
 process.on('uncaughtException', (error: Error) => {
+  // A gateway handshake that `ws` aborted after discord.js had already
+  // detached from the socket. Nobody is left listening, so Node escalates it
+  // to a process-level throw — but the connection is abandoned and holds no
+  // state, and discord.js is already retrying on a fresh one. Killing the bot
+  // over it costs a real outage (11s and an interrupted track on 2026-09-01,
+  // a full crash on 2026-08-08) and fixes nothing. If the gateway is genuinely
+  // unreachable, the fresh connection's failures reach the watchdog through
+  // `shardError` and that restarts us properly.
+  if (isOrphanedGatewayHandshakeError(error)) {
+    logger.warn('Ignoring orphaned gateway handshake error', {
+      error: error.message,
+    });
+    Debug.error('process.gateway.orphaned_handshake', error);
+    return;
+  }
+
   logger.error('Uncaught exception', {
     error: error?.message || String(error),
     stack: error?.stack,
