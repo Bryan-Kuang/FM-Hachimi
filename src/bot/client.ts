@@ -384,12 +384,12 @@ class BotClient {
       this.watchdog.recordFailure(shardId, error.message);
       Debug.error('client.event.shardError', error);
     });
-    // Note: the shardError hook is not proven to catch the 2026-08-08 crash.
-    // That error came from ws's handshake (websocket.js:913) and escaped
-    // despite the 'error' listener above, so it may originate below the shard
-    // layer entirely. If it recurs, the absence of a gateway-failure line right
-    // before the uncaught exception is the signal that a different hook is
-    // needed.
+    // Note: this hook does NOT catch every gateway handshake failure. It
+    // recurred on 2026-09-01 as a 522 with no gateway-failure line before it —
+    // the signal this comment used to predict. Confirmed cause: discord.js
+    // detaches from a still-connecting socket, so the late response has no
+    // listener and goes straight to `uncaughtException`. Handled there, via
+    // isOrphanedGatewayHandshakeError() — see gateway_handshake_error.ts.
 
     this.client.on('shardDisconnect', (event: { code: number }, shardId: number) => {
       this.watchdog.recordFailure(shardId, `disconnected (code ${event?.code})`);

@@ -341,6 +341,18 @@ If you catch it before the watchdog does, `docker restart bilibili-discord-bot`
 is the same fix. Knobs: `GATEWAY_STUCK_TIMEOUT_MS` (0 disables the watchdog),
 `GATEWAY_CHECK_INTERVAL_MS`, `GATEWAY_LOG_INTERVAL_MS`.
 
+**The other shape: a crash with no shard error before it.** Same family of
+failure, different exit. If `ws` gets a non-101 handshake response *after*
+discord.js has detached from that socket, nothing is listening, and Node turns
+it into an uncaught exception. The tell is a `Uncaught exception` line with
+`Unexpected server response: <5xx>` and a `ws/lib/websocket.js:913` frame, with
+**no** gateway-failure line before it. Seen 2026-08-08 (521) and 2026-09-01
+(522, ~11s outage plus an interrupted track). These are now logged and ignored
+rather than fatal — the socket is abandoned and holds no state, and a gateway
+that is genuinely unreachable still reaches the watchdog through the fresh
+connection. If you see this line, no action is needed; if you see it *often*,
+Discord's edge is flapping.
+
 **Health endpoints.** `/healthz` is a static 200 — it proves the process is
 alive and nothing more, which is why the container looked healthy throughout.
 `/readyz` follows the real gateway state (`botStats.gateway.connected`) and is
