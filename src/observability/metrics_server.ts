@@ -14,6 +14,7 @@ import * as logger from '../services/logger_service';
 
 type ReadinessSnapshot = boolean | {
   running?: boolean;
+  botStats?: { ready?: boolean } | null;
   [key: string]: unknown;
 };
 
@@ -36,7 +37,13 @@ function writeJson(res: http.ServerResponse, status: number, body: unknown): voi
 
 function isReadySnapshot(snapshot: ReadinessSnapshot): boolean {
   if (typeof snapshot === 'boolean') return snapshot;
-  return snapshot.running !== false;
+  if (snapshot.running === false) return false;
+  // A live process is not a working bot. Readiness must follow the gateway
+  // too, or /readyz reports 200 while the shard is wedged — which is exactly
+  // what hid the 2026-09-01 outage for 50 minutes. `botStats` absent means the
+  // caller isn't reporting bot state, so don't invent an opinion about it.
+  if (snapshot.botStats && snapshot.botStats.ready === false) return false;
+  return true;
 }
 
 export function createMetricsServer({ port, host, readiness }: ServerOptions = {}): MetricsServerHandle {

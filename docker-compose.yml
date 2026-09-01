@@ -67,9 +67,16 @@ services:
           cpus: '0.25'
           memory: 256M
 
-    # Health check
+    # Health check.
+    # Points at /readyz, not /healthz: /healthz is a static 200 that only proves
+    # the process is alive, which is why Docker reported "healthy" throughout the
+    # 2026-09-01 gateway outage while the bot answered nobody. /readyz follows
+    # the actual gateway connection, so `docker ps` and any ops alerting on it
+    # tell the truth. Recovery itself is the in-process watchdog's job
+    # (src/bot/gateway_watchdog.ts) — an unhealthy container is not restarted by
+    # the restart policy on its own.
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/healthz >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/readyz >/dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

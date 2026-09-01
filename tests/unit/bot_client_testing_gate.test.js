@@ -46,6 +46,7 @@ jest.mock("../../src/services/logger_service", () => ({
 
 jest.mock("../../src/config/config", () => ({
   test: { guildId: "1376318047794761838" },
+  gateway: { stuckTimeoutMs: 120000, checkIntervalMs: 15000, logIntervalMs: 15000 },
 }));
 
 const BotClient = require("../../src/bot/client");

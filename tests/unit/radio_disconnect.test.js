@@ -52,6 +52,7 @@ jest.mock('../../src/services/logger_service', () => ({
 
 jest.mock('../../src/config/config', () => ({
   test: { guildId: 'test-guild' },
+  gateway: { stuckTimeoutMs: 120000, checkIntervalMs: 15000, logIntervalMs: 15000 },
 }));
 
 jest.mock('../../src/utils/debug', () => ({

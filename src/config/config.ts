@@ -136,6 +136,20 @@ interface AnnoyingConfig {
   dataFile: string;
 }
 
+interface GatewayConfig {
+  /**
+   * How long the Discord gateway may stay disconnected before the process
+   * exits so the container restarts with a fresh session. 0 disables the
+   * watchdog. See src/bot/gateway_watchdog.ts for why a restart is the only
+   * exit from a wedged shard.
+   */
+  stuckTimeoutMs: number;
+  /** How often the watchdog re-checks the outage age. */
+  checkIntervalMs: number;
+  /** Minimum gap between gateway-failure log lines. */
+  logIntervalMs: number;
+}
+
 interface ResumeConfig {
   enabled: boolean;
   /** Snapshot file (under the persisted data/ mount so it survives redeploys). */
@@ -188,6 +202,7 @@ interface BotConfig {
   radio: RadioConfig;
   dailyHachimi: DailyHachimiConfig;
   annoying: AnnoyingConfig;
+  gateway: GatewayConfig;
   resume: ResumeConfig;
   test: TestConfig;
   search: SearchConfig;
@@ -472,6 +487,16 @@ const config: BotConfig = {
     rejoinDelayMs: Math.max(0, parseIntegerEnv(process.env.ANNOYING_REJOIN_DELAY_MS, 1500)),
     dataFile: process.env.ANNOYING_DATA_FILE
       || path.join(process.cwd(), "data", "annoying_state.json"),
+  },
+  gateway: {
+    // A shard that cannot re-establish its session recovers only by restarting:
+    // @discordjs/ws keeps resuming to the same stale resume_gateway_url on a
+    // fixed 500ms timer, forever. 120s is comfortably longer than a normal
+    // gateway blip (discord.js resumes within seconds) and far shorter than the
+    // ~50min zombie window we hit on 2026-09-01.
+    stuckTimeoutMs: Math.max(0, parseIntegerEnv(process.env.GATEWAY_STUCK_TIMEOUT_MS, 120 * 1000)),
+    checkIntervalMs: Math.max(1000, parseIntegerEnv(process.env.GATEWAY_CHECK_INTERVAL_MS, 15 * 1000)),
+    logIntervalMs: Math.max(0, parseIntegerEnv(process.env.GATEWAY_LOG_INTERVAL_MS, 15 * 1000)),
   },
   resume: {
     // Resume interrupted playback after a restart/redeploy. A snapshot of every
