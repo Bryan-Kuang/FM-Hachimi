@@ -65,6 +65,7 @@ const createStatusCommand = (playerService: any) => ({
     try {
       const gitSha = (process.env.GIT_SHA || '').slice(0, 7) || 'dev';
       const stats = playerService.getStatistics?.() ?? null;
+      const voiceHealth = playerService.getAnnoyingService?.()?.getVoiceRecovery?.()?.getHealth();
       const bilibiliCache = readCacheStats(config.bilibili.mediaCacheDir);
       const youtubeCache = readCacheStats(config.youtube.mediaCacheDir);
 
@@ -102,6 +103,14 @@ const createStatusCommand = (playerService: any) => ({
           },
         )
         .setTimestamp();
+
+      if (voiceHealth) {
+        const degraded = voiceHealth.sessions.filter((session: any) => session.degraded);
+        embed.addFields({ name: 'Voice recovery', value: degraded.length
+          ? `${degraded.length} session(s) need recovery`
+          : 'No confirmed voice membership mismatch' });
+        if (!voiceHealth.healthy) embed.setColor(0xed4245);
+      }
 
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 

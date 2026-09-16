@@ -25,6 +25,9 @@ const AnnoyingService = require('../../src/services/annoying_service');
 
 function makePlayer(overrides = {}) {
   return {
+    voiceIntentRevision: 0,
+    intendedVoiceChannelId: 'vc-1',
+    prepareVoiceRecovery: jest.fn(),
     lastSelfDisconnectAt: 0,
     lastSelfJoinAt: 0,
     lastSelfJoinChannelId: null,
@@ -38,6 +41,8 @@ function makeDeps({ player, capturedState } = {}) {
   const channel = { send: jest.fn().mockResolvedValue({}) };
   const deps = {
     client: {
+      isReady: () => true,
+      rest: { get: jest.fn().mockResolvedValue({ channel_id: 'vc-1' }) },
       user: { id: 'bot-1' },
       channels: { fetch: jest.fn().mockResolvedValue(channel) },
     },
@@ -45,7 +50,7 @@ function makeDeps({ player, capturedState } = {}) {
     sessionManager: {
       sessions: new Map([['guild-1', { player, uiContext: { channelId: 'text-1' } }]]),
     },
-    radioService: {},
+    radioService: { stop: jest.fn().mockResolvedValue() },
     resumeService: {
       captureGuild: jest.fn().mockReturnValue(capturedState ?? null),
       reconstructGuild: jest.fn().mockResolvedValue(true),
@@ -186,6 +191,18 @@ describe('AnnoyingService', () => {
   });
 
   describe('handleBotDisconnect', () => {
+    test('slow audit lookup admits only one disconnect reconstruction', async () => {
+      let resolve;
+      AuditLog.findRecentAuditExecutor.mockImplementation(() => new Promise(r => { resolve = r; }));
+      const { deps } = makeDeps({ player: makePlayer(), capturedState: capturedState() });
+      const svc = makeService(deps); svc.enable('guild-1');
+      const first = svc.handleBotDisconnect(oldState());
+      await svc.handleBotDisconnect(oldState());
+      expect(AuditLog.findRecentAuditExecutor).toHaveBeenCalledTimes(1);
+      resolve(null); await first; await jest.advanceTimersByTimeAsync(1500);
+      expect(deps.resumeService.reconstructGuild).toHaveBeenCalledTimes(1);
+      svc.getVoiceRecovery().stop();
+    });
     test('ignores when the mode is off', async () => {
       const player = makePlayer();
       const { deps } = makeDeps({ player, capturedState: capturedState() });
@@ -273,7 +290,7 @@ describe('AnnoyingService', () => {
       expect(deps.resumeService.reconstructGuild).toHaveBeenCalled();
     });
 
-    test('gives up gracefully when reconstruction fails', async () => {
+    test('retains recovery and retries when reconstruction fails', async () => {
       AuditLog.findRecentAuditExecutor.mockResolvedValue(null);
       const player = makePlayer();
       const { deps, channel } = makeDeps({ player, capturedState: capturedState() });
@@ -285,6 +302,9 @@ describe('AnnoyingService', () => {
       await jest.advanceTimersByTimeAsync(1500);
 
       expect(channel.send).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(5000);
+      expect(deps.resumeService.reconstructGuild).toHaveBeenCalledTimes(2);
+      svc.getVoiceRecovery().stop();
     });
   });
 

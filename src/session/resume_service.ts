@@ -57,6 +57,7 @@ interface ResumeSnapshot {
 }
 
 interface RestoreDeps {
+  recoveryIsCurrent?: () => boolean;
   client: any;          // discord.js Client (ready)
   audioManager: any;    // AudioManager — creates players with extractors wired
   sessionManager: any;  // SessionManager
@@ -77,6 +78,10 @@ const EMPTY_PAYLOAD: PlaybackPayload = {
 };
 
 class ResumeService {
+  private pendingSnapshots: () => GuildResumeState[] = () => [];
+
+  setPendingSnapshots(provider: () => GuildResumeState[]): void { this.pendingSnapshots = provider; }
+
   private readonly enabled: boolean;
   private readonly dataFile: string;
   private readonly resume: discordVoiceResume.SessionResume<PlaybackPayload>;
@@ -137,12 +142,14 @@ class ResumeService {
     guildId: string,
     voiceChannelIdOverride?: string,
   ): GuildResumeState | null {
+    const pending = this.pendingSnapshots().find(state => state.guildId === guildId);
+    if (pending) return pending;
     const session = sessionManager.sessions.get(guildId);
     const player = session?.player;
-    if (!player || !player.voiceConnection) return null;
+    if (!player || (!player.voiceConnection && !player.intendedVoiceChannelId)) return null;
 
     const voiceChannelId =
-      voiceChannelIdOverride ?? player.voiceConnection.joinConfig?.channelId;
+      voiceChannelIdOverride ?? player.intendedVoiceChannelId ?? player.voiceConnection?.joinConfig?.channelId;
     if (!voiceChannelId) return null;
 
     if (!player.currentTrack || (!player.isPlaying && !player.isPaused)) {
@@ -256,6 +263,7 @@ class ResumeService {
     payload: PlaybackPayload | null,
     ctx: RestoreContext,
   ): Promise<boolean> {
+    if (deps.recoveryIsCurrent && !deps.recoveryIsCurrent()) return false;
     const { client, audioManager, sessionManager } = deps;
     const { guildId, textChannelId, roomWasEmpty } = ctx;
     const state = payload ?? EMPTY_PAYLOAD;
@@ -298,7 +306,10 @@ class ResumeService {
     const session = sessionManager.get(guildId);
     for (const bvid of state.history || []) session.addHistory(bvid);
 
-    const joined = await player.joinVoiceChannel(voiceChannel);
+    const joined = deps.recoveryIsCurrent
+      ? await player.joinVoiceChannel(voiceChannel, 0, deps.recoveryIsCurrent)
+      : await player.joinVoiceChannel(voiceChannel);
+    if (deps.recoveryIsCurrent && !deps.recoveryIsCurrent()) return false;
     if (!joined) {
       logger.warn('Resume skipped: failed to rejoin voice channel', {
         guildId,
@@ -311,12 +322,16 @@ class ResumeService {
     if (state.isPaused) {
       // Re-pause as soon as the resource starts so a deliberately paused
       // session comes back paused instead of blasting audio.
-      player.audioPlayer.once(AudioPlayerStatus.Playing, () => player.pause());
+      player.audioPlayer.once(AudioPlayerStatus.Playing, () => {
+        if (!deps.recoveryIsCurrent || deps.recoveryIsCurrent()) player.pause();
+      });
     }
 
     // Stale stream URLs are handled inside playCurrentTrack (isExpired() →
     // re-extract), so a snapshot older than the CDN URL lifetime still plays.
-    await player.playCurrentTrack({ startAtSeconds: state.positionSeconds });
+    const played = await player.playCurrentTrack({ startAtSeconds: state.positionSeconds,
+      ...(deps.recoveryIsCurrent ? { isCurrent: deps.recoveryIsCurrent } : {}) });
+    if (played === false || (deps.recoveryIsCurrent && !deps.recoveryIsCurrent())) return false;
 
     // Re-arm endless radio so rotation continues. Without this the single
     // restored track plays out and the bot goes idle (radio keeps only the
@@ -329,8 +344,10 @@ class ResumeService {
           guildId,
           error: (err as Error).message,
         });
+        if (deps.recoveryIsCurrent) return false;
       }
     }
+    if (deps.recoveryIsCurrent && !deps.recoveryIsCurrent()) return false;
 
     logger.info('Resumed playback after restart', {
       guildId,
@@ -371,7 +388,10 @@ class ResumeService {
     const session = deps.sessionManager.get(guildId);
     for (const bvid of state.history || []) session.addHistory(bvid);
 
-    const joined = await player.joinVoiceChannel(voiceChannel);
+    const joined = deps.recoveryIsCurrent
+      ? await player.joinVoiceChannel(voiceChannel, 0, deps.recoveryIsCurrent)
+      : await player.joinVoiceChannel(voiceChannel);
+    if (deps.recoveryIsCurrent && !deps.recoveryIsCurrent()) return false;
     if (!joined) {
       logger.warn('Presence resume skipped: failed to rejoin voice channel', {
         guildId,
@@ -382,12 +402,18 @@ class ResumeService {
 
     if (restartRadio && state.radioMode && deps.radioService && textChannelId) {
       try {
-        await deps.radioService.start(guildId, voiceChannel, textChannelId);
+        if (deps.recoveryIsCurrent) {
+          const result = await deps.radioService.start(guildId, voiceChannel, textChannelId, deps.recoveryIsCurrent);
+          if (result?.success === false || !deps.recoveryIsCurrent()) return false;
+        } else {
+          await deps.radioService.start(guildId, voiceChannel, textChannelId);
+        }
       } catch (err: unknown) {
         logger.warn('Presence resume: failed to restart radio mode', {
           guildId,
           error: (err as Error).message,
         });
+        if (deps.recoveryIsCurrent) return false;
       }
     }
 

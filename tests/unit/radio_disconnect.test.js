@@ -79,6 +79,7 @@ function makeBotDisconnectStates(guildId = 'guild-1') {
   const guild = { id: guildId, name: 'Guild' };
   return {
     oldState: {
+      id: 'bot-id',
       member: { id: 'bot-id' },
       channel: { id: 'vc-1', name: 'General' },
       channelId: 'vc-1',

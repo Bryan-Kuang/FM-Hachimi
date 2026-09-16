@@ -79,6 +79,41 @@ describe('ResumeService radio mode', () => {
     expect(plainSnap.guilds[0].radioMode).toBe(false);
   });
 
+  it('retains intended session after the connection object has disappeared', () => {
+    const svc = new ResumeService(opts());
+    const player = makePlayer({ voiceConnection: null, intendedVoiceChannelId: 'voice-1' });
+    expect(svc.captureGuild(makeSessionManager(player), 'guild-1')?.voiceChannelId).toBe('voice-1');
+  });
+
+  it('uses the retained recovery snapshot instead of cleared playback state', () => {
+    const svc = new ResumeService(opts());
+    const manager = makeSessionManager(makePlayer());
+    const snapshot = svc.captureGuild(manager, 'guild-1');
+    svc.setPendingSnapshots(() => snapshot ? [snapshot] : []);
+    manager.sessions.get('guild-1').player = null;
+    expect(svc.captureGuild(manager, 'guild-1')).toBe(snapshot);
+  });
+
+  it('cancelled restoration does not change queue or start audio', async () => {
+    const svc = new ResumeService(opts());
+    const getPlayer = jest.fn();
+    await expect((svc as any).onRestore({ recoveryIsCurrent: () => false, audioManager: { getPlayer } }, {}, {}, {})).resolves.toBe(false);
+    expect(getPlayer).not.toHaveBeenCalled();
+  });
+
+  it('does not report recovery success when radio cannot be re-armed', async () => {
+    const svc = new ResumeService(opts());
+    const player = makePlayer({ radioMode: true });
+    const manager = makeSessionManager(player);
+    const payload = svc.captureGuild(manager, 'guild-1');
+    const restored = await (svc as any).onRestore({
+      recoveryIsCurrent: () => true, client: {},
+      audioManager: { getPlayer: () => player }, sessionManager: manager,
+      radioService: { resume: jest.fn().mockRejectedValue(new Error('temporary failure')) },
+    }, { id: 'voice-1' }, payload, { guildId: 'guild-1', textChannelId: null });
+    expect(restored).toBe(false);
+  });
+
   it('re-arms radio on restore when the snapshot was in radio mode', async () => {
     const svc = new ResumeService(opts());
     // Persist a radio-mode snapshot to disk.

@@ -83,6 +83,20 @@ function makeWorld() {
   return { service, player, extractor, youtubeExtractor, playerService, bilibiliApi, voiceChannel };
 }
 
+test('an old radio advance cannot overwrite the queue after recovery stops and re-arms radio', async () => {
+  const w = makeWorld();
+  await w.service.start('g1', w.voiceChannel, 'text-1');
+  let resolve;
+  w.service.takeNext = () => new Promise(r => { resolve = r; });
+  const advancing = w.service.handleAdvance('g1');
+  await w.service.stop('g1');
+  await w.service.resume('g1', 'text-1');
+  w.playerService.addTrack.mockClear();
+  resolve(extracted('stale'));
+  await advancing;
+  expect(w.playerService.addTrack).not.toHaveBeenCalled();
+});
+
 beforeEach(() => {
   jest.clearAllMocks();
   config.radio.enabled = true;
