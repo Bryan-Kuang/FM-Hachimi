@@ -361,6 +361,34 @@ container is *not* restarted by the restart policy — that is the watchdog's jo
 
 ## Quick checks
 
+### Voice membership recovery
+
+The bot now checks intended voice sessions against Discord every 30 seconds,
+and also checks after shard-ready/resume and guild-available events. Two
+confirmed mismatches trigger per-guild reconstruction, even if the local voice
+connection still says `ready`. Persistent non-ready local transport is checked
+as well. REST timeouts, 429s and 5xx responses do not count as missing membership.
+
+Recovery preserves the queue/seek/pause/radio snapshot before destroying the
+stale connection. Transient failures retry after 5, 10, 20, 40, then 60 seconds
+(60-second cap). Definitive channel deletion or access/permission failures stop
+retries and remain visible as degraded. Stop, leave, a new join, and applicable
+moderation exemptions cancel stale recovery work. Pending recovery snapshots
+remain part of the existing restart snapshot file.
+
+`/readyz` includes `botStats.voice` with expected/observed channels, last
+verification time, local status and recovery attempts; confirmed degradation
+returns 503 even when the gateway is healthy. `/status` includes a recovery
+summary. `/metrics` exposes `voice_membership_mismatch`,
+`voice_membership_last_verified_timestamp_seconds`, `voice_recovery_pending`,
+`voice_recovery_attempts_total` and `voice_recovery_success_total`.
+
+When diagnosing an empty channel, do not infer membership from FFmpeg progress
+or gateway readiness. Confirm using the authenticated Discord voice-state API;
+10065 (`Unknown Voice State`) is the explicit missing-state response. Never log
+the bot token or raw voice-server token payloads. See
+[`2026-09-16 incident`](docs/incidents/2026-09-16-voice-presence-desync.md).
+
 ```bash
 # container health + recent cookie refreshes
 cd ~/bilibili-bot && docker compose ps && docker compose logs --tail=200 | grep -i cookie

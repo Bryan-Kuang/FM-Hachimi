@@ -46,6 +46,7 @@ interface BotStats {
   username?: string;
   id?:       string;
   gateway?:  { connected: boolean; outageMs: number };
+  voice?: { healthy: boolean; sessions: Record<string, unknown>[] };
 }
 
 class BotClient {
@@ -218,12 +219,13 @@ class BotClient {
       }
 
       const annoyingService = playerService.getAnnoyingService?.();
+      if (oldState.id === botUserId && annoyingService?.getVoiceRecovery?.()?.isRecovering(oldState.guild.id)) return;
 
       // Bot was server-muted/deafened — annoying mode clears it. No early
       // return: a combined event (muted while being dragged) must still fall
       // through to the move branch below.
       if (
-        oldState.member?.id === this.client.user?.id &&
+        oldState.id === this.client.user?.id &&
         newState.channel &&
         ((!oldState.serverMute && newState.serverMute) ||
           (!oldState.serverDeaf && newState.serverDeaf))
@@ -235,7 +237,7 @@ class BotClient {
 
       // Bot was dragged to another voice channel — annoying mode moves it back.
       if (
-        oldState.member?.id === this.client.user?.id &&
+        oldState.id === this.client.user?.id &&
         oldState.channel &&
         newState.channel &&
         oldState.channelId !== newState.channelId
@@ -248,13 +250,13 @@ class BotClient {
 
       // Check if bot was disconnected from a voice channel
       if (
-        oldState.member?.id === this.client.user?.id &&
-        oldState.channel &&
-        !newState.channel
+        oldState.id === this.client.user?.id &&
+        oldState.channelId &&
+        !newState.channelId
       ) {
         logger.info('Bot was disconnected from voice channel', {
           guild:   oldState.guild.name,
-          channel: oldState.channel.name,
+          channel: oldState.channelId,
         });
 
         // Annoying mode decides BEFORE teardown — it snapshots the live queue
@@ -262,7 +264,8 @@ class BotClient {
         // rejoin when the disconnect is hostile.
         if (annoyingService) {
           try {
-            await annoyingService.handleBotDisconnect(oldState);
+            const outcome = await annoyingService.handleBotDisconnect(oldState);
+            if (outcome === 'reconstructing' || outcome === 'superseded') return;
           } catch (err: unknown) {
             logger.warn('Annoying mode: disconnect handling failed', {
               error: (err as Error).message,
@@ -399,11 +402,21 @@ class BotClient {
     this.client.on('shardResume', (shardId: number) => {
       this.watchdog.recordRecovery('shardResume');
       Debug.trace('client.event.shardResume', { shardId });
+      void playerService.getAnnoyingService?.()?.getVoiceRecovery?.()?.check();
     });
 
     this.client.on('shardReady', (shardId: number) => {
       this.watchdog.recordRecovery('shardReady');
       Debug.trace('client.event.shardReady', { shardId });
+      void playerService.getAnnoyingService?.()?.getVoiceRecovery?.()?.check();
+    });
+
+    this.client.on('shardReconnecting', (shardId: number) => {
+      this.watchdog.recordFailure(shardId, 'reconnecting');
+      logger.warn('Discord gateway reconnecting', { shardId });
+    });
+    this.client.on('guildAvailable', () => {
+      void playerService.getAnnoyingService?.()?.getVoiceRecovery?.()?.check();
     });
 
     this.client.on('warn', (warning: string) => {
@@ -522,16 +535,18 @@ class BotClient {
       return { ready: false, uptime: 0, guilds: 0, users: 0, gateway };
     }
 
+    const voice = this.playerService.getAnnoyingService?.()?.getVoiceRecovery?.()?.getHealth();
     const uptime = this.startTime ? Date.now() - this.startTime.getTime() : 0;
 
     return {
-      ready:    gateway.connected,
+      ready:    gateway.connected && (voice?.healthy ?? true),
       uptime:   Math.floor(uptime / 1000),
       guilds:   this.client.guilds.cache.size,
       users:    this.client.users.cache.size,
       username: this.client.user?.username,
       id:       this.client.user?.id,
       gateway,
+      ...(voice ? { voice } : {}),
     };
   }
 
@@ -541,6 +556,7 @@ class BotClient {
   async shutdown(): Promise<void> {
     logger.info('Shutting down Discord bot');
     this.stopGatewayWatchdog();
+    this.playerService.getAnnoyingService?.()?.getVoiceRecovery?.()?.stop();
     try {
       if (this.isReady) {
         await this.client.destroy();

@@ -101,6 +101,10 @@ class AudioPlayer {
   // uses these to tell the bot's own leaves/moves apart from hostile
   // disconnects/drags in voiceStateUpdate — without them the idle
   // auto-disconnect (or /play moving the bot) would trigger a rejoin loop.
+  intendedVoiceChannelId: string | null = null;
+  voiceIntentRevision = 0;
+  private playbackRevision = 0;
+  private monitoredConnections = new WeakSet<object>();
   lastSelfDisconnectAt: number;
   lastSelfJoinAt: number;
   // Channel the last self-initiated join targeted. A move event landing in a
@@ -345,7 +349,14 @@ class AudioPlayer {
 
   // ── Voice connection ─────────────────────────────────────────────────
 
-  async joinVoiceChannel(voiceChannel: VoiceChannelLike, retryCount = 0): Promise<boolean> {
+  async joinVoiceChannel(voiceChannel: VoiceChannelLike, retryCount = 0, recoveryIsCurrent?: () => boolean): Promise<boolean> {
+    if (recoveryIsCurrent && !recoveryIsCurrent()) return false;
+    if (retryCount === 0 && !recoveryIsCurrent) {
+      this.voiceIntentRevision++;
+      this.intendedVoiceChannelId = voiceChannel.id;
+    }
+    const revision = this.voiceIntentRevision;
+    const isCurrent = recoveryIsCurrent ?? (() => this.voiceIntentRevision === revision);
     const maxRetries = 3;
     this.lastSelfJoinAt = Date.now();
     this.lastSelfJoinChannelId = voiceChannel.id;
@@ -371,7 +382,10 @@ class AudioPlayer {
           this.voiceConnection = existingConnection;
           this.currentGuild = voiceChannel.guild.id;
           logger.info('Re-subscribing audio player to existing voice connection');
-          this.voiceConnection.subscribe(this.audioPlayer);
+          this.monitorVoiceConnection(this.voiceConnection);
+          await this.waitForVoiceConnection();
+          if (!isCurrent()) return false;
+          this.voiceConnection?.subscribe(this.audioPlayer);
           return true;
         }
         logger.warn('Existing voice connection is stale, recreating', { status, channelId: voiceChannel.id });
@@ -387,8 +401,10 @@ class AudioPlayer {
         adapterCreator: voiceChannel.guild.voiceAdapterCreator,
       });
 
+      this.monitorVoiceConnection(this.voiceConnection);
       this.currentGuild = voiceChannel.guild.id;
       await this.waitForVoiceConnection();
+      if (!isCurrent()) return false;
       this.voiceConnection!.subscribe(this.audioPlayer);
 
       logger.info('Successfully joined voice channel', {
@@ -415,55 +431,50 @@ class AudioPlayer {
           delay: backoffMs,
         });
         await new Promise<void>((resolve) => setTimeout(resolve, backoffMs));
-        return this.joinVoiceChannel(voiceChannel, retryCount + 1);
+        if (!isCurrent()) return false;
+        return this.joinVoiceChannel(voiceChannel, retryCount + 1, isCurrent);
       }
       return false;
     }
   }
 
+  private monitorVoiceConnection(connection: VoiceConnection): void {
+    if (this.monitoredConnections.has(connection)) return;
+    this.monitoredConnections.add(connection);
+    const guildId = this.currentGuild ?? connection.joinConfig.guildId;
+    connection.on('stateChange', (oldState, newState) => {
+      logger.info('Voice connection state changed', {
+        guildId, from: oldState.status, to: newState.status,
+        reason: 'reason' in newState ? newState.reason : undefined,
+        closeCode: 'closeCode' in newState ? newState.closeCode : undefined,
+      });
+    });
+    connection.on('error', (err: Error) => {
+      logger.warn('Voice connection error', { guildId, error: err.message });
+    });
+  }
+
   async waitForVoiceConnection(): Promise<void> {
+    const connection = this.voiceConnection;
+    if (!connection) throw new Error('No voice connection');
+    if (connection.state.status === VoiceConnectionStatus.Ready) return;
     return new Promise((resolve, reject) => {
-      if (!this.voiceConnection) {
-        reject(new Error('No voice connection'));
-        return;
-      }
-      if (this.voiceConnection.state.status === VoiceConnectionStatus.Ready) {
-        resolve();
-        return;
-      }
-
-      const timeout = setTimeout(() => {
-        logger.error('Voice connection timeout', {
-          currentStatus: this.voiceConnection?.state?.status,
-          guild: this.currentGuild,
-        });
-        reject(new Error('Voice connection timeout'));
-      }, config.voice.connectionTimeoutMs);
-
       const cleanup = () => {
         clearTimeout(timeout);
-        this.voiceConnection!.removeAllListeners(VoiceConnectionStatus.Ready);
-        this.voiceConnection!.removeAllListeners(VoiceConnectionStatus.Disconnected);
-        this.voiceConnection!.removeAllListeners(VoiceConnectionStatus.Destroyed);
+        connection.off(VoiceConnectionStatus.Ready, onReady);
+        connection.off(VoiceConnectionStatus.Disconnected, onDisconnected);
+        connection.off(VoiceConnectionStatus.Destroyed, onDestroyed);
       };
-
-      this.voiceConnection.once(VoiceConnectionStatus.Ready, () => {
-        logger.info('Voice connection is ready');
+      const onReady = () => { cleanup(); resolve(); };
+      const onDisconnected = () => { cleanup(); reject(new Error('Voice connection disconnected')); };
+      const onDestroyed = () => { cleanup(); reject(new Error('Voice connection destroyed')); };
+      const timeout = setTimeout(() => {
         cleanup();
-        resolve();
-      });
-
-      this.voiceConnection.once(VoiceConnectionStatus.Disconnected, () => {
-        logger.warn('Voice connection disconnected during wait');
-        cleanup();
-        reject(new Error('Voice connection disconnected'));
-      });
-
-      this.voiceConnection.once(VoiceConnectionStatus.Destroyed, () => {
-        logger.warn('Voice connection destroyed during wait');
-        cleanup();
-        reject(new Error('Voice connection destroyed'));
-      });
+        reject(new Error('Voice connection timeout'));
+      }, config.voice.connectionTimeoutMs);
+      connection.once(VoiceConnectionStatus.Ready, onReady);
+      connection.once(VoiceConnectionStatus.Disconnected, onDisconnected);
+      connection.once(VoiceConnectionStatus.Destroyed, onDestroyed);
     });
   }
 
@@ -533,7 +544,10 @@ class AudioPlayer {
     return this.playCurrentTrack();
   }
 
-  async playCurrentTrack(options: { startAtSeconds?: number } = {}): Promise<boolean> {
+  async playCurrentTrack(options: { startAtSeconds?: number; isCurrent?: () => boolean } = {}): Promise<boolean> {
+    const playbackRevision = ++this.playbackRevision;
+    const isCurrent = () => this.playbackRevision === playbackRevision && (options.isCurrent?.() ?? true);
+    if (!isCurrent()) return false;
     const startAtSeconds = Math.max(0, options.startAtSeconds ?? 0);
     if (!this.currentTrack) {
       logger.warn('No current track to play');
@@ -568,6 +582,7 @@ class AudioPlayer {
         }
       }
 
+      if (!isCurrent()) return false;
       this.cleanupFFmpegProcess();
 
       // Re-extract audio URL if stale, or if there's no URL at all yet (never
@@ -582,6 +597,7 @@ class AudioPlayer {
           const refreshExtractor = this.getRefreshExtractor(this.currentTrack);
           if (refreshExtractor) {
             const freshUrl = await refreshExtractor.getAudioStreamUrl(this.currentTrack.normalizedUrl);
+            if (!isCurrent()) return false;
             this.currentTrack.audioUrl = freshUrl;
             this.currentTrack.extractedAt = new Date().toISOString();
             logger.info('Refreshed stale audio URL', {
@@ -603,6 +619,7 @@ class AudioPlayer {
         // '' to createAudioResource (that would spawn ffmpeg against nothing
         // and burn a full 3-attempt CDN-retry cycle for what is really a
         // single failed extraction). Drop it and move on now.
+        if (!isCurrent()) return false;
         if (!this.currentTrack.audioUrl) {
           logger.warn('Dropping unplayable pending track (refresh failed, no audio URL)', {
             title: this.currentTrack.title,
@@ -612,8 +629,10 @@ class AudioPlayer {
         }
       }
 
+      if (!isCurrent()) return false;
       logger.debug('Creating audio resource for playback');
       const audioResource = await this.createAudioResource(this.currentTrack.audioUrl, startAtSeconds);
+      if (!isCurrent()) { audioResource?.playStream.destroy(); return false; }
       if (!audioResource) {
         throw new Error('Failed to create audio resource - resource is null');
       }
@@ -627,6 +646,7 @@ class AudioPlayer {
       this.audioPlayer.play(audioResource);
 
       await new Promise<void>((resolve) => setTimeout(resolve, config.voice.handoffWaitMs));
+      if (!isCurrent()) return false;
       this._manualNavigating = false;
 
       logger.info('Track playback initiated successfully', {
@@ -640,6 +660,7 @@ class AudioPlayer {
 
       return true;
     } catch (error: any) {
+      if (!isCurrent()) return false;
       logger.error('Failed to play track', {
         title: this.currentTrack?.title || 'Unknown',
         error: error.message,
@@ -948,6 +969,9 @@ class AudioPlayer {
   }
 
   async stop(): Promise<boolean> {
+    this.playbackRevision++;
+    this.voiceIntentRevision++;
+    this.intendedVoiceChannelId = null;
     try {
       this.cleanupFFmpegProcess();
       this._cdnRetryPending = false;
@@ -997,7 +1021,11 @@ class AudioPlayer {
     logger.info('Player entered idle state', { guild: this.currentGuild });
   }
 
-  _doDisconnect(): void {
+  _doDisconnect(preserveIntent = false): void {
+    if (!preserveIntent) {
+      this.voiceIntentRevision++;
+      this.intendedVoiceChannelId = null;
+    }
     this._cancelInactivityTimer();
     this.lastSelfDisconnectAt = Date.now();
     if (this.voiceConnection) {
@@ -1180,7 +1208,12 @@ class AudioPlayer {
 
   // ── Cleanup ──────────────────────────────────────────────────────────
 
-  leaveVoiceChannel(): void {
+  prepareVoiceRecovery(): void {
+    this.leaveVoiceChannel(true);
+  }
+
+  leaveVoiceChannel(preserveIntent = false): void {
+    this.playbackRevision++;
     this.cleanupFFmpegProcess();
     this._cancelInactivityTimer();
     this._cdnRetryPending = false;
@@ -1194,7 +1227,7 @@ class AudioPlayer {
     this._accumulatedPlayMs = 0;
     this._currentPlayStartedAt = null;
 
-    this._doDisconnect();
+    this._doDisconnect(preserveIntent);
     logger.info('Left voice channel');
   }
 

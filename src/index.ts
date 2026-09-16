@@ -184,6 +184,7 @@ class BilibiliDiscordBot {
         resumeService,
       });
       playerService.setAnnoyingService(annoyingService as any);
+      annoyingService.getVoiceRecovery()?.start();
 
       resumeService.scheduleRestore({
         client: this.botClient.getClient(),

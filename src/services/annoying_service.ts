@@ -35,6 +35,7 @@ import * as path from 'path';
 import { AuditLogEvent } from 'discord.js';
 import * as logger from './logger_service';
 import AuditLog = require('../utils/audit_log');
+import VoiceRecoveryService = require('./voice_recovery_service');
 
 /** Bot-left events this close to our own _doDisconnect() are voluntary. */
 const SELF_DISCONNECT_WINDOW_MS = 3000;
@@ -62,7 +63,7 @@ interface AnnoyingDeps {
   resumeService: any;   // ResumeService — capture + reconstruct machinery
 }
 
-type DisconnectOutcome = 'ignore' | 'exempt' | 'reconstructing';
+type DisconnectOutcome = 'ignore' | 'exempt' | 'reconstructing' | 'superseded';
 
 class AnnoyingService {
   /** Reply for /stop (command or button) refused while the mode is armed. */
@@ -70,6 +71,9 @@ class AnnoyingService {
 
   private readonly options: AnnoyingOptions;
   private deps: AnnoyingDeps | null;
+  private recovery: VoiceRecoveryService | null = null;
+
+  getVoiceRecovery(): VoiceRecoveryService | null { return this.recovery; }
   private readonly enabledGuilds: Set<string>;
   /** Guilds with a rejoin/move-back in flight — guards double reconstruction. */
   private readonly busyGuilds: Set<string>;
@@ -93,6 +97,28 @@ class AnnoyingService {
 
   initialize(deps: AnnoyingDeps): void {
     this.deps = deps;
+    this.recovery = new VoiceRecoveryService({ ...deps, isBusy: id => this.busyGuilds.has(id),
+      shouldRecover: async (guildId, actual) => {
+        this.busyGuilds.add(guildId);
+        try {
+          const player = deps.sessionManager.sessions.get(guildId)?.player;
+          const revision = player?.voiceIntentRevision;
+          if (actual && actual === player?.intendedVoiceChannelId) return true;
+          const guild = deps.client.guilds?.cache.get(guildId);
+          const culprit = guild ? await AuditLog.findRecentAuditExecutor(guild,
+            actual ? AuditLogEvent.MemberMove : AuditLogEvent.MemberDisconnect) : null;
+          if (!player || player.voiceIntentRevision !== revision) return false;
+          if (this.isExemptUser(culprit) || (!this.isEnabled(guildId) && (actual || culprit))) {
+            if (actual) { player.intendedVoiceChannelId = actual; player.voiceIntentRevision++; }
+            else player.leaveVoiceChannel();
+            this.recovery?.cancel(guildId);
+            return false;
+          }
+          return true;
+        } finally { this.busyGuilds.delete(guildId); }
+      },
+    });
+    deps.resumeService.setPendingSnapshots?.(() => this.recovery?.getPendingSnapshots() ?? []);
   }
 
   /**
@@ -145,6 +171,7 @@ class AnnoyingService {
   }
 
   disable(guildId: string): void {
+    this.recovery?.cancel(guildId);
     this.enabledGuilds.delete(guildId);
     this.persist();
   }
@@ -194,7 +221,7 @@ class AnnoyingService {
     const deps = this.deps;
     const guildId: string | undefined = oldState?.guild?.id;
     if (!deps || !guildId || !this.isEnabled(guildId)) return 'ignore';
-    if (this.busyGuilds.has(guildId)) return 'ignore';
+    if (this.busyGuilds.has(guildId) || this.recovery?.isRecovering(guildId)) return 'reconstructing';
 
     const player = deps.sessionManager.sessions?.get(guildId)?.player;
     if (!player) return 'ignore';
@@ -210,37 +237,24 @@ class AnnoyingService {
     const state = deps.resumeService.captureGuild(deps.sessionManager, guildId, oldState.channelId);
     if (!state) return 'ignore'; // connection already gone — nothing to reclaim
 
-    const culprit = await AuditLog.findRecentAuditExecutor(
-      oldState.guild,
-      AuditLogEvent.MemberDisconnect,
-    );
-    if (this.isExemptUser(culprit)) {
-      logger.info('Annoying mode: disconnect by exempt user, standing down', {
-        guildId,
-        culprit: culprit?.username,
-      });
-      return 'exempt';
-    }
-
-    const culpritName = culprit?.displayName || culprit?.username || '未知凶手';
+    // Acquire before audit I/O: two events must not capture/schedule twice.
     this.busyGuilds.add(guildId);
-    setTimeout(() => {
-      this.reconstruct(state, culpritName)
-        .catch((err: Error) => {
-          logger.error('Annoying mode: reconstruction failed', {
-            guildId,
-            error: err.message,
-          });
-        })
-        .finally(() => this.busyGuilds.delete(guildId));
-    }, this.options.rejoinDelayMs);
-
-    logger.info('Annoying mode: hostile disconnect, reconstruction scheduled', {
-      guildId,
-      culprit: culpritName,
-      delayMs: this.options.rejoinDelayMs,
-    });
-    return 'reconstructing';
+    const revision = player.voiceIntentRevision;
+    try {
+      const culprit = await AuditLog.findRecentAuditExecutor(oldState.guild, AuditLogEvent.MemberDisconnect);
+      if (player.voiceIntentRevision !== revision) return 'superseded';
+      if (!this.isEnabled(guildId)) return 'ignore';
+      if (this.isExemptUser(culprit)) {
+        this.recovery?.cancel(guildId);
+        logger.info('Annoying mode: disconnect by exempt user, standing down', { guildId });
+        return 'exempt';
+      }
+      this.recovery?.request(state, this.options.rejoinDelayMs);
+      logger.info('Annoying mode: hostile disconnect, reconstruction scheduled', { guildId });
+      return 'reconstructing';
+    } finally {
+      this.busyGuilds.delete(guildId);
+    }
   }
 
   /**
@@ -267,49 +281,55 @@ class AnnoyingService {
       return;
     }
 
-    const culprit = await AuditLog.findRecentAuditExecutor(
-      oldState.guild,
-      AuditLogEvent.MemberMove,
-    );
-    if (this.isExemptUser(culprit)) {
-      logger.info('Annoying mode: move by exempt user, staying put', {
-        guildId,
-        culprit: culprit?.username,
-      });
-      return;
-    }
-    if (this.busyGuilds.has(guildId)) return;
-
-    const targetChannel = oldState.channel;
-    const culpritName = culprit?.displayName || culprit?.username || '未知黑手';
+    if (this.busyGuilds.has(guildId) || this.recovery?.isRecovering(guildId)) return;
     this.busyGuilds.add(guildId);
-    setTimeout(() => {
-      (async () => {
-        const moved = await player.joinVoiceChannel(targetChannel);
-        if (!moved) {
-          logger.warn('Annoying mode: failed to move back', { guildId });
-          return;
-        }
-        logger.info('Annoying mode: moved back after hostile drag', {
+    const revision = player.voiceIntentRevision;
+    let scheduled = false;
+    try {
+      const culprit = await AuditLog.findRecentAuditExecutor(oldState.guild, AuditLogEvent.MemberMove);
+      if (player.voiceIntentRevision !== revision || !this.isEnabled(guildId)) return;
+      if (this.isExemptUser(culprit)) {
+        player.intendedVoiceChannelId = newState.channelId;
+        player.voiceIntentRevision++;
+        this.recovery?.cancel(guildId);
+        logger.info('Annoying mode: move by exempt user, staying put', {
           guildId,
-          channelId: targetChannel.id,
-          culprit: culpritName,
+          culprit: culprit?.username,
         });
-        // Same "基米永不灭～" announcement as the reconstruction path. A move
-        // never interrupts playback, so skip it when nothing is playing.
-        if (player.currentTrack?.title) {
-          await deps.resumeService.announceResume(
-            deps.client,
-            session?.uiContext?.channelId ?? null,
-            player.currentTrack,
-          );
-        }
-      })()
-        .catch((err: Error) => {
-          logger.error('Annoying mode: move-back failed', { guildId, error: err.message });
-        })
-        .finally(() => this.busyGuilds.delete(guildId));
-    }, this.options.rejoinDelayMs);
+        return;
+      }
+      const targetChannel = oldState.channel;
+      const culpritName = culprit?.displayName || culprit?.username || '未知黑手';
+      scheduled = true;
+      setTimeout(() => {
+        (async () => {
+          if (player.voiceIntentRevision !== revision || !this.isEnabled(guildId)) return;
+          const moved = await player.joinVoiceChannel(targetChannel);
+          if (!moved) {
+            logger.warn('Annoying mode: failed to move back', { guildId });
+            return;
+          }
+          logger.info('Annoying mode: moved back after hostile drag', {
+            guildId,
+            channelId: targetChannel.id,
+            culprit: culpritName,
+          });
+          // Same "基米永不灭～" announcement as the reconstruction path. A move
+          // never interrupts playback, so skip it when nothing is playing.
+          if (player.currentTrack?.title) {
+            await deps.resumeService.announceResume(
+              deps.client,
+              session?.uiContext?.channelId ?? null,
+              player.currentTrack,
+            );
+          }
+        })()
+          .catch((err: Error) => {
+            logger.error('Annoying mode: move-back failed', { guildId, error: err.message });
+          })
+          .finally(() => this.busyGuilds.delete(guildId));
+      }, this.options.rejoinDelayMs);
+    } finally { if (!scheduled) this.busyGuilds.delete(guildId); }
   }
 
   /**
@@ -398,39 +418,6 @@ class AnnoyingService {
     }, this.options.rejoinDelayMs);
   }
 
-  private async reconstruct(state: any, culpritName: string): Promise<void> {
-    const deps = this.deps!;
-
-    const restored = await deps.resumeService.reconstructGuild(
-      {
-        client: deps.client,
-        audioManager: deps.audioManager,
-        sessionManager: deps.sessionManager,
-        radioService: deps.radioService,
-      },
-      state,
-    );
-    if (!restored) {
-      // Channel gone / empty / join denied — the normal teardown already ran,
-      // so losing this round gracefully is fine.
-      logger.info('Annoying mode: reconstruction skipped or failed, giving up', {
-        guildId: state.guildId,
-      });
-      return;
-    }
-
-    // Our own teardown stamped lastSelfDisconnectAt; clear it so the
-    // attacker's NEXT kick isn't mistaken for a self-leave.
-    const player = deps.sessionManager.sessions?.get(state.guildId)?.player;
-    if (player) player.lastSelfDisconnectAt = 0;
-
-    // No extra message here — reconstructGuild already announced the
-    // "基米永不灭～" resurrection to the text channel.
-    logger.info('Annoying mode: session reconstructed after hostile disconnect', {
-      guildId: state.guildId,
-      culprit: culpritName,
-    });
-  }
 }
 
 export = AnnoyingService;

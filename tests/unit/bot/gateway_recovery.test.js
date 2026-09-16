@@ -84,6 +84,25 @@ describe("gateway outage handling", () => {
     expect(stats.gateway).toEqual({ connected: true, outageMs: 0 });
   });
 
+  test('fresh gateway ready reconciles voice instead of assuming it survived', () => {
+    const bot = makeReadyBot();
+    const recovery = { check: jest.fn().mockResolvedValue(), getHealth: () => ({ healthy: false, sessions: [] }) };
+    bot.playerService.getAnnoyingService = () => ({ getVoiceRecovery: () => recovery });
+    mockHandlers.shardReady(0);
+    expect(recovery.check).toHaveBeenCalledTimes(1);
+    expect(bot.getStats().ready).toBe(false);
+    expect(bot.getStats().gateway.connected).toBe(true);
+  });
+
+  test('uncached bot member and channel still trigger disconnect handling', async () => {
+    const bot = makeReadyBot();
+    const handleBotDisconnect = jest.fn().mockResolvedValue('reconstructing');
+    bot.playerService.getAnnoyingService = () => ({ handleBotDisconnect });
+    const guild = { id: 'g', name: 'guild' };
+    await mockHandlers.voiceStateUpdate({ id: 'bot-id', channelId: 'v', guild }, { id: 'bot-id', channelId: null, guild });
+    expect(handleBotDisconnect).toHaveBeenCalledTimes(1);
+  });
+
   test("shard errors flip readiness to false", () => {
     const bot = makeReadyBot();
 

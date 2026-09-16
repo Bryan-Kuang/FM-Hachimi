@@ -59,6 +59,7 @@ interface RadioInterlude {
 }
 
 interface RadioState {
+  generation: number;
   enabled: boolean;
   channelId: string | null;
   /** Pre-extracted next track, hidden from the queue/UI. */
@@ -120,6 +121,7 @@ class RadioService {
     let state = this.states.get(guildId);
     if (!state) {
       state = {
+        generation: 0,
         enabled: false,
         channelId: null,
         onDeck: null,
@@ -142,6 +144,7 @@ class RadioService {
     guildId: string,
     voiceChannel: VoiceChannelLike,
     channelId: string,
+    recoveryIsCurrent?: () => boolean,
   ): Promise<RadioStartResult> {
     if (!config.radio.enabled) {
       return { success: false, error: 'Radio mode is disabled by the server configuration.' };
@@ -163,6 +166,7 @@ class RadioService {
     }
 
     const first = await this.replenish(guildId);
+    if (recoveryIsCurrent && !recoveryIsCurrent()) return { success: false, error: 'Recovery cancelled' };
     if (!first) {
       return {
         success: false,
@@ -171,6 +175,7 @@ class RadioService {
     }
 
     const state = this.get(guildId);
+    state.generation++;
     state.enabled = true;
     state.channelId = channelId;
     state.onDeck = null;
@@ -188,8 +193,12 @@ class RadioService {
     // Visible queue = current track only. The on-deck track stays hidden.
     player.queue.reset();
     await this.playerService.addTrack(guildId, first, RADIO_REQUESTED_BY);
+    if (recoveryIsCurrent && !recoveryIsCurrent()) return { success: false, error: 'Recovery cancelled' };
     this.playerService.setUIContext(guildId, channelId);
-    const played = await this.playerService.play(guildId);
+    const played = recoveryIsCurrent
+      ? await player.playCurrentTrack({ isCurrent: recoveryIsCurrent })
+      : await this.playerService.play(guildId);
+    if (recoveryIsCurrent && !recoveryIsCurrent()) return { success: false, error: 'Recovery cancelled' };
     if (!played) {
       await this.stop(guildId);
       return { success: false, error: 'Failed to start playback.' };
@@ -221,6 +230,7 @@ class RadioService {
     }
 
     const state = this.get(guildId);
+    state.generation++;
     state.enabled = true;
     state.channelId = channelId;
     state.onDeck = null;
@@ -249,7 +259,9 @@ class RadioService {
    */
   async stop(guildId: string): Promise<void> {
     const state = this.states.get(guildId);
-    if (!state || !state.enabled) return;
+    if (!state) return;
+    state.generation++;
+    if (!state.enabled) return;
 
     state.enabled = false;
     state.channelId = null;
@@ -407,15 +419,22 @@ class RadioService {
     track: ExtractedTrackData,
     requestedBy: string,
   ): Promise<boolean> {
+    const state = this.get(guildId);
+    const generation = state.generation;
+    if (!state.enabled) return true;
     const player = this.playerService.getPlayer(guildId);
     player.queue.reset();
     await this.playerService.addTrack(guildId, track, requestedBy);
+    if (!state.enabled || state.generation !== generation) return true;
     return this.playerService.play(guildId);
   }
 
   /** Promote the on-deck (or freshly fetched) random track and play it. */
   private async advanceNormal(guildId: string): Promise<boolean> {
+    const state = this.get(guildId);
+    const generation = state.generation;
     const next = await this.takeNext(guildId);
+    if (!state.enabled || state.generation !== generation) return true;
     if (!next) {
       logger.warn('Radio could not fetch the next track, ending radio', { guildId });
       await this.stop(guildId);
@@ -440,6 +459,7 @@ class RadioService {
    */
   private async playBreak(guildId: string): Promise<boolean> {
     const state = this.get(guildId);
+    const generation = state.generation;
     const extractor = this.playerService.getExtractor();
     if (!extractor) {
       logger.warn('Radio break: extractor unavailable, skipping break', { guildId });
@@ -458,6 +478,7 @@ class RadioService {
     }
 
     const player = this.playerService.getPlayer(guildId);
+    if (!state.enabled || state.generation !== generation) return true;
     // Flag before play() so the emitted state renders the minimal break card
     // from the first paint (no full-card flash).
     player.radioBreak = true;
@@ -481,9 +502,10 @@ class RadioService {
     const state = this.get(guildId);
     if (!state.enabled || state.onDeck || state.onDeckPromise) return;
 
+    const generation = state.generation;
     state.onDeckPromise = this.replenish(guildId)
       .then((track) => {
-        if (state.enabled) state.onDeck = track;
+        if (state.enabled && state.generation === generation) state.onDeck = track;
         return track;
       })
       .catch((e) => {
@@ -491,7 +513,7 @@ class RadioService {
         return null;
       })
       .finally(() => {
-        state.onDeckPromise = null;
+        if (state.generation === generation) state.onDeckPromise = null;
       });
   }
 
