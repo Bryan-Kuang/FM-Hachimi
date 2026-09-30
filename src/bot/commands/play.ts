@@ -5,145 +5,18 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { SlashCommandBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
-import { routeQuery, type RouteResult } from '../../utils/url_router';
+import { routeQuery } from '../../utils/url_router';
 import SearchResultsView = require('../../ui/search_results_view');
 import SearchService = require('../../search/search_service');
 import SearchSessionStore = require('../../search/search_session_store');
 import BilibiliUrls = require('../../search/bilibili_urls');
 import YouTubeUrls = require('../../search/youtube_urls');
 import PlaybackCoordinator = require('../../playback/playback_coordinator');
-import { createInteractionStageReporter, createThrottledProgressReporter } from '../../playback/stage_feedback';
-import { playPlaylist, playAttachment } from '../../playback/playlist_coordinator';
-import { validateAttachment, buildAttachmentTrackData, type AttachmentInput } from '../../playback/attachment_track';
+import { createInteractionStageReporter } from '../../playback/stage_feedback';
 import * as logger from '../../services/logger_service';
 import config = require('../../config/config');
 import { interleaveRoundRobin } from '../../search/interleave';
 import BilibiliApi = require('../../bilibili/api');
-import BilibiliValidator = require('../../bilibili/validator');
-import { resolvePlaylist } from '../../playlists';
-import { resolveBilibiliMultipart } from '../../playlists/bilibili_playlist_resolver';
-import type { ResolvedPlaylist, PlaylistProgress } from '../../playlists/types';
-
-/** Rejects with `timeoutError` if `promise` doesn't settle within `ms`. */
-function withTimeout<T>(promise: Promise<T>, ms: number, timeoutError: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(timeoutError)), ms);
-    promise.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (error) => { clearTimeout(timer); reject(error as Error); },
-    );
-  });
-}
-
-/**
- * Shared resolve → bulk-enqueue → report flow for every playlist source
- * (YouTube playlist, Bilibili fav/collection/multipart). `resolve` does the
- * source-specific fetch (and may itself throw, e.g. BILIBILI_FAV_PRIVATE)
- * while everything after that — progress throttling, queueing via
- * playPlaylist, and the final reply — is identical across sources.
- */
-async function runPlaylistFlow(
-  interaction: ChatInputCommandInteraction<'cached'>,
-  playbackService: any,
-  resolve: (onProgress: PlaylistProgress) => Promise<ResolvedPlaylist>,
-): Promise<void> {
-  const progress = createThrottledProgressReporter(interaction, config.playlists.progressIntervalMs);
-
-  try {
-    const playlist = await resolve((fetched, total) => {
-      progress.report(`正在解析歌单… 已获取 ${fetched}${total ? '/' + total : ''}`);
-    });
-
-    const result = await playPlaylist({
-      interaction,
-      playerService: playbackService,
-      playlist,
-      onProgress: (queued, total) => {
-        progress.report(`已加入队列 ${queued}/${total}…`);
-      },
-    });
-
-    await progress.finish();
-
-    if (result.success) {
-      let content = `>> 歌单「${result.title}」已加入 ${result.queued} 首`;
-      if (result.truncated) {
-        content += `（共 ${result.totalCount} 首，已截断至 ${config.playlists.maxItems}）`;
-      }
-      await interaction.editReply({ content });
-      return;
-    }
-
-    if (result.error === 'RADIO_ACTIVE') {
-      await interaction.editReply({ content: '[!] 电台模式运行中，歌单会被电台覆盖。请先使用 /radio 关闭电台再导入歌单。' });
-    } else {
-      await interaction.editReply({ content: `[!] 歌单解析失败: ${(result.error || '').substring(0, 100)}` });
-    }
-  } catch (err: unknown) {
-    await progress.finish();
-    const msg = (err as Error).message || '';
-    if (msg === 'BILIBILI_FAV_PRIVATE') {
-      await interaction.editReply({ content: '[!] 收藏夹不是公开的或不存在' });
-    } else {
-      await interaction.editReply({ content: `[!] 歌单解析失败: ${msg.substring(0, 100)}` });
-    }
-  }
-}
-
-/**
- * Shared validate → build → play → reply flow for both the `file` slash-
- * command option and a pasted Discord CDN link (route.kind === 'attachment').
- * No extraction step — the attachment IS the audio URL — so this only
- * validates type/size, builds the finished track, and hands it to
- * playAttachment.
- */
-async function runAttachmentFlow(
-  interaction: ChatInputCommandInteraction<'cached'>,
-  playbackService: any,
-  input: AttachmentInput,
-): Promise<void> {
-  const validation = validateAttachment(input, config.attachments.maxBytes);
-  if (!validation.ok) {
-    if (validation.reason === 'size') {
-      const maxMb = Math.floor(config.attachments.maxBytes / 1024 / 1024);
-      await interaction.editReply({ content: `[!] 文件过大（上限 ${maxMb}MB）` });
-    } else {
-      await interaction.editReply({ content: '[!] 不支持的文件类型（支持 mp3/m4a/ogg/wav/flac/webm）' });
-    }
-    return;
-  }
-
-  const trackData = buildAttachmentTrackData(input);
-  const stageReporter = createInteractionStageReporter(interaction, 'Attachment');
-  const result = await playAttachment({
-    interaction,
-    playerService: playbackService,
-    data: trackData,
-    onStage: stageReporter,
-  });
-  await stageReporter.finish();
-
-  if (!result.success) {
-    if (result.error === 'RADIO_ACTIVE') {
-      await interaction.editReply({ content: '[!] 电台模式运行中，无法添加上传的文件。请先使用 /radio 关闭电台。' });
-    } else {
-      await interaction.editReply({ content: result.error || '[!] 添加失败' });
-    }
-    return;
-  }
-
-  const trackTitle = (result.track as { title?: string } | undefined)?.title;
-  await interaction.editReply({ content: `>> 已添加: ${trackTitle || trackData.title}` });
-  logger.info('Play command completed (attachment)', {
-    title: trackTitle || trackData.title,
-    user: interaction.user.username,
-  });
-}
-
-/** Whether route.kind represents a bulk playlist source (Task 2.9). */
-function isPlaylistRoute(route: RouteResult): boolean {
-  return route.kind === 'youtube-playlist' || route.kind === 'bilibili-fav' || route.kind === 'bilibili-collection';
-}
 
 const createPlayCommand = (playbackService: any, _queueService: any) => ({
   data: new SlashCommandBuilder()
@@ -153,13 +26,7 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
       option
         .setName('query')
         .setDescription('视频链接或搜索关键词（支持 Bilibili / YouTube）')
-        .setRequired(false),
-    )
-    .addAttachmentOption((option) =>
-      option
-        .setName('file')
-        .setDescription('音频文件 (mp3/m4a/ogg/wav/flac/webm)')
-        .setRequired(false),
+        .setRequired(true),
     ),
 
   cooldown: 5,
@@ -167,10 +34,6 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
   async execute(interaction: ChatInputCommandInteraction<'cached'>): Promise<void> {
     try {
       const query  = interaction.options.getString('query') || interaction.options.getString('url');
-      // Guarded with `?.` — several lightweight per-file test mocks of
-      // `interaction.options` only implement getString/getInteger; real
-      // discord.js interactions always have getAttachment.
-      const attachment = interaction.options.getAttachment?.('file') ?? null;
       const user   = interaction.user;
       const member = interaction.member;
 
@@ -188,9 +51,9 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         return;
       }
 
-      if (!query && !attachment) {
+      if (!query?.trim()) {
         await interaction.reply({
-          content: '请提供链接/关键词，或附加一个音频文件',
+          content: '请提供视频链接或搜索关键词',
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -198,31 +61,8 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-      // ─── Uploaded audio file (attachment wins when both query and file
-      // are given) ────────────────────────────────────────────────────────
-      if (attachment) {
-        await runAttachmentFlow(interaction, playbackService, {
-          url: attachment.url,
-          name: attachment.name,
-          contentType: attachment.contentType,
-          size: attachment.size,
-        });
-        return;
-      }
+      const route = routeQuery(query);
 
-      const route = routeQuery(query as string);
-
-      // ─── Pasted Discord CDN attachment link ────────────────────────────────
-      if (route.kind === 'attachment') {
-        await runAttachmentFlow(interaction, playbackService, { url: route.raw });
-        return;
-      }
-
-      // ─── YouTube URL ────────────────────────────────────────────────────────
-      // kind check (not just platform) — 'youtube-playlist' also has
-      // platform:'youtube', isUrl:true and must fall through to the
-      // playlist branch further down instead of being extracted as a
-      // single (invalid) video.
       if (route.kind === 'youtube-video') {
         const ytExtractor = playbackService.getYouTubeExtractor();
         if (!ytExtractor) {
@@ -271,51 +111,8 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         return;
       }
 
-      // ─── Bilibili URL ───────────────────────────────────────────────────────
-      // kind check (not just platform) — 'bilibili-fav'/'bilibili-collection'
-      // also have platform:'bilibili', isUrl:true and must fall through to
-      // the playlist branch further down.
       if (route.kind === 'bilibili-video') {
         const url = route.normalizedUrl || route.raw;
-
-        // 分P (multipart) detection: a bare BV URL (no explicit ?p=) whose
-        // video actually has more than one part enqueues every part instead
-        // of just page 1. Skipped while radio is enabled — the existing
-        // single-URL playUrl() path already interjects page 1 into the
-        // rotation, and a bulk enqueue would be silently discarded on the
-        // next radio advance anyway (RadioService resets the queue).
-        // Every failure mode here (bad id parse, API error, timeout) falls
-        // through to the normal single-video path unchanged — detection is
-        // strictly best-effort and must never block ordinary playback.
-        try {
-          const videoId = BilibiliValidator.extractVideoId(route.raw);
-          const hasExplicitPage = /[?&]p=\d+/.test(route.raw);
-          const radioEnabled = Boolean(playbackService.getRadioService?.()?.isEnabled(interaction.guild.id));
-
-          if (videoId?.type === 'BV' && !hasExplicitPage && !radioEnabled) {
-            const detected = await withTimeout(
-              BilibiliApi.getVideoPages(videoId.id),
-              config.playlists.multipartDetectTimeoutMs,
-              'multipart detection timeout',
-            );
-            if (detected.pages.length > 1) {
-              await runPlaylistFlow(interaction, playbackService, async (onProgress) => {
-                onProgress(detected.pages.length, detected.pages.length);
-                return resolveBilibiliMultipart({
-                  bvid: videoId.id,
-                  api: BilibiliApi,
-                  maxItems: config.playlists.maxItems,
-                });
-              });
-              return;
-            }
-          }
-        } catch (detectError: unknown) {
-          logger.debug('Bilibili multipart detection skipped', {
-            url,
-            error: (detectError as Error).message,
-          });
-        }
 
         const stageReporter = createInteractionStageReporter(interaction, 'Bilibili');
         const result = await PlaybackCoordinator.playUrl('bilibili', {
@@ -341,32 +138,10 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
         return;
       }
 
-      // ─── Playlist ingestion (YouTube playlist / Bilibili fav / Bilibili
-      // collection) ─────────────────────────────────────────────────────────
-      if (isPlaylistRoute(route)) {
-        if (route.kind === 'youtube-playlist' && !playbackService.getYouTubeExtractor()) {
-          await interaction.editReply({ content: '[!] YouTube support is not available' });
-          return;
-        }
-
-        await runPlaylistFlow(interaction, playbackService, (onProgress) => resolvePlaylist(route, {
-          youtubeExtractor: playbackService.getYouTubeExtractor(),
-          bilibiliApi: BilibiliApi,
-          maxItems: config.playlists.maxItems,
-          onProgress,
-        }));
-        logger.info('Play command completed (playlist)', {
-          query,
-          kind: route.kind,
-          user: user.username,
-        });
-        return;
-      }
-
       // ─── Unsupported URL ────────────────────────────────────────────────────
       if (route.isUrl && route.platform === 'unknown') {
         await interaction.editReply({
-          content: '[!] 不支持的链接格式。目前支持 Bilibili 和 YouTube 链接。',
+          content: '[!] 不支持的链接格式。请使用 Bilibili 或 YouTube 单视频链接；不支持歌单、收藏夹、合集或音频附件。',
         });
         return;
       }
@@ -377,14 +152,10 @@ const createPlayCommand = (playbackService: any, _queueService: any) => ({
       const ytExtractorForSearch = playbackService.getYouTubeExtractor();
       const perPlatformLimit = config.search.limitPerPlatform;
 
-      // Bilibili uses the HTTP API here so initial discovery stays fast.
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const bilibiliApi = require('../../bilibili/api') as any;
-
       const searchResult = await SearchService.searchDualPlatforms({
         keyword:          query as string,
         limitPerPlatform: perPlatformLimit,
-        bilibiliApi,
+        bilibiliApi: BilibiliApi,
         youtubeExtractor: ytExtractorForSearch,
       });
       const biliResults = searchResult.bilibili;

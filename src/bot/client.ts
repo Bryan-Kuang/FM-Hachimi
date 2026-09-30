@@ -17,7 +17,6 @@ import * as logger from '../services/logger_service';
 import config = require('../config/config');
 import Debug = require('../utils/debug');
 import CommandRegistry = require('./commands');
-import * as TestingAccess from './testing_access';
 import { isFirstListenerJoin } from './voice_presence';
 import { GatewayWatchdog, StuckReport } from './gateway_watchdog';
 
@@ -34,8 +33,6 @@ interface CommandDef {
   data:     { name: string };
   execute:  (interaction: ChatInputCommandInteraction<'cached'>) => Promise<void>;
   cooldown?: number;
-  stage?: 'stable' | 'testing';
-  featureName?: string;
 }
 
 interface BotStats {
@@ -325,14 +322,6 @@ class BotClient {
       }
 
       try {
-        if (TestingAccess.isTestingCommand(command)) {
-          const allowed = await TestingAccess.assertTestingGuild(
-            interaction,
-            command.featureName || command.data.name,
-          );
-          if (!allowed) return;
-        }
-
         if (await this.checkCooldown(interaction, command)) return;
 
         await command.execute(interaction);

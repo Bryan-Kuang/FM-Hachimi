@@ -2,7 +2,7 @@
 
 Runbook for deploying and operating F.M. Hachimi on the VPS.
 
-## Cheat sheet — the five commands you actually run
+## Common operations
 
 The VPS address, user, and key are deliberately not written down here (public
 repo — CI keeps them in the `DEPLOY_HOST`/`DEPLOY_USER`/`DEPLOY_SSH_KEY`
@@ -21,12 +21,18 @@ docker logs -f bilibili-discord-bot --tail 100
 # the gateway is wedged (see "Gateway outages and the watchdog").
 docker ps --format '{{.Names}}: {{.Status}}' && curl -s 127.0.0.1:9090/readyz
 
-# Trigger a deploy and watch it (local; any pushed main commit also deploys)
-gh workflow run pipeline.yml && gh run watch
+# Refresh global commands through CI (does not build or deploy the bot)
+gh workflow run pipeline.yml -f environment=global && gh run watch
 
 # Register/refresh slash commands manually (local; normally automatic post-deploy)
 npm run deploy:commands
 ```
+
+Bot deployment is triggered by a push to `main` or the weekly scheduled rebuild.
+Manual workflow dispatch only registers or clears slash commands. To retry a
+failed bot deployment, rerun that push/scheduled workflow in GitHub Actions.
+The current `npm run ops:deploy` helper also uses manual dispatch, so despite its
+name it only refreshes commands.
 
 ## Which image is running
 
@@ -55,12 +61,18 @@ it is — re-run the deploy rather than debugging the app.
 ## Topology
 
 - **Host:** Oracle Cloud Ubuntu VPS, repo at `/home/ubuntu/bilibili-bot`, tracks `main`.
-- **Runtime:** single Docker container (`docker compose`), healthchecked, metrics on `127.0.0.1:9090` (loopback only).
+- **Runtime:** Docker Compose runs the bot (`bilibili-discord-bot`) and the
+  YouTube PO-token provider (`pot-provider`) on the shared `botnet` network. The
+  provider has no host port; bot health and metrics bind to `127.0.0.1:9090` on
+  the host (loopback only).
 - **State lives on the host (bind mounts), never in the image:**
   - `secrets/` — `youtube_cookies.txt`, `bilibili_cookies.txt` (mode 600)
-  - `data/` — `daily_hachimi.json` (must survive rebuilds); `resume_state.json`
-    (playback snapshot written on shutdown so active sessions resume after a deploy —
-    consumed on startup, discarded if older than `RESUME_MAX_AGE_MS`, default 15 min)
+  - `data/` — `daily_hachimi.json` (schedules), `daily_hachimi_history.json`
+    (recommendation history), `annoying_state.json` (per-guild armed flags), and
+    `resume_state.json` (queue, playback position and idle voice presence).
+    Resume snapshots are written periodically and on shutdown, consumed on
+    startup, and discarded if older than `RESUME_MAX_AGE_MS` (default 15 min).
+  - `cache/` — downloaded audio in separate Bilibili and YouTube stores
   - `logs/` — unused in prod: `LOG_TO_FILE=false` since 2026-07 (the app's date-stamped
     files never rotated); read logs with `docker compose logs` (json-file driver, 10m/3 rotation)
   - `~/.fm-hachimi-youtube/profile` → mounted read-only at `/app/youtube-browser-profile`
@@ -77,41 +89,34 @@ pushes to **GHCR** (`ghcr.io/bryan-kuang/fm-hachimi`, tagged `latest` + commit S
 `deploy` SSHes to the VPS → `git pull --ff-only` → `scripts/deploy/remote-deploy.sh` →
 `docker login ghcr.io` + `docker compose pull` + `up -d` (pulls the **exact image CI tested**
 via `IMAGE_TAG`=commit SHA) → healthcheck poll → `deploy-commands` registers global commands.
-Failures ping Discord. PRs run `check` + `image` (build-only, no push/deploy). The scheduled
-`Cookie Health` monitor is a separate workflow.
+Weekly scheduled runs also check, rebuild without cache and deploy, but do not
+re-register commands. Deploy-job failures ping Discord. PRs run `check` + `image`
+(build-only, no push/deploy). The scheduled `Cookie Health` monitor is separate.
 
 **Registry deploy prerequisites** (one-time): either make the `fm-hachimi` GHCR package
 **public** (then no auth needed to pull), or add a repo secret **`GHCR_TOKEN`** = a classic
 PAT with `read:packages` so the VPS can pull a private image. CI pushes using the built-in
 `GITHUB_TOKEN` (no PAT needed for push). Local dev still builds: `docker compose up --build`.
 
-### Slash commands & the testing system
+### Slash commands
 
-**Stable (global) commands auto-deploy** at the end of the `Pipeline` (the
-`deploy-commands` job, after a successful deploy on `main`). **Testing / guild scopes
-are manual** via the `Pipeline` workflow's `workflow_dispatch` — e.g. run it with `test`
-after adding a
-`stage:'testing'` command. A command's `stage` field decides where it can live:
+All supported commands register globally after a successful push-triggered production deploy.
+Manual Pipeline dispatch offers `global` (register commands) and `clear_guild`
+(remove this application's old guild-scoped commands in the specified guild).
 
-- `stage: 'stable'` (or unset) → **global** (every server, ~1h propagation).
-- `stage: 'testing'` → **test guild only**, plus a runtime guard (`assertTestingGuild`)
-  that rejects it elsewhere — so testing features are gated even if registration leaks.
-  Testing buttons use a `testing:` customId prefix.
+When upgrading from the testing-command system, record the former test guild ID
+before removing `TEST_GUILD_ID` from the deployment configuration. Clear that
+guild's application commands before registering the global command set:
 
-Workflow options:
+```bash
+CLEAR_GUILD_COMMANDS=true GUILD_ID=<former-test-guild-id> npm run deploy:commands
+npm run deploy:commands
+```
 
-| Option | Scope | Use |
-|---|---|---|
-| `global` | stable cmds, everywhere | **production default** |
-| `test` | `stage:'testing'` cmds → `TEST_GUILD_ID` | try a feature in the test server (no dups) |
-| `clear_guild` | clear a guild's scoped cmds | remove duplicate commands from a guild |
-
-**Duplicates** = a command registered both globally and guild-scoped. `global` + `test` are
-non-overlapping, so they never duplicate. The legacy `guild` all-commands deploy mode was
-removed 2026-07 (it was the only way duplicates got created); `clear_guild` stays as the
-remediation tool. Note: `stage:'testing'` is currently unused — tag a command with it to
-route it through the `test` flow. Authoring and graduation rules for testing features live
-in [`docs/testing-features.md`](docs/testing-features.md).
+The cleanup operation registers nothing. Repeat it for each guild with old
+application commands. Other applications' commands are unaffected. The application
+no longer reads `TEST_GUILD_ID`, `DEPLOY_TEST_COMMANDS` or command-stage flags.
+Automated CI tests and health checks are retained.
 
 ## YouTube cookies — decision tree
 
@@ -140,10 +145,10 @@ When cookies go stale, work down this list; each step is the fallback for the on
 
    | Error | Meaning | Go to |
    |---|---|---|
-   | `Sign in to confirm you're not a bot` | The session really is dead. | step 1 |
-   | `The page needs to be reloaded` / `No video formats found` | Cookies are **fine**; yt-dlp's client set is broken against YouTube. | see below |
+   | `Sign in to confirm you're not a bot` | Authentication or bot detection failed; try cookie refresh. | step 1 |
+   | `The page needs to be reloaded` / `No video formats found` | Can indicate a client/PO-token issue; does not by itself establish cookie validity. | see below |
 
-   For the second row, the fix is a yt-dlp client/PO-token change, not a re-login. Check the
+   For the second row, investigate the yt-dlp client and PO-token path first. Check the
    pot-provider sidecar (`docker exec bilibili-discord-bot wget -qO- http://pot-provider:4416/ping`),
    then find a client that works and set it in `~/bilibili-bot/.env`:
 
@@ -195,22 +200,23 @@ config the bot never runs is what froze rotation on 2026-08-07.
 
 ### Validation is slow, and its timeout is the thing that breaks first
 
-While YouTube's SABR/PO-token experiment is running, `web_embedded` is the only
-client whose stream URLs actually serve bytes, and it pays the nsig JS solve:
-**55-86s per extraction** on the 2-vCPU host. Validation runs one such
+During the August 2026 incident, `web_embedded` was the working client and its
+nsig JS solve took **55–86s per extraction** on the 2-vCPU host. These are
+historical observations; re-measure the configured client before changing it. Validation runs one such
 extraction per canary URL, each capped by `YOUTUBE_COOKIE_VALIDATE_TIMEOUT_MS`
 (default 180000; the upstream package's own default is 90s, which is *under* the
 observed cost).
 
-So a `Timed out` in `YouTube cookie refresh failed` means the box was busy, not
-that the cookies died:
+A `Timed out` in `YouTube cookie refresh failed` means validation exceeded its
+budget; it does not establish whether the cookies are valid:
 
 ```
 exported cookies failed validation: \nTimed out
 ```
 
-Treat that string as its own branch of step 0 — no canary check needed, and
-certainly no re-login. Re-measure before changing anything:
+Check host load and repeat validation before attempting re-login. The example
+below reproduces the historical `web_embedded` check; substitute the configured
+client when investigating a different setup:
 
 ```bash
 docker exec bilibili-discord-bot sh -c 'cp /app/secrets/youtube_cookies.txt /tmp/v.txt
@@ -255,8 +261,7 @@ Never commit `secrets/`, cookie files, browser profiles, or bot-account credenti
 
 ## Media cache (YouTube + Bilibili)
 
-Since cold extraction is slow (YouTube ~16s; Bilibili re-extracts + streams from its
-CDN each play) and can't be made fast on this IP, the bot caches the **downloaded
+To avoid repeated extraction and CDN downloads, the bot caches the **downloaded
 audio file** for replayed videos. After the first play, the extractor downloads the
 audio (HTTP GET of the signed URL) into the `cache/` host bind-mount; later plays —
 even after the signed URL expires — read the local file instantly (no yt-dlp/native
@@ -355,8 +360,8 @@ Discord's edge is flapping.
 
 **Health endpoints.** `/healthz` is a static 200 — it proves the process is
 alive and nothing more, which is why the container looked healthy throughout.
-`/readyz` follows the real gateway state (`botStats.gateway.connected`) and is
-what the Docker healthcheck and any ops alerting should use. An unhealthy
+`/readyz` combines gateway readiness and voice-session health; confirmed voice
+degradation also returns 503. Docker healthchecks and ops alerting should use it. An unhealthy
 container is *not* restarted by the restart policy — that is the watchdog's job.
 
 ## Quick checks
@@ -399,7 +404,7 @@ echo $(( $(date +%s) - $(stat -c %Y ~/bilibili-bot/secrets/youtube_cookies.txt) 
 # metrics over the loopback binding
 curl -s 127.0.0.1:9090/metrics | jq '.gauges, .counters.youtube_cookie_refresh_total'
 
-# validate the live YouTube cookie file end-to-end (prints the video id on success).
+# Check extraction metadata (prints the video id on success).
 # NOTE: this only proves a format was found. For "can we actually play?", use the
 # 200-check in the decision tree above — see the 2026-08-08 note on why.
 docker exec bilibili-discord-bot yt-dlp \
@@ -417,12 +422,13 @@ docker logs bilibili-discord-bot --since 24h 2>&1 | grep "Playback stream health
 
 ## Playback tuning knobs
 
-`.env.example` documents the full set; these were added 2026-08-08 and are the ones you
-reach for when YouTube changes under you or playback gets choppy.
+[`.env.example`](.env.example) lists common settings; advanced defaults are in
+[`src/config/config.ts`](src/config/config.ts). These knobs help investigate
+extraction failures and choppy playback.
 
 | Env | Default | What it does |
 |-----|---------|--------------|
-| `YOUTUBE_PLAYER_CLIENT` | *(empty)* | Pin yt-dlp's player client. Currently `web_embedded` in prod — see the decision tree. |
+| `YOUTUBE_PLAYER_CLIENT` | *(empty)* | Pin yt-dlp's player client. `web_embedded` was used in the August incident; verify the active setting before changing it. |
 | `YOUTUBE_PLAYER_CLIENT_FALLBACKS` | `web_embedded,mweb,default` | Tried in order when the primary client's URL fails the stream probe. |
 | `YOUTUBE_EXTRACTION_TIMEOUT_MS` | `30000` | yt-dlp kill timer per extraction. Raise if extraction is legitimately slow on a loaded host. |
 | `STREAM_PROBE_ENABLED` | `true` | Byte-range check on extracted URLs before caching/playing. Turn off only to isolate a probe bug. |

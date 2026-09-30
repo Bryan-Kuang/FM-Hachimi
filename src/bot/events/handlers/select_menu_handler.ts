@@ -8,7 +8,6 @@
 import { MessageFlags } from 'discord.js';
 import EmbedBuilders = require('../../../ui/embeds');
 import ButtonBuilders = require('../../../ui/buttons');
-import SearchService = require('../../../search/search_service');
 import SearchSessionStore = require('../../../search/search_session_store');
 import PlaybackCoordinator = require('../../../playback/playback_coordinator');
 import { createInteractionStageReporter } from '../../../playback/stage_feedback';
@@ -49,12 +48,11 @@ function createSelectMenuHandler(playerService: any) {
         return await handleSearchSelectV2(interaction, customId, playerService);
       }
 
-      if (customId.startsWith('search_select_')) {
-        return await handleSearchSelect(interaction, customId, playerService);
-      }
-
-      if (customId.startsWith('play_search_')) {
-        return await handlePlaySearch(interaction, customId, playerService);
+      if (customId.startsWith('search_select_') || customId.startsWith('play_search_')) {
+        await interaction.reply({
+          content: '搜索已过期，请使用 /play 重新搜索。',
+          flags: MessageFlags.Ephemeral,
+        });
       }
     } catch (error: unknown) {
       await handleSelectMenuError(interaction, error as Error);
@@ -239,10 +237,6 @@ type DirectSelectionPlatform = 'bilibili' | 'youtube';
 interface DirectVideoSelection {
   platform: DirectSelectionPlatform;
   url: string;
-}
-
-function isDirectSelectionValue(value: string): boolean {
-  return value.startsWith('bili:') || value.startsWith('yt:');
 }
 
 function normalizeBilibiliSelection(rawIdentity: string): string | null {
@@ -457,230 +451,6 @@ async function handleSearchSelectV2(interaction: any, customId: string, playerSe
     user:       user.username,
     guild:      interaction.guild?.name,
   });
-}
-
-// ---------------------------------------------------------------------------
-// Search Select
-// ---------------------------------------------------------------------------
-
-async function handleSearchSelect(interaction: any, customId: string, playerService: any): Promise<void> {
-  const user          = interaction.user;
-  const selectedValue = interaction.values[0] as string;
-
-  logger.debug('Search result select menu interaction received', {
-    selectedValue,
-    user:  user.username,
-    guild: interaction.guild?.name,
-  });
-
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
-  const keyword     = customId.replace('search_select_', '').replace(/_/g, ' ');
-
-  try {
-    const directSelection = parseDirectSelectionValue(selectedValue);
-    if (directSelection) {
-      const played = await playDirectSelection(interaction, playerService, directSelection);
-      if (!played) return;
-      logger.info('Video added to queue from direct search result', {
-        platform: directSelection.platform,
-        user:     user.username,
-        guild:    interaction.guild?.name,
-      });
-      return;
-    }
-
-    if (isDirectSelectionValue(selectedValue)) {
-      return await editInvalidSelection(interaction);
-    }
-
-    const originalEmbed = interaction.message.embeds[0];
-    if (!originalEmbed || !originalEmbed.description) {
-      const errorEmbed = EmbedBuilders.createErrorEmbed(
-        'Search Results Not Found', 'Could not find the original search results.',
-        { suggestion: 'Please perform a new search.' },
-      );
-      return await interaction.editReply({ embeds: [errorEmbed] });
-    }
-
-    const indexMatch = selectedValue.match(/^search_result_(\d+)$/);
-    if (!indexMatch) {
-      return await editInvalidSelection(interaction);
-    }
-
-    const resultIndex = parseInt(indexMatch[1], 10);
-    const extractor = playerService.getExtractor();
-    if (!extractor) {
-      const errorEmbed = EmbedBuilders.createErrorEmbed(
-        'Extractor Not Available', 'Bilibili extractor is not available.',
-        { suggestion: 'Please try again later.' },
-      );
-      return await interaction.editReply({ embeds: [errorEmbed] });
-    }
-
-    const searchResults = await SearchService.searchBilibili({
-      keyword,
-      limit: 25,
-      extractor,
-    });
-
-    if (resultIndex >= searchResults.length) {
-      const errorEmbed = EmbedBuilders.createErrorEmbed(
-        'Video Not Found', 'The selected video is no longer available.',
-        { suggestion: 'Please perform a new search.' },
-      );
-      return await interaction.editReply({ embeds: [errorEmbed] });
-    }
-
-    const selectedVideo = searchResults[resultIndex];
-    const videoUrl      = selectedVideo.url || `https://www.bilibili.com/video/av${selectedVideo.id}`;
-
-    const played = await playBilibiliSelection(interaction, playerService, videoUrl, selectedVideo.title);
-    if (!played) return;
-
-    logger.info('Video added to queue from search results', {
-      videoTitle: selectedVideo.title,
-      videoId:    selectedVideo.id,
-      user:       user.username,
-      guild:      interaction.guild?.name,
-    });
-  } catch (innerError: unknown) {
-    logger.error('Failed to add video from search results', {
-      error: (innerError as Error).message,
-      stack: (innerError as Error).stack,
-      user:  user.username,
-      guild: interaction.guild?.name,
-    });
-
-    const errorEmbed = EmbedBuilders.createErrorEmbed(
-      'Error Adding Video', 'An error occurred while adding the video to queue.',
-      { suggestion: 'Please try again.' },
-    );
-    await interaction.editReply({ embeds: [errorEmbed] });
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Play Search (dual-platform: Bilibili + YouTube from /play keyword)
-// ---------------------------------------------------------------------------
-
-async function handlePlaySearch(interaction: any, customId: string, playerService: any): Promise<void> {
-  const user          = interaction.user;
-  const selectedValue = interaction.values[0] as string; // "bili_0", "yt_2", etc.
-  const member        = interaction.member;
-
-  logger.debug('Play search select menu interaction received', {
-    selectedValue,
-    user:  user.username,
-    guild: interaction.guild?.name,
-  });
-
-  if (!member?.voice?.channel) {
-    await interaction.reply({ content: 'Voice channel required', flags: MessageFlags.Ephemeral });
-    return;
-  }
-
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
-  const keyword     = customId.replace('play_search_', '').replace(/_/g, ' ');
-  const isBilibili  = selectedValue.startsWith('bili:') || selectedValue.startsWith('bili_');
-  const resultIndex = parseInt(selectedValue.replace(/^(bili|yt)_/, ''), 10);
-
-  try {
-    const directSelection = parseDirectSelectionValue(selectedValue);
-    if (directSelection) {
-      const played = await playDirectSelection(interaction, playerService, directSelection);
-      if (!played) return;
-      logger.info('Video added to queue from direct play search', {
-        platform: directSelection.platform,
-        user:     user.username,
-        guild:    interaction.guild?.name,
-      });
-      return;
-    }
-
-    if (isDirectSelectionValue(selectedValue) || Number.isNaN(resultIndex)) {
-      return await editInvalidSelection(interaction);
-    }
-
-    if (isBilibili) {
-      // ── Bilibili path (use HTTP API, not yt-dlp extractor) ──────────────
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const bilibiliApi = require('../../../bilibili/api') as any;
-      const results = await SearchService.searchBilibili({
-        keyword,
-        limit: 10,
-        bilibiliApi,
-        source: 'api',
-      });
-
-      if (!results || resultIndex >= results.length) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          'Video Not Found', 'The selected video is no longer available.',
-          { suggestion: 'Please search again.' },
-        );
-        return await interaction.editReply({ embeds: [errorEmbed] });
-      }
-
-      const selectedVideo = results[resultIndex];
-      const videoUrl = selectedVideo.url || `https://www.bilibili.com/video/${selectedVideo.bvid || 'av' + selectedVideo.id}`;
-      const played = await playBilibiliSelection(interaction, playerService, videoUrl, selectedVideo.title);
-      if (!played) return;
-    } else {
-      // ── YouTube path ────────────────────────────────────────────────────
-      const ytExtractor = playerService.getYouTubeExtractor();
-      if (!ytExtractor) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          'YouTube Not Available', 'YouTube extractor is not available.',
-          { suggestion: 'Please try again later.' },
-        );
-        return await interaction.editReply({ embeds: [errorEmbed] });
-      }
-
-      const results = await SearchService.searchYouTube({
-        keyword,
-        limit: 10,
-        youtubeExtractor: ytExtractor,
-      });
-
-      if (resultIndex >= results.length) {
-        const errorEmbed = EmbedBuilders.createErrorEmbed(
-          'Video Not Found', 'The selected video is no longer available.',
-          { suggestion: 'Please search again.' },
-        );
-        return await interaction.editReply({ embeds: [errorEmbed] });
-      }
-
-      const selectedVideo = results[resultIndex];
-      const videoUrl = selectedVideo.url || `https://www.youtube.com/watch?v=${selectedVideo.id}`;
-      const played = await playYouTubeSelection(interaction, playerService, videoUrl, selectedVideo.title);
-      if (!played) return;
-    }
-
-    logger.info('Video added to queue from play search', {
-      platform: isBilibili ? 'bilibili' : 'youtube',
-      index:    resultIndex,
-      user:     user.username,
-      guild:    interaction.guild?.name,
-    });
-  } catch (innerError: unknown) {
-    logger.error('Failed to add video from play search', {
-      error:    (innerError as Error).message,
-      platform: isBilibili ? 'bilibili' : 'youtube',
-      user:     user.username,
-      guild:    interaction.guild?.name,
-    });
-
-    const msg = (innerError as Error).message || '';
-    const lowerMsg = msg.toLowerCase();
-    let content = 'An error occurred while adding the video.';
-    if (lowerMsg.includes('auth/bot check') || lowerMsg.includes('automatic cookie refresh') || lowerMsg.includes('cookies expired')) {
-      content = '[✗] YouTube auth check failed after automatic cookie refresh. The bot account may need a fresh VPS browser login.';
-    }
-
-    const errorEmbed = EmbedBuilders.createErrorEmbed('Error Adding Video', content, { suggestion: 'Please try again.' });
-    await interaction.editReply({ embeds: [errorEmbed] });
-  }
 }
 
 // ---------------------------------------------------------------------------

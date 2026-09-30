@@ -90,7 +90,7 @@ describe("select menu direct video values", () => {
   test("/play Bilibili direct value plays without repeating keyword search", async () => {
     const playerService = makePlayerService();
     const handler = createSelectMenuHandler(playerService);
-    const interaction = makeInteraction({ customId: "play_search_hachimi", value: "bili:BV1abc" });
+    const interaction = makeInteraction({ customId: "search_select_v2_hachimi", value: "bili:BV1abc" });
 
     await handler(interaction);
 
@@ -107,7 +107,7 @@ describe("select menu direct video values", () => {
   test("/play Bilibili direct value sets UI context before playback and notifies state", async () => {
     const playerService = makePlayerService();
     const handler = createSelectMenuHandler(playerService);
-    const interaction = makeInteraction({ customId: "play_search_hachimi", value: "bili:BV1abc" });
+    const interaction = makeInteraction({ customId: "search_select_v2_hachimi", value: "bili:BV1abc" });
 
     await handler(interaction);
 
@@ -122,7 +122,7 @@ describe("select menu direct video values", () => {
     const playerService = makePlayerService();
     playerService.playBilibiliVideo.mockResolvedValue({ success: false, error: "Network error" });
     const handler = createSelectMenuHandler(playerService);
-    const interaction = makeInteraction({ customId: "play_search_hachimi", value: "bili:BV1abc" });
+    const interaction = makeInteraction({ customId: "search_select_v2_hachimi", value: "bili:BV1abc" });
 
     await handler(interaction);
 
@@ -133,7 +133,7 @@ describe("select menu direct video values", () => {
   test("/play YouTube direct value extracts audio without repeating keyword search", async () => {
     const playerService = makePlayerService();
     const handler = createSelectMenuHandler(playerService);
-    const interaction = makeInteraction({ customId: "play_search_hachimi", value: "yt:dQw4w9WgXcQ" });
+    const interaction = makeInteraction({ customId: "search_select_v2_hachimi", value: "yt:dQw4w9WgXcQ" });
 
     await handler(interaction);
 
@@ -149,7 +149,7 @@ describe("select menu direct video values", () => {
     const playerService = makePlayerService();
     playerService._ytExtractor.extractAudio.mockRejectedValue(new Error("extract failed"));
     const handler = createSelectMenuHandler(playerService);
-    const interaction = makeInteraction({ customId: "play_search_hachimi", value: "yt:dQw4w9WgXcQ" });
+    const interaction = makeInteraction({ customId: "search_select_v2_hachimi", value: "yt:dQw4w9WgXcQ" });
 
     await handler(interaction);
 
@@ -163,11 +163,11 @@ describe("select menu direct video values", () => {
     );
   });
 
-  test("/search YouTube direct value defers failure replies ephemerally", async () => {
+  test("/play YouTube direct value defers failure replies ephemerally", async () => {
     const playerService = makePlayerService();
     playerService._ytExtractor.extractAudio.mockRejectedValue(new Error("extract failed"));
     const handler = createSelectMenuHandler(playerService);
-    const interaction = makeInteraction({ customId: "search_select_hachimi", value: "yt:abcdefghijk" });
+    const interaction = makeInteraction({ customId: "search_select_v2_hachimi", value: "yt:abcdefghijk" });
 
     await handler(interaction);
 
@@ -177,10 +177,10 @@ describe("select menu direct video values", () => {
     });
   });
 
-  test("/search Bilibili direct value plays without repeating keyword search", async () => {
+  test("/play Bilibili direct value plays without repeating keyword search", async () => {
     const playerService = makePlayerService();
     const handler = createSelectMenuHandler(playerService);
-    const interaction = makeInteraction({ customId: "search_select_hachimi", value: "bili:av12345" });
+    const interaction = makeInteraction({ customId: "search_select_v2_hachimi", value: "bili:av12345" });
 
     await handler(interaction);
 
@@ -192,10 +192,10 @@ describe("select menu direct video values", () => {
     expect(playerService._extractor.searchVideos).not.toHaveBeenCalled();
   });
 
-  test("/search YouTube direct value extracts audio without repeating keyword search", async () => {
+  test("/play YouTube direct value extracts audio without repeating keyword search", async () => {
     const playerService = makePlayerService();
     const handler = createSelectMenuHandler(playerService);
-    const interaction = makeInteraction({ customId: "search_select_hachimi", value: "yt:abcdefghijk" });
+    const interaction = makeInteraction({ customId: "search_select_v2_hachimi", value: "yt:abcdefghijk" });
 
     await handler(interaction);
 
@@ -206,58 +206,4 @@ describe("select menu direct video values", () => {
     expect(playerService._ytExtractor.searchVideos).not.toHaveBeenCalled();
   });
 
-  test("legacy /play Bilibili index value still falls back to a search", async () => {
-    bilibiliApi.searchVideos.mockResolvedValue([
-      { title: "Legacy Bili", bvid: "BVlegacy", url: "https://www.bilibili.com/video/BVlegacy" },
-    ]);
-    const playerService = makePlayerService();
-    const handler = createSelectMenuHandler(playerService);
-    const interaction = makeInteraction({ customId: "play_search_hachimi", value: "bili_0" });
-
-    await handler(interaction);
-
-    expect(bilibiliApi.searchVideos).toHaveBeenCalledWith("hachimi", 1, 10);
-    expect(playerService.playBilibiliVideo).toHaveBeenCalledWith(
-      interaction,
-      "https://www.bilibili.com/video/BVlegacy",
-      expect.objectContaining({ onStage: expect.any(Function) }),
-    );
-  });
-
-  test("legacy /play YouTube index value still falls back to a search", async () => {
-    const playerService = makePlayerService();
-    playerService._ytExtractor.searchVideos.mockResolvedValue({
-      success: true,
-      results: [{ title: "Legacy YouTube", id: "dQw4w9WgXcQ" }],
-    });
-    const handler = createSelectMenuHandler(playerService);
-    const interaction = makeInteraction({ customId: "play_search_hachimi", value: "yt_0" });
-
-    await handler(interaction);
-
-    expect(playerService._ytExtractor.searchVideos).toHaveBeenCalledWith("hachimi", 10);
-    expect(playerService._ytExtractor.extractAudio).toHaveBeenCalledWith(
-      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      expect.objectContaining({ priority: "foreground", source: "playback" }),
-    );
-  });
-
-  test("legacy /search index value still falls back to a Bilibili search", async () => {
-    const playerService = makePlayerService();
-    playerService._extractor.searchVideos.mockResolvedValue({
-      success: true,
-      results: [{ title: "Legacy Search", id: "12345" }],
-    });
-    const handler = createSelectMenuHandler(playerService);
-    const interaction = makeInteraction({ customId: "search_select_hachimi", value: "search_result_0" });
-
-    await handler(interaction);
-
-    expect(playerService._extractor.searchVideos).toHaveBeenCalledWith("hachimi", 25);
-    expect(playerService.playBilibiliVideo).toHaveBeenCalledWith(
-      interaction,
-      "https://www.bilibili.com/video/av12345",
-      expect.objectContaining({ onStage: expect.any(Function) }),
-    );
-  });
 });

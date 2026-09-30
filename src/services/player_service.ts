@@ -35,11 +35,11 @@ import type {
 interface PreExtractionServiceLike {
   prewarmBilibiliUrls(
     urls: string[],
-    context: { source: 'play_search' | 'search_command' | 'daily_recommendation'; guildId?: string; keyword?: string },
+    context: { source: 'play_search' | 'daily_recommendation'; guildId?: string; keyword?: string },
   ): unknown;
   prewarmYouTubeUrls?(
     urls: string[],
-    context: { source: 'play_search' | 'search_command' | 'daily_recommendation'; guildId?: string; keyword?: string },
+    context: { source: 'play_search' | 'daily_recommendation'; guildId?: string; keyword?: string },
   ): unknown;
 }
 
@@ -69,7 +69,6 @@ interface PlayerServiceDeps {
   progressTracker: unknown;
   extractor: ExtractorLike;
   youtubeExtractor?: ExtractorLike;
-  historyStore?: unknown;
   preExtractionService?: PreExtractionServiceLike | null;
 }
 
@@ -79,8 +78,6 @@ class PlayerService extends EventEmitter {
   private extractor: ExtractorLike;
   private youtubeExtractor: ExtractorLike | null;
   private preExtractionService: PreExtractionServiceLike | null;
-  /** Per-guild AbortControllers for running hachimi ops */
-  private _hachimiControllers: Map<GuildId, AbortController>;
   /** Endless radio controller, attached post-construction by the composition root. */
   private radioService: RadioServiceLike | null;
   /** /annoying anti-disconnect mode, attached post-construction by the composition root. */
@@ -92,7 +89,6 @@ class PlayerService extends EventEmitter {
     progressTracker: _progressTracker,
     extractor,
     youtubeExtractor,
-    historyStore: _historyStore,
     preExtractionService,
   }: PlayerServiceDeps) {
     super();
@@ -101,7 +97,6 @@ class PlayerService extends EventEmitter {
     this.extractor           = extractor;
     this.youtubeExtractor    = youtubeExtractor || null;
     this.preExtractionService = preExtractionService || null;
-    this._hachimiControllers = new Map();
     this.radioService = null;
     this.annoyingService = null;
   }
@@ -120,14 +115,6 @@ class PlayerService extends EventEmitter {
 
   getAnnoyingService(): AnnoyingServiceLike | null {
     return this.annoyingService;
-  }
-
-  _setHachimiController(guildId: GuildId, controller: AbortController): void {
-    this._hachimiControllers.set(guildId, controller);
-  }
-
-  _clearHachimiController(guildId: GuildId): void {
-    this._hachimiControllers.delete(guildId);
   }
 
   /**
@@ -182,29 +169,6 @@ class PlayerService extends EventEmitter {
     } catch (e: unknown) {
       metrics.counter('player_errors_total', 'Player action errors').inc({ action: 'play' });
       logger.error('Play action failed', { guildId, error: (e as Error).message });
-      return false;
-    }
-  }
-
-  /**
-   * Jump to a specific queue index and start playback there. Used by the
-   * bulk-enqueue playlist path (playlist_coordinator.ts) instead of play() —
-   * playNext()'s "cursor cleared, queue non-empty → resume from the newest
-   * item" quirk would otherwise start a freshly-appended playlist at its
-   * LAST item instead of its first.
-   */
-  async playTrackAt(guildId: GuildId, index: number): Promise<boolean> {
-    try {
-      metrics.counter('player_play_total', 'Tracks started').inc({ guildId });
-      const player = this.audioManager.getPlayer(guildId);
-      if (!player) return false;
-      const success = await player.playTrack(index);
-      const state   = player.getState();
-      this._emitState(guildId, state, state.currentTrack);
-      return success;
-    } catch (e: unknown) {
-      metrics.counter('player_errors_total', 'Player action errors').inc({ action: 'playTrackAt' });
-      logger.error('playTrackAt action failed', { guildId, index, error: (e as Error).message });
       return false;
     }
   }
@@ -276,8 +240,6 @@ class PlayerService extends EventEmitter {
   async stop(guildId: GuildId): Promise<boolean> {
     try {
       metrics.counter('player_stop_total', 'Stop actions').inc({ guildId });
-      this._hachimiControllers.get(guildId)?.abort();
-      this._hachimiControllers.delete(guildId);
       await this.radioService?.stop(guildId);
       const result = await this.audioManager.stopPlayback(guildId);
       if (result && result.player) {
@@ -417,14 +379,14 @@ class PlayerService extends EventEmitter {
 
   prewarmBilibiliUrls(
     urls: string[],
-    context: { source: 'play_search' | 'search_command' | 'daily_recommendation'; guildId?: string; keyword?: string },
+    context: { source: 'play_search' | 'daily_recommendation'; guildId?: string; keyword?: string },
   ): unknown {
     return this.preExtractionService?.prewarmBilibiliUrls(urls, context);
   }
 
   prewarmYouTubeUrls(
     urls: string[],
-    context: { source: 'play_search' | 'search_command' | 'daily_recommendation'; guildId?: string; keyword?: string },
+    context: { source: 'play_search' | 'daily_recommendation'; guildId?: string; keyword?: string },
   ): unknown {
     return this.preExtractionService?.prewarmYouTubeUrls?.(urls, context);
   }

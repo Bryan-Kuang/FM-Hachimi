@@ -106,7 +106,7 @@ interface RadioConfig {
   enabled: boolean;
   replenishMaxAttempts: number;
   // Periodic "take a break" video injected into radio rotation. The feature is
-  // gated to the test guild (see TEST_GUILD_ID); the interval is global.
+  // enabled for every guild running radio; the interval is global.
   breakEnabled: boolean;
   breakIntervalMinutes: number;
   breakVideoUrl: string;
@@ -160,26 +160,9 @@ interface ResumeConfig {
   snapshotIntervalMs: number;
 }
 
-interface TestConfig {
-  mode: boolean;
-  guildId: string | undefined;
-}
-
 interface SearchConfig {
   /** Results requested per platform for the keyword search (/play). */
   limitPerPlatform: number;
-}
-
-interface PlaylistConfig {
-  maxItems: number;
-  progressIntervalMs: number;
-  /** yt-dlp kill timer when resolving a playlist. */
-  resolveTimeoutMs: number;
-  multipartDetectTimeoutMs: number;
-}
-
-interface AttachmentConfig {
-  maxBytes: number;
 }
 
 interface PlaybackConfig {
@@ -204,10 +187,7 @@ interface BotConfig {
   annoying: AnnoyingConfig;
   gateway: GatewayConfig;
   resume: ResumeConfig;
-  test: TestConfig;
   search: SearchConfig;
-  playlists: PlaylistConfig;
-  attachments: AttachmentConfig;
   playback: PlaybackConfig;
 }
 
@@ -513,21 +493,8 @@ const config: BotConfig = {
     // leaves a fresh file to resume from. Set to 0 to flush only at shutdown.
     snapshotIntervalMs: Math.max(0, parseIntegerEnv(process.env.RESUME_SNAPSHOT_INTERVAL_MS, 15 * 1000)),
   },
-  test: {
-    mode: process.env.TEST_MODE === "true",
-    guildId: process.env.TEST_GUILD_ID,
-  },
   search: {
     limitPerPlatform: Math.max(1, parseIntegerEnv(process.env.SEARCH_LIMIT_PER_PLATFORM, 10)),
-  },
-  playlists: {
-    maxItems: Math.max(1, parseIntegerEnv(process.env.PLAYLIST_MAX_ITEMS, 100)),
-    progressIntervalMs: Math.max(0, parseIntegerEnv(process.env.PLAYLIST_PROGRESS_INTERVAL_MS, 1500)),
-    resolveTimeoutMs: Math.max(1000, parseIntegerEnv(process.env.PLAYLIST_RESOLVE_TIMEOUT_MS, 60000)),
-    multipartDetectTimeoutMs: Math.max(0, parseIntegerEnv(process.env.PLAYLIST_MULTIPART_DETECT_TIMEOUT_MS, 3000)),
-  },
-  attachments: {
-    maxBytes: Math.max(1, parseIntegerEnv(process.env.ATTACHMENT_MAX_BYTES, 50 * 1024 * 1024)),
   },
   playback: {
     // An extracted URL is not a playable URL. yt-dlp's mweb client returned

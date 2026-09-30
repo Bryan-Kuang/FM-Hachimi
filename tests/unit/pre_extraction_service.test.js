@@ -58,7 +58,7 @@ describe("PreExtractionService", () => {
       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
       "not a url",
       "https://www.bilibili.com/video/BV1valid",
-    ], { source: "search_command" });
+    ], { source: "play_search" });
 
     expect(summary).toMatchObject({ queued: 1, skipped: 2 });
     await flushPromises();
@@ -150,7 +150,7 @@ describe("PreExtractionService", () => {
     const summary = service.prewarmYouTubeUrls([
       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
       "https://youtu.be/abcdefghijk",
-    ], { source: "search_command", guildId: "guild-1", keyword: "hachimi" });
+    ], { source: "play_search", guildId: "guild-1", keyword: "hachimi" });
 
     expect(summary).toMatchObject({ queued: 0, skipped: 2 });
     await flushPromises();

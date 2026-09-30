@@ -1,7 +1,11 @@
 # Voice presence desynchronization — 2026-09-16 UTC
 
-Status: service restored during investigation. Application fixes have since
-been implemented in this change; production deployment is still pending.
+Historical record: findings and verification below describe the September 16
+investigation and subsequent local implementation. Code line numbers, dependency
+versions, test counts and deployment observations refer to that investigation,
+not the current checkout or production state. The fixes are present in the
+current source; this documentation review did not inspect or deploy production.
+For current procedures, see [voice membership recovery](../../OPERATIONS.md#voice-membership-recovery).
 
 Implementation adds a shared per-guild recovery coordinator, authoritative
 membership polling and gateway-triggered checks, forced stale-connection
@@ -52,7 +56,7 @@ The local files examined for Guild, ClientVoiceManager, WebSocketManager and the
 voice library bundle have identical SHA-256 hashes to production. Application
 recovery files match the deployed commit except explanatory comments in client.ts.
 
-## Why recovery and detection failed
+## Why recovery and detection failed in the incident version
 
 1. `src/bot/client.ts:249` triggers anti-disconnect recovery only from a bot
    `voiceStateUpdate` leave event. `shardReady`/`shardResume` at lines 399–406
@@ -73,7 +77,7 @@ recovery files match the deployed commit except explanatory comments in client.t
    missing membership. Manual recovery resumed the latest local position, not
    a known last-audible position; that position cannot now be reconstructed.
 
-## Required fixes, in order
+## Fixes identified during the investigation
 
 ### P1: Independent voice reconciliation and reliable reconstruction
 
@@ -127,7 +131,7 @@ a periodic authoritative membership check, using the same per-guild recovery
 coordinator. A REST check confirms membership, not audio delivery; retain voice
 transport/heartbeat diagnostics as a separate signal.
 
-## Acceptance scenarios
+## Acceptance scenarios identified during the investigation
 
 - No leave event, local Ready, REST Unknown Voice State: restore automatically.
 - New shardReady replaces voice cache, no bot leave emitted: restore once.
@@ -139,10 +143,11 @@ transport/heartbeat diagnostics as a separate signal.
 - Preserve seek/pause/radio and idle-presence intent; retry transient join failures.
 - Gateway healthy plus confirmed missing intended voice: status shows degradation.
 
-Existing targeted tests cover explicit disconnect, gateway outage and readiness,
-but do not model authoritative membership disagreeing with local Ready. They
-even assert that failed reconstruction is abandoned. No production code changes
-or deployment were made as part of this investigation.
+At investigation time, existing targeted tests covered explicit disconnect,
+gateway outage and readiness, but did not model authoritative membership
+disagreeing with local Ready. They even asserted that failed reconstruction was
+abandoned. The investigation itself made no production code changes or deployment;
+subsequent local implementation is recorded below.
 
 Validation: the 30 annoying-service tests and 8 gateway-recovery tests passed.
 The 4 readiness tests initially hit sandbox `listen EPERM`; rerunning those

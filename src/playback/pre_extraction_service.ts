@@ -4,7 +4,7 @@ import YouTubeValidator = require('../youtube/validator');
 import config = require('../config/config');
 import type { AudioExtractorLike } from '../services/types';
 
-type PreExtractionSource = 'play_search' | 'search_command' | 'daily_recommendation';
+type PreExtractionSource = 'play_search' | 'daily_recommendation';
 
 interface PreExtractionContext {
   source: PreExtractionSource;
