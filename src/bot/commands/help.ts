@@ -27,7 +27,7 @@ const createHelpCommand = (_playbackService: any) => ({
           {
             name: 'Playback',
             value:
-              '`/play <URL>` - 播放Bilibili视频音频\n`/pause` - 暂停当前播放\n' +
+              '`/play <链接或关键词>` - 播放视频或搜索，支持 Bilibili / YouTube\n`/pause` - 暂停当前播放\n' +
               '`/resume` - 恢复播放\n`/stop` - 停止播放并清空队列',
             inline: false,
           },
@@ -37,15 +37,15 @@ const createHelpCommand = (_playbackService: any) => ({
             inline: false,
           },
           {
-            name: 'Search',
-            value: '`/search <关键词>` - 搜索Bilibili视频\n`/nowplaying` - 查看当前播放的歌曲',
+            name: 'Status',
+            value: '`/nowplaying` - 查看当前播放的歌曲\n`/status` - 查看机器人健康状态',
             inline: false,
           },
           {
             name: 'Features',
             value:
-              '`/hachimi` - 自动添加哈基米精选视频\n`/daily-hachimi` - 配置每日哈基米推荐\n' +
-              '`/radio` - 电台模式：无限随机播放哈基米歌曲\n' +
+              '`/daily-hachimi` - 配置每日哈基米推荐\n' +
+              '`/radio` - 电台模式：无限随机播放哈基米歌曲（含不可跳过的休息插播）\n' +
               '`/annoying` - 烦人模式：被踢出语音也会立刻回来继续播放',
             inline: false,
           },

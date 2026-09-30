@@ -14,7 +14,6 @@
     "docker:build": "docker build .",
     "bench:extractors": "node scripts/bench-extractors.js",
     "deploy:commands": "node scripts/deploy-commands.js",
-    "deploy:commands:test": "DEPLOY_TEST_COMMANDS=true node scripts/deploy-commands.js",
     "ops:ssh": "ssh fm-hachimi-vps",
     "ops:logs": "ssh -t fm-hachimi-vps 'docker logs -f bilibili-discord-bot --tail 100'",
     "ops:health": "ssh fm-hachimi-vps 'docker ps --format \"{{.Names}}: {{.Status}}\"; printf \"readyz: \"; curl -s 127.0.0.1:9090/readyz; echo'",

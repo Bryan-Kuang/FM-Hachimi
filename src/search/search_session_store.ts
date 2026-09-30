@@ -1,7 +1,7 @@
 /**
  * Search Session Store
- * Short-lived in-memory store for paginated search results. Each /search or
- * /play keyword search stores its full result list under a random token; the
+ * Short-lived in-memory store for paginated search results. Each /play
+ * keyword search stores its full result list under a random token; the
  * page buttons and select menu reference the token in their customIds.
  */
 

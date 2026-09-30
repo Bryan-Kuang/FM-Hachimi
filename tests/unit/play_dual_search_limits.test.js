@@ -8,6 +8,7 @@ jest.mock("discord.js", () => ({
           setName: jest.fn().mockReturnThis(),
           setDescription: jest.fn().mockReturnThis(),
           setRequired: jest.fn().mockReturnThis(),
+          addChoices: jest.fn().mockReturnThis(),
         });
         return builder;
       }),
@@ -16,6 +17,7 @@ jest.mock("discord.js", () => ({
           setName: jest.fn().mockReturnThis(),
           setDescription: jest.fn().mockReturnThis(),
           setRequired: jest.fn().mockReturnThis(),
+          addChoices: jest.fn().mockReturnThis(),
         });
         return builder;
       }),

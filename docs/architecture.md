@@ -1,25 +1,24 @@
 # Architecture
 
 Visual map of F.M. Hachimi. For operations (deploying, cookies, incidents) see
-[`OPERATIONS.md`](../OPERATIONS.md); for the testing-command system see
-[`testing-features.md`](testing-features.md).
+[`OPERATIONS.md`](../OPERATIONS.md). Commands register globally; automated
+regression tests cover the retained playback and recovery paths.
 
 ## Module map
 
-One node per `src/` directory. Arrows point in the direction of calls.
+Main `src/` components. Arrows point in the direction of calls.
 
 ```mermaid
 graph TD
     subgraph Discord glue
-        commands["bot/commands<br/>(17 slash commands)"]
+        commands["bot/commands<br/>(13 slash commands)"]
         events["bot/events<br/>(buttons, select menus)"]
         client["bot/client"]
     end
 
     subgraph Features
-        services["services<br/>(player, radio, daily hachimi, annoying)"]
+        services["services<br/>(player, radio, daily hachimi, annoying, recovery)"]
         search["search<br/>(keyword search + interleave)"]
-        playlists["playlists<br/>(bulk enqueue resolvers)"]
     end
 
     subgraph Playback engine
@@ -43,7 +42,6 @@ graph TD
     client --> events
     commands --> playback
     commands --> search
-    commands --> playlists
     commands --> ui
     events --> ui
     events --> playback
@@ -52,7 +50,6 @@ graph TD
     session -->|guild state, resume| playback
     ui -->|now-playing updates| session
 
-    playback --> playlists
     playback --> audio
     playback -->|pre-extraction| bilibili
     playback -->|pre-extraction| youtube
@@ -67,7 +64,7 @@ graph TD
 
 Cross-cutting (used everywhere, omitted from the graph): `config/` (env-validated
 settings), `utils/` (formatters, locks, URL routing), `observability/` (metrics +
-`/healthz` server on `127.0.0.1:9090`), `models/` + `types.ts` (shared types),
+`/healthz`, `/readyz`, `/metrics`; host binding `127.0.0.1:9090`), `models/` + `types.ts` (shared types),
 `services/logger_service` (winston).
 
 ## Playback data flow
@@ -76,6 +73,7 @@ settings), `utils/` (formatters, locks, URL routing), `observability/` (metrics 
 sequenceDiagram
     actor U as User
     participant C as /play command
+    participant S as Search service + result menu
     participant P as Playback coordinator
     participant X as Extractor (bilibili/ or youtube/)
     participant M as Media cache
@@ -83,7 +81,14 @@ sequenceDiagram
     participant D as Discord voice
 
     U->>C: /play <url or keywords>
-    C->>P: route URL (utils/url_router) + enqueue
+    alt keywords
+        C->>S: search Bilibili and YouTube, interleave results
+        S-->>U: paginated results
+        U->>S: select a video
+        S->>P: play selected video URL
+    else single-video URL
+        C->>P: play normalized URL (utils/url_router)
+    end
     P->>X: resolve audio for URL
     X->>M: cached?
     alt cache hit
@@ -96,6 +101,16 @@ sequenceDiagram
     A-->>U: now-playing card (ui/)
 ```
 
+`/play` has only one required parameter, `query`. A Bilibili part link keeps
+its explicit part; a YouTube watch link with a playlist parameter plays only
+the selected video. Bulk imports and attachments are unsupported.
+
+Normal playback adds the selected video to the queue. During radio, `/play`
+and daily-recommendation clicks interject immediately via `RadioService.playNow`,
+then rotation resumes. Radio prefetches the next track and inserts a mandatory
+break after the interval elapses and the current song ends naturally. Playback
+requests and skipping are refused during the break.
+
 The cache is two independent LRU stores (`cache/bilibili/`, `cache/youtube/`),
 each capped by entry count and total bytes with its own `index.json`
 (`src/audio/media_cache.ts`; caps in `src/config/config.ts`).
@@ -107,9 +122,10 @@ flowchart LR
     push["push to main"] --> check["check<br/>lint · typecheck · test · build"]
     check --> image["image<br/>build + push GHCR<br/>latest + commit SHA"]
     image --> deploy["deploy<br/>SSH to VPS<br/>remote-deploy.sh:<br/>pull · up -d · health poll"]
-    deploy --> cmds["deploy-commands<br/>register global slash commands"]
+    deploy -->|push only| cmds["deploy-commands<br/>register global slash commands"]
 
-    cron["Mon 20:00 UTC cron"] -->|--no-cache rebuild<br/>fresh yt-dlp| image
+    cron["Mon 20:00 UTC cron<br/>image rebuild without cache"] --> check
+    manual["manual dispatch"] --> commandOnly["register global commands<br/>or clear old guild commands"]
     cookie["cookie-health.yml<br/>every 6h"] -->|stale > 13h| hook
     deploy -->|failure| hook["Discord webhook alert"]
 
@@ -120,6 +136,24 @@ flowchart LR
 - The VPS pulls the **exact SHA-tagged image CI tested** — it never rebuilds.
 - Full runbook: [`OPERATIONS.md`](../OPERATIONS.md).
 
+## Recovery and runtime state
+
+The Compose stack contains the bot plus the YouTube PO-token sidecar on `botnet`.
+Host mounts preserve `data/`, `secrets/` and both `cache/` stores; the dedicated
+Chrome profile is mounted read-only for cookie export.
+
+`ResumeService` snapshots playback and idle voice presence periodically and on
+shutdown. `VoiceRecoveryService` (`src/services/voice_recovery_service.ts`) verifies intended membership against Discord,
+serializes per-guild reconstruction, retries transient failures and cancels stale
+work after user actions. Annoying mode applies audit-log exemptions before
+requesting recovery; its armed flags persist independently of resume snapshots.
+
+`/healthz` reports process liveness. `/readyz` reports gateway and voice readiness;
+Docker uses this endpoint. `/metrics` returns JSON counters and gauges. The gateway
+watchdog handles prolonged gateway outages, while voice recovery works per guild.
+Existing error webhooks report runtime failures. Cloud repair tooling is outside
+this repository's current scope.
+
 ## Directory guide
 
 | Directory | Responsibility |
@@ -127,17 +161,16 @@ flowchart LR
 | `src/bot/commands/` | Slash command definitions (one file per command; registry in `index.ts`) |
 | `src/bot/events/` | Interaction routing: buttons, select menus |
 | `src/bot/client.ts` | Discord client wiring |
-| `src/services/` | Feature services: player facade, radio rotation, daily hachimi cron, annoying mode, logger |
-| `src/session/` | Per-guild voice session state, audio manager, resume-after-deploy |
-| `src/playback/` | Coordinators between session and audio: playlist flow, pre-extraction |
+| `src/services/` | Feature services: player facade, radio rotation, daily hachimi cron, annoying mode, voice recovery, logger |
+| `src/session/` | Per-guild voice state, audio manager and resume |
+| `src/playback/` | Coordinators between session and audio: single-video playback, pre-extraction |
 | `src/audio/` | Playback engine: ffmpeg/opus player, media cache (LRU), queue, CDN retry |
 | `src/bilibili/` | Bilibili metadata + audio extraction (adapter over `@bryan-kuang/bilibili-audio-extractor`) |
 | `src/youtube/` | YouTube extraction via yt-dlp + cookie refresh (adapter over `ytdlp-cookie-keeper`) |
 | `src/search/` | Keyword search across platforms, result interleaving, session store |
-| `src/playlists/` | Playlist URL resolvers for bulk enqueue |
 | `src/ui/` | Embeds, button rows, progress bars, search result views |
 | `src/config/` | Env parsing + validation, all tunables |
-| `src/observability/` | Metrics registry + loopback HTTP server (`/healthz`, `/metrics`) |
+| `src/observability/` | Metrics registry + health HTTP server (`/healthz`, `/readyz`, `/metrics`) |
 | `src/utils/` | Small shared helpers (formatting, locks, URL routing, history) |
 | `src/models/`, `src/types.ts` | Shared domain types |
 

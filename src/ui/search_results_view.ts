@@ -1,13 +1,9 @@
 /**
  * Search Results View
- * Renders paginated search results as a compact two-column embed: plain
- * `1.`-`N.` numbering over consecutive entries, 10 per page (`RESULTS_PER_PAGE`
- * rows × 2 columns). Single-platform searches (`/search`) and the dual-platform
- * interleaved keyword search (`/play`, mode `'mixed'`) share this layout — the
- * caller decides ordering (interleaved or not) before the entries land here.
- * A select menu over the *current page's* entries and page buttons sit below
- * the embed. Shared by /search, /play keyword search, and the page-button
- * handler.
+ * Renders paginated results as a two-column embed, 10 entries per page.
+ * The /play command interleaves Bilibili and YouTube keyword results before
+ * passing them to this view. A select menu over the current page's entries
+ * and page buttons sit below the embed. Shared by /play and the page handler.
  */
 
 import {

@@ -11,41 +11,25 @@ const { REST, Routes } = require("discord.js");
 const config = require("../src/config/config");
 const logger = require("../src/services/logger_service");
 const CommandRegistry = require("../src/bot/commands");
-const TestingAccess = require("../src/bot/testing_access");
 
 function toCommandData(commands) {
   return commands.map((command) => command.data.toJSON());
 }
 
 function createDeploymentPlan(env = process.env) {
-  const deployTesting = env.DEPLOY_TEST_COMMANDS === "true";
   const clear = env.CLEAR_GUILD_COMMANDS === "true";
-
-  if (deployTesting) {
-    if (!TestingAccess.TEST_GUILD_ID) {
-      throw new Error(
-        "TEST_GUILD_ID is required when DEPLOY_TEST_COMMANDS=true (no hardcoded fallback)"
-      );
-    }
-    const commands = clear ? [] : CommandRegistry.getGuildCommandsForTestServer(null, null);
-    return {
-      scope: "test_guild",
-      guildId: TestingAccess.TEST_GUILD_ID,
-      clear,
-      commandData: toCommandData(commands),
-    };
-  }
 
   // Guild-scoped *deploys* were removed on purpose: they duplicate the global
   // command set inside one guild. Clearing stays — it is the remediation tool
   // for exactly that duplicate mess.
   if (clear) {
-    if (!config.discord.guildId) {
+    const guildId = env.GUILD_ID || config.discord.guildId;
+    if (!guildId) {
       throw new Error("GUILD_ID is required when CLEAR_GUILD_COMMANDS=true");
     }
     return {
       scope: "guild_clear",
-      guildId: config.discord.guildId,
+      guildId,
       clear: true,
       commandData: [],
     };
@@ -55,7 +39,7 @@ function createDeploymentPlan(env = process.env) {
     scope: "global",
     guildId: null,
     clear: false,
-    commandData: toCommandData(CommandRegistry.getGlobalCommands(null, null)),
+    commandData: toCommandData(CommandRegistry.createCommands(null, null)),
   };
 }
 
@@ -99,33 +83,11 @@ async function deployCommands() {
       return;
     }
 
-    if (plan.guildId) {
-      logger.info("Deploying guild-scoped commands", {
-        scope: plan.scope,
-        guildId: plan.guildId,
-      });
-
-      await rest.put(
-        Routes.applicationGuildCommands(
-          config.discord.clientId,
-          plan.guildId
-        ),
-        { body: commandData }
-      );
-
-      logger.info("Successfully deployed guild commands", {
-        scope: plan.scope,
-        guildId: plan.guildId,
-      });
-    } else {
-      logger.info("Deploying stable commands globally");
-
-      await rest.put(Routes.applicationCommands(config.discord.clientId), {
-        body: commandData,
-      });
-
-      logger.info("Successfully deployed global stable commands");
-    }
+    logger.info("Deploying commands globally");
+    await rest.put(Routes.applicationCommands(config.discord.clientId), {
+      body: commandData,
+    });
+    logger.info("Successfully deployed global commands");
 
     // Log deployed commands
     commandData.forEach((command) => {

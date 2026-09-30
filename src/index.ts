@@ -136,7 +136,6 @@ class BilibiliDiscordBot {
         progressTracker,
         extractor,
         youtubeExtractor,
-        historyStore,
         preExtractionService,
       });
 

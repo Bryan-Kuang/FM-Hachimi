@@ -11,7 +11,6 @@ interface SearchVideo {
   uploader?: string;
   view?: number;
   viewCount?: number;
-  [key: string]: unknown;
 }
 
 interface SearchResponseShape {
@@ -20,21 +19,7 @@ interface SearchResponseShape {
 }
 
 interface SearcherLike {
-  searchVideos: (...args: unknown[]) => Promise<SearchResponseShape | SearchVideo[]>;
-}
-
-interface SearchOptions {
-  keyword: string;
-  limit: number;
-  extractor?: SearcherLike | null;
-  bilibiliApi?: SearcherLike | null;
-  source?: 'extractor' | 'api';
-}
-
-interface YouTubeSearchOptions {
-  keyword: string;
-  limit: number;
-  youtubeExtractor?: SearcherLike | null;
+  searchVideos: (keyword: string, ...args: number[]) => Promise<SearchResponseShape | SearchVideo[]>;
 }
 
 interface DualSearchOptions {
@@ -66,42 +51,7 @@ function normalizeBilibiliResult(result: SearchVideo): SearchVideo {
 }
 
 function rankAndLimit(results: SearchVideo[], keyword: string, limit: number): SearchVideo[] {
-  return SearchRanker.rankAndLimitSearchResults(results, keyword, limit) as SearchVideo[];
-}
-
-async function searchBilibili({
-  keyword,
-  limit,
-  extractor,
-  bilibiliApi,
-  source = 'extractor',
-}: SearchOptions): Promise<SearchVideo[]> {
-  try {
-    const response = source === 'api'
-      ? await bilibiliApi?.searchVideos(keyword, 1, limit)
-      : await extractor?.searchVideos(keyword, limit);
-    const normalized = responseToArray(response).map(normalizeBilibiliResult);
-    return rankAndLimit(normalized, keyword, limit);
-  } catch (error: unknown) {
-    logger.warn('Bilibili search failed', { keyword, source, error: (error as Error)?.message });
-    return [];
-  }
-}
-
-async function searchYouTube({
-  keyword,
-  limit,
-  youtubeExtractor,
-}: YouTubeSearchOptions): Promise<SearchVideo[]> {
-  try {
-    const response = await youtubeExtractor?.searchVideos(keyword, limit);
-    return rankAndLimit(responseToArray(response), keyword, limit);
-  } catch (error: unknown) {
-    // Swallowing this silently is why the 2026-08-08 outage presented as
-    // "YouTube results just disappeared" with nothing in the logs to chase.
-    logger.warn('YouTube search failed', { keyword, error: (error as Error)?.message });
-    return [];
-  }
+  return SearchRanker.rankAndLimitSearchResults(results, keyword, limit);
 }
 
 /**
@@ -139,9 +89,5 @@ async function searchDualPlatforms({
 }
 
 export = {
-  normalizeBilibiliResult,
-  responseToArray,
-  searchBilibili,
-  searchYouTube,
   searchDualPlatforms,
 };

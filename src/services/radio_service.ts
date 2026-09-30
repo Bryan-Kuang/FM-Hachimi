@@ -2,10 +2,9 @@
  * RadioService
  * Endless "radio" playback of random 哈基米 (Hachimi) tracks.
  *
- * Unlike /hachimi (which queues a fixed batch that then loops), radio behaves
- * like a live station: the visible queue holds only the current track, and the
- * NEXT track is pre-extracted into a hidden per-guild on-deck slot for gapless
- * transitions. The on-deck track is deliberately kept OUT of Queue.items so the
+ * Radio behaves like a live station: the visible queue holds only the current
+ * track. The next track is pre-extracted into a hidden per-guild on-deck slot
+ * for gapless transitions. The on-deck track is deliberately kept OUT of Queue.items so the
  * now-playing card never reveals how many songs are buffered.
  *
  * Advancement is driven by AudioPlayer.advanceHook: when a radio track ends (or

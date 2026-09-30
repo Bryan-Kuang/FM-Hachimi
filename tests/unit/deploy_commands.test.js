@@ -1,3 +1,5 @@
+jest.mock('../../src/services/logger_service', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));
+
 function makeCommand(name, description) {
   return {
     data: {
@@ -7,7 +9,7 @@ function makeCommand(name, description) {
   };
 }
 
-function loadDeployCommands({ testGuildId = "1376318047794761838" } = {}) {
+function loadDeployCommands() {
   jest.resetModules();
 
   // scripts/deploy-commands.js registers ts-node so a plain `node` invocation can
@@ -18,7 +20,6 @@ function loadDeployCommands({ testGuildId = "1376318047794761838" } = {}) {
   jest.doMock("ts-node", () => ({ register: jest.fn() }));
 
   const stableCommand = makeCommand("play", "Play music");
-  const testingCommand = makeCommand("experiment", "[Testing] Try experiment");
 
   jest.doMock("discord.js", () => ({
     REST: jest.fn().mockImplementation(() => ({
@@ -37,15 +38,10 @@ function loadDeployCommands({ testGuildId = "1376318047794761838" } = {}) {
       clientId: "client-id",
       guildId: "legacy-guild",
     },
-    test: {
-      guildId: testGuildId,
-    },
   }));
 
   jest.doMock("../../src/bot/commands", () => ({
-    createCommands: jest.fn(() => [stableCommand, testingCommand]),
-    getGlobalCommands: jest.fn(() => [stableCommand]),
-    getGuildCommandsForTestServer: jest.fn(() => [testingCommand]),
+    createCommands: jest.fn(() => [stableCommand]),
   }));
 
   return require("../../scripts/deploy-commands");
@@ -59,7 +55,7 @@ describe("deploy command payload selection", () => {
     jest.dontMock("../../src/bot/commands");
   });
 
-  test("default deploy targets global stable commands only", () => {
+  test("default deploy targets global commands", () => {
     const { createDeploymentPlan } = loadDeployCommands();
 
     const plan = createDeploymentPlan({});
@@ -69,39 +65,7 @@ describe("deploy command payload selection", () => {
     expect(plan.commandData.map((command) => command.name)).toEqual(["play"]);
   });
 
-  test("test deploy targets testing commands in the test guild only", () => {
-    const { createDeploymentPlan } = loadDeployCommands();
-
-    const plan = createDeploymentPlan({ DEPLOY_TEST_COMMANDS: "true" });
-
-    expect(plan.scope).toBe("test_guild");
-    expect(plan.guildId).toBe("1376318047794761838");
-    expect(plan.commandData.map((command) => command.name)).toEqual(["experiment"]);
-  });
-
-  test("test deploy fails fast when TEST_GUILD_ID is not configured", () => {
-    const { createDeploymentPlan } = loadDeployCommands({ testGuildId: "" });
-
-    expect(() => createDeploymentPlan({ DEPLOY_TEST_COMMANDS: "true" })).toThrow(
-      /TEST_GUILD_ID is required/
-    );
-  });
-
-  test("clear mode for test deploy targets the test guild", () => {
-    const { createDeploymentPlan } = loadDeployCommands();
-
-    const plan = createDeploymentPlan({
-      DEPLOY_TEST_COMMANDS: "true",
-      CLEAR_GUILD_COMMANDS: "true",
-    });
-
-    expect(plan.clear).toBe(true);
-    expect(plan.scope).toBe("test_guild");
-    expect(plan.guildId).toBe("1376318047794761838");
-    expect(plan.commandData).toEqual([]);
-  });
-
-  test("clear mode without test flag clears the configured guild and deploys nothing", () => {
+  test("clear mode clears the configured guild and deploys nothing", () => {
     const { createDeploymentPlan } = loadDeployCommands();
 
     const plan = createDeploymentPlan({ CLEAR_GUILD_COMMANDS: "true" });
@@ -110,5 +74,31 @@ describe("deploy command payload selection", () => {
     expect(plan.guildId).toBe("legacy-guild");
     expect(plan.clear).toBe(true);
     expect(plan.commandData).toEqual([]);
+  });
+
+  test("explicit cleanup can target a former test guild without testing configuration", () => {
+    const { createDeploymentPlan } = loadDeployCommands();
+    const plan = createDeploymentPlan({ CLEAR_GUILD_COMMANDS: 'true', GUILD_ID: 'former-test-guild' });
+    expect(plan).toMatchObject({ scope: 'guild_clear', guildId: 'former-test-guild', commandData: [] });
+  });
+
+  test.each([
+    [false, 'global:client-id', [{ name: 'play', description: 'Play music' }]],
+    [true, 'guild:client-id:former-test-guild', []],
+  ])('sends the correct REST payload (guild cleanup: %s)', async (clear, route, body) => {
+    const originalEnv = process.env;
+    process.env = { ...originalEnv, CLEAR_GUILD_COMMANDS: clear ? 'true' : '', GUILD_ID: 'former-test-guild' };
+    const exit = jest.spyOn(process, 'exit').mockImplementation(code => { throw new Error(`Unexpected exit ${code}`); });
+    try {
+      const { deployCommands } = loadDeployCommands();
+      const { REST } = require('discord.js');
+      await deployCommands();
+      const rest = REST.mock.results[0].value;
+      expect(rest.put).toHaveBeenCalledTimes(1);
+      expect(rest.put).toHaveBeenCalledWith(route, { body });
+    } finally {
+      exit.mockRestore();
+      process.env = originalEnv;
+    }
   });
 });

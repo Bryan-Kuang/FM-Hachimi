@@ -76,10 +76,10 @@ describe("SearchService", () => {
       searchVideos: jest.fn().mockResolvedValue([{ title: "hachimi", bvid: "BV2" }]),
     };
 
-    await expect(SearchService.searchBilibili({ keyword: "hachimi", limit: 5, extractor }))
-      .resolves.toEqual([expect.objectContaining({ id: "BV1" })]);
-    await expect(SearchService.searchBilibili({ keyword: "hachimi", limit: 5, bilibiliApi: api, source: "api" }))
-      .resolves.toEqual([expect.objectContaining({ bvid: "BV2" })]);
+    await expect(SearchService.searchDualPlatforms({ keyword: "hachimi", limitPerPlatform: 5, bilibiliApi: extractor }))
+      .resolves.toMatchObject({ bilibili: [expect.objectContaining({ id: "BV1" })] });
+    await expect(SearchService.searchDualPlatforms({ keyword: "hachimi", limitPerPlatform: 5, bilibiliApi: api }))
+      .resolves.toMatchObject({ bilibili: [expect.objectContaining({ bvid: "BV2" })] });
   });
 
   test("Bilibili and YouTube failures fall back to [] independently (Promise.allSettled) and log a warning", async () => {

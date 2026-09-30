@@ -112,7 +112,7 @@ describe("YouTubeExtractor extraction cache behavior", () => {
 
     const background = extractor.extractAudio(
       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      { priority: "background", source: "search_command" },
+      { priority: "background", source: "play_search" },
     );
     await Promise.resolve();
     const foreground = extractor.extractAudio(
