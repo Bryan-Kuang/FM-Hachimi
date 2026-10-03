@@ -14,6 +14,10 @@ jest.mock("../../src/services/logger_service", () => ({
 }));
 
 const AudioPlayer = require("../../src/audio/audio_player");
+const { spawn } = require("child_process");
+const { EventEmitter } = require("events");
+const { PassThrough } = require("stream");
+const logger = require("../../src/services/logger_service");
 
 describe("regression: CDN retry coordination", () => {
   let player;
@@ -24,7 +28,37 @@ describe("regression: CDN retry coordination", () => {
     player.retryCurrentTrack = jest.fn();
   });
 
-  afterEach(() => jest.clearAllTimers());
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  test("FFmpeg timeout 146 retries an interrupted track instead of advancing it", async () => {
+    jest.useFakeTimers();
+    require("@discordjs/voice").StreamType = { Raw: "raw" };
+    const proc = new EventEmitter();
+    proc.stdout = new PassThrough();
+    proc.stderr = new PassThrough();
+    proc.stdin = new PassThrough();
+    proc.kill = jest.fn();
+    spawn.mockReturnValue(proc);
+    player._ffmpegChecked = true;
+    player.currentTrack = { title: "t", duration: 300, resetRetry: jest.fn() };
+    player._accumulatedPlayMs = 10000;
+
+    await player.createAudioResource("https://upos-sz-mirrorcosov.bilivideo.com/audio.m4s");
+    proc.stderr.emit("data", Buffer.from(
+      "Connection to tcp://upos-sz-mirrorcosov.bilivideo.com:443 failed: Operation timed out\nError opening input: Operation timed out",
+    ));
+    proc.emit("close", 146);
+    player._handleIdle();
+
+    expect(player.retryCurrentTrack).toHaveBeenCalledTimes(1);
+    expect(player.handleTrackEnd).not.toHaveBeenCalled();
+    expect(logger.error).not.toHaveBeenCalledWith(
+      "FFmpeg process exited with error", expect.anything(),
+    );
+  });
 
   test("Idle with _cdnRetryPending=true calls retryCurrentTrack, not handleTrackEnd", () => {
     player.currentTrack = { title: "t", duration: 300, resetRetry: jest.fn() };

@@ -15,7 +15,7 @@ interface CdnRetryConfig {
 }
 
 export function isCdnFailure(code: number, stderr: string): boolean {
-  const retryableCodes = new Set([255, 8, 251]);
+  const retryableCodes = new Set([255, 8, 251, 146]);
   if (!retryableCodes.has(code)) return false;
   const cdnPatterns = [
     /End of file/i,
@@ -24,6 +24,7 @@ export function isCdnFailure(code: number, stderr: string): boolean {
     /Connection reset/i,
     /Connection refused/i,
     /Connection timed out/i,
+    /Operation timed out/i,
     /I\/O error/i,
     /HTTP error/i,
     /403 Forbidden/i,
