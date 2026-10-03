@@ -29,6 +29,7 @@ describe("cdn_retry.isCdnFailure", () => {
       [8, "[https @ 0x7a1] HTTP error 403 Forbidden"],
       [8, "Server returned 403 Forbidden (access denied)"],
       [251, "[tls @ 0x7c2] Unknown error\nError opening input: I/O error"],
+      [146, "[tcp @ 0x1] Connection to tcp://upos-sz-mirrorcosov.bilivideo.com:443 failed: Operation timed out\nError opening input: Operation timed out"],
     ];
     test.each(retryableCases)("code=%i stderr=%j → true", (code, stderr) => {
       expect(isCdnFailure(code, stderr)).toBe(true);
@@ -45,6 +46,8 @@ describe("cdn_retry.isCdnFailure", () => {
       [255, "Invalid data found when processing input"],
       [255, ""],
       [8, "Invalid argument"],
+      [146, "Invalid data found when processing input"],
+      [143, "Operation timed out"],
     ];
     test.each(nonRetryableCases)(
       "code=%i stderr=%j → false",

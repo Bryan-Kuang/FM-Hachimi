@@ -703,7 +703,7 @@ class AudioPlayer {
               '-reconnect_delay_max', '5',
               '-rw_timeout', '30000000',
               '-timeout', '30000000',
-              '-headers', 'Connection: keep-alive',
+              '-headers', 'Connection: keep-alive\r\n',
             ]
           : [];
 
