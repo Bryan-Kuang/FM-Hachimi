@@ -108,6 +108,7 @@ interface ExtractionOptions {
 interface NativeExtractionPayload {
   metadata: VideoMetadata;
   audioUrl: string;
+  backupAudioUrls?: string[];
   selectedFormat: SelectedFormatMetadata;
   timing: {
     metadataApiMs: number;
@@ -338,16 +339,7 @@ class BilibiliExtractor {
           const nativePayload = await this.nativeExtractor.extract(normalizedUrl);
           const result = this.createExtractedAudioFromNativePayload(url, normalizedUrl, nativePayload);
 
-          // The native path talks to Bilibili's playurl API, which can hand
-          // back a CDN link that refuses the actual request. Confirm the URL
-          // serves bytes before committing it; a dead one falls through to the
-          // yt-dlp path below rather than reaching FFmpeg.
-          if (!await streamProbe.probeOrWarn(result.audioUrl, result.streamHeaders, {
-            platform: 'bilibili:native',
-            sourceUrl: normalizedUrl,
-          })) {
-            throw new Error('native stream URL failed reachability probe');
-          }
+          result.audioUrl = await this.selectPlayableNativeUrl(nativePayload, normalizedUrl);
 
           this.extractionCache.set(normalizedUrl, result);
           // Fire-and-forget: download the audio so future plays hit the local
@@ -477,6 +469,25 @@ class BilibiliExtractor {
 
       throw new Error(`Audio extraction failed: ${(error as Error).message}`);
     }
+  }
+
+  private async selectPlayableNativeUrl(payload: NativeExtractionPayload, sourceUrl: string): Promise<string> {
+    const candidates = [...new Set([payload.audioUrl, ...(payload.backupAudioUrls ?? [])])];
+    for (const audioUrl of candidates) {
+      if (await streamProbe.probeOrWarn(audioUrl, {
+        referer: 'https://www.bilibili.com/',
+        userAgent: this.userAgent,
+      }, { platform: 'bilibili:native', sourceUrl })) {
+        if (audioUrl !== payload.audioUrl) {
+          logger.info('Bilibili backup CDN selected', {
+            url: sourceUrl,
+            host: new URL(audioUrl).hostname,
+          });
+        }
+        return audioUrl;
+      }
+    }
+    throw new Error('native stream URL failed reachability probe');
   }
 
   /**
@@ -804,13 +815,14 @@ class BilibiliExtractor {
     } else if (config.bilibili.nativeExtractorEnabled) {
       try {
         const nativePayload = await this.nativeExtractor.extract(normalizedUrl);
+        const audioUrl = await this.selectPlayableNativeUrl(nativePayload, normalizedUrl);
         logger.info("Bilibili native stream URL refresh completed", {
           url: normalizedUrl,
           method: 'native',
           formatId: nativePayload.selectedFormat.formatId,
           protocol: nativePayload.selectedFormat.protocol,
         });
-        return nativePayload.audioUrl;
+        return audioUrl;
       } catch (nativeError: unknown) {
         logger.warn("Bilibili native stream URL refresh failed; falling back to yt-dlp", {
           url: normalizedUrl,

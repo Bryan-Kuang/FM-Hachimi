@@ -15,6 +15,7 @@ const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 const logger = require("../../src/services/logger_service");
+const axios = require("axios");
 const BilibiliExtractor = require("../../src/bilibili/extractor");
 const NativeBilibiliExtractor = require("../../src/bilibili/native_extractor");
 
@@ -114,6 +115,7 @@ describe("Bilibili native extractor", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    axios.get.mockResolvedValue({ status: 206, data: { destroy: jest.fn() } });
     extractor = new BilibiliExtractor();
   });
 
@@ -162,6 +164,115 @@ describe("Bilibili native extractor", () => {
     const result = await extractor.extractAudio(VIDEO_URL);
 
     expect(result.duration).toBe(149); // the played part, not 1272
+  });
+
+  const primary = "https://upos-sz-mirrorcosov.bilivideo.com/high.m4s?token=primary";
+  const backup = "https://upos-hz-mirrorakam.akamaized.net/high.m4s?token=a%2Bb&expires=123";
+
+  function mockCdnAlternatives() {
+    mockNativeResponses({ audio: [
+      { id: 30216, baseUrl: "https://low.example.com/low.m4s", bandwidth: 64000,
+        codecs: "mp4a.40.2", backupUrl: ["https://low.example.com/backup.m4s"] },
+      { id: 30280, baseUrl: primary, bandwidth: 128000, codecs: "mp4a.40.2",
+        backupUrl: [primary, "file:///invalid.m4s", backup, backup] },
+    ] });
+    axios.get.mockImplementation(async url => {
+      if (url !== backup) throw new Error("timeout of 2000ms exceeded");
+      return { status: 206, data: { destroy: jest.fn() } };
+    });
+  }
+
+  test("plays and caches the selected format's signed backup after primary CDN timeout", async () => {
+    mockCdnAlternatives();
+    mockYtDlpFallback();
+    extractor._ytdlpChecked = true;
+    const mediaCache = { getEntry: () => null, put: jest.fn() };
+    extractor.setMediaCache(mediaCache);
+
+    const result = await extractor.extractAudio(VIDEO_URL);
+
+    expect(result.audioUrl).toBe(backup);
+    expect(result.extractionMethod).toBe("native");
+    expect(result.formatId).toBe("30280");
+    expect(mediaCache.put).toHaveBeenCalledWith(VIDEO_URL, backup, result.streamHeaders, result);
+    expect((await extractor.extractAudio(VIDEO_URL)).audioUrl).toBe(backup);
+    expect(axios.get.mock.calls.map(call => call[0])).toEqual([primary, backup]);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test("refreshes a failed stream to a reachable backup without yt-dlp", async () => {
+    mockCdnAlternatives();
+    expect(await extractor.getAudioStreamUrl(VIDEO_URL)).toBe(backup);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test("tries the second backup when the primary and first backup fail", async () => {
+    mockNativeResponses({ audio: [{ id: 30280, base_url: primary, bandwidth: 128000,
+      codecs: "mp4a.40.2", backup_url: ["https://first.example.com/audio.m4s", backup] }] });
+    axios.get.mockImplementation(async url => {
+      if (url !== backup) return { status: 403, data: { destroy: jest.fn() } };
+      return { status: 206, data: { destroy: jest.fn() } };
+    });
+    mockYtDlpFallback();
+    extractor._ytdlpChecked = true;
+    expect((await extractor.extractAudio(VIDEO_URL)).audioUrl).toBe(backup);
+    expect(axios.get.mock.calls.map(call => call[0])).toEqual([
+      primary, "https://first.example.com/audio.m4s", backup,
+    ]);
+  });
+
+  test("retains yt-dlp fallback when every native CDN candidate fails", async () => {
+    mockCdnAlternatives();
+    axios.get.mockImplementation(async url => ({
+      status: url.includes("fallback.example.com") ? 206 : 403,
+      data: { destroy: jest.fn() },
+    }));
+    mockYtDlpFallback();
+    extractor._ytdlpChecked = true;
+    const result = await extractor.extractAudio(VIDEO_URL);
+    expect(result.extractionMethod).toBe("ytdlp_fallback");
+    expect(result.audioUrl).toBe("https://fallback.example.com/audio.m4a");
+    expect(axios.get.mock.calls.map(call => call[0])).toEqual([
+      primary, backup, "https://fallback.example.com/audio.m4a",
+    ]);
+  });
+
+  test("concurrent videos retain only their own selected format's backups", async () => {
+    mockNativeResponses();
+    const baseFetch = global.fetch;
+    global.fetch = jest.fn(async (url, init) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/x/player/wbi/playurl") {
+        const id = parsed.searchParams.get("bvid");
+        if (id === "BV1xx411c7BF") await new Promise(resolve => setImmediate(resolve));
+        return jsonResponse({ code: 0, data: { dash: { audio: [{
+          id: 30280, baseUrl: `https://primary.example.com/${id}.m4s`,
+          backupUrl: [`https://backup.example.com/${id}.m4s`],
+          codecs: "mp4a.40.2", bandwidth: 128000,
+        }] } } });
+      }
+      return baseFetch(url, init);
+    });
+    const native = new NativeBilibiliExtractor({ userAgent: "Test UA" });
+    const [first, second] = await Promise.all([
+      native.extract(VIDEO_URL),
+      native.extract("https://www.bilibili.com/video/BV1epbw6TEov"),
+    ]);
+    expect(first.backupAudioUrls).toEqual(["https://backup.example.com/BV1xx411c7BF.m4s"]);
+    expect(second.backupAudioUrls).toEqual(["https://backup.example.com/BV1epbw6TEov.m4s"]);
+  });
+
+  test("recovers a backup-only audio format even when the API omits its format id", async () => {
+    mockNativeResponses({ audio: [{ bandwidth: 128000, codecs: "mp4a.40.2",
+      backupUrl: [primary, backup] }] });
+    axios.get.mockImplementation(async url => ({
+      status: url === backup ? 206 : 403, data: { destroy: jest.fn() },
+    }));
+    mockYtDlpFallback();
+    extractor._ytdlpChecked = true;
+    const result = await extractor.extractAudio(VIDEO_URL);
+    expect(result.audioUrl).toBe(backup);
+    expect(result.extractionMethod).toBe("native");
   });
 
   test("falls back to yt-dlp and emits fallback stage when native extraction finds no audio", async () => {
