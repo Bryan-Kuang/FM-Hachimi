@@ -274,15 +274,16 @@ extract, no network). `src/audio/media_cache.ts`, keyed by video, LRU-evicted by
 entry count **and** total size.
 
 Each platform gets its **own cache dir + budget** (separate subdirs under the same
-`cache/` mount) so neither platform's churn can evict the other's files. Combined
-budget ~1 GB, split evenly:
+`cache/` mount) so neither platform's churn can evict the other's files. Budgets:
+Bilibili 2000 entries / 8 GB (it is also the radio's library, see AGENTS.md), YouTube
+100 entries / 512 MB:
 
 - Dirs: YouTube → `cache/youtube/`, Bilibili → `cache/bilibili/` (each with its own
   `index.json`). Both under the `./cache:/app/cache` mount — no compose change.
 - YouTube env: `YOUTUBE_MEDIA_CACHE_ENABLED` (default true), `YOUTUBE_MEDIA_CACHE_DIR`
   (`/app/cache/youtube`), `YOUTUBE_MEDIA_CACHE_MAX_ENTRIES` (100), `..._MAX_MB` (512).
 - Bilibili env: `BILIBILI_MEDIA_CACHE_ENABLED` (default true), `BILIBILI_MEDIA_CACHE_DIR`
-  (`/app/cache/bilibili`), `BILIBILI_MEDIA_CACHE_MAX_ENTRIES` (100), `..._MAX_MB` (512).
+  (`/app/cache/bilibili`), `BILIBILI_MEDIA_CACHE_MAX_ENTRIES` (2000), `..._MAX_MB` (8192).
 - This is what keeps the fixed radio **break video** fast on repeat plays, and covers
   any replayed Bilibili track (e.g. the daily recommendation).
 - Clear it any time: `rm -rf ~/bilibili-bot/cache/*` (re-downloads on next play).
@@ -292,6 +293,26 @@ budget ~1 GB, split evenly:
   `cache/youtube/`. Old files at the `cache/` root (`cache/index.json`, loose
   `*.m4a`/`*.webm`) are now orphaned — delete the loose root files once:
   `find ~/bilibili-bot/cache -maxdepth 1 -type f -delete` (leaves the two subdirs).
+
+## Radio request budget (Bilibili)
+
+On 2026-10-11 Bilibili started answering the VPS IP with HTTP 412 after the radio had
+been running around the clock at ~5000 Bilibili requests a day. The radio now keeps
+that low:
+
+- 70% of picks come from the Bilibili media cache (the "library"); the rest discover new
+  videos from a per-guild candidate pool filled by one search (`RADIO_LIBRARY_SHARE`,
+  `RADIO_CANDIDATE_POOL_SIZE` / `_MIN_SIZE` / `_MAX_AGE_MS`).
+- When the voice channel has had no humans for 5 minutes, the current song finishes and
+  the bot waits in the channel without fetching; the next person to join resumes it
+  (`RADIO_EMPTY_CHANNEL_HOLD_MS`). Logs: `Radio held: voice channel is empty`,
+  `Radio resumed: a listener joined`.
+- Any 412 logs `Bilibili risk control (HTTP 412); pausing background requests`; for the
+  next 30 minutes the radio plays only from the library (`BILIBILI_RISK_CONTROL_COOLDOWN_MS`).
+- Bilibili API requests are spaced 800 ms + up to 400 ms jitter apart
+  (`BILIBILI_MIN_REQUEST_GAP_MS`, `BILIBILI_REQUEST_JITTER_MS`).
+- `Bilibili daily request count` is logged once per UTC day with totals by kind; the
+  `bilibili_requests_total` metric has the live count.
 
 ## Detecting problems
 

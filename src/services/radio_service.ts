@@ -17,6 +17,7 @@ import * as logger from './logger_service';
 import config = require('../config/config');
 import { RADIO_BREAK_MESSAGE } from '../playback/radio_controls';
 import type { ExtractedTrackData } from './types';
+import * as bilibiliRequestGuard from '../bilibili/request_guard';
 
 const RADIO_REQUESTED_BY = '📻 Radio';
 
@@ -26,6 +27,8 @@ interface VoiceChannelLike {
 
 interface ExtractorLike {
   extractAudio(url: string, options?: any): Promise<ExtractedTrackData>;
+  /** Locally cached Bilibili video URLs, least recently played first. */
+  listCachedVideoUrls?(): string[];
 }
 
 interface PlayerServiceLike {
@@ -48,8 +51,18 @@ interface BilibiliApiLike {
   searchHachimiVideos(
     maxResults: number,
     guildId: string | null,
+    options?: { fillFromHistory?: boolean },
   ): Promise<{ results?: HachimiCandidate[]; failReason?: string }>;
   recordHachimiHistory?(guildId: string, bvid: string): void;
+  hasHachimiHistory?(guildId: string, bvid: string): boolean;
+}
+
+/** Humans in the bot's voice channel for a guild, or null when unknown. */
+type ListenerCounter = (guildId: string) => number | null;
+
+interface CandidatePool {
+  items: HachimiCandidate[];
+  fetchedAt: number;
 }
 
 interface RadioInterlude {
@@ -74,6 +87,12 @@ interface RadioState {
    * consumed by the next advance. The rotation resumes after it ends.
    */
   interlude: RadioInterlude | null;
+  /**
+   * Rotation is held: the channel has been empty, so the last track finished
+   * and nothing new was fetched. The bot stays in the channel; the next human
+   * to arrive resumes the rotation.
+   */
+  holding: boolean;
 }
 
 interface RadioStartResult {
@@ -92,6 +111,10 @@ class RadioService {
   private playerService: PlayerServiceLike;
   private bilibiliApi: BilibiliApiLike;
   private states: Map<string, RadioState>;
+  private pools = new Map<string, CandidatePool>();
+  private emptySince = new Map<string, number>();
+  private listenerCounter: ListenerCounter | null = null;
+  private random: () => number = Math.random;
 
   constructor(
     playerService: PlayerServiceLike,
@@ -101,6 +124,49 @@ class RadioService {
     this.playerService = playerService;
     this.bilibiliApi = bilibiliApi;
     this.states = new Map();
+  }
+
+  /** Wire in how to count humans in the bot's voice channel (composition root). */
+  setListenerCounter(counter: ListenerCounter | null): void {
+    this.listenerCounter = counter;
+  }
+
+  /** Test hook for the library/discovery coin flip. */
+  setRandom(random: () => number): void {
+    this.random = random;
+  }
+
+  /**
+   * Called on every voice state change in a guild. Tracks when the bot's
+   * channel became empty, and resumes a held rotation when someone arrives.
+   */
+  async noteVoiceActivity(guildId: string): Promise<void> {
+    const listeners = this.listenerCounter?.(guildId) ?? null;
+    if (listeners === null) return;
+    if (listeners === 0) {
+      if (!this.emptySince.has(guildId)) this.emptySince.set(guildId, Date.now());
+      return;
+    }
+
+    this.emptySince.delete(guildId);
+    const state = this.states.get(guildId);
+    if (!state?.enabled || !state.holding) return;
+    state.holding = false;
+    logger.info('Radio resumed: a listener joined', { guildId });
+    await this.advanceNormal(guildId);
+  }
+
+  /** True when the bot's channel has had no humans for the hold threshold. */
+  private shouldHold(guildId: string): boolean {
+    const listeners = this.listenerCounter?.(guildId) ?? null;
+    if (listeners === null) return false;
+    if (listeners > 0) {
+      this.emptySince.delete(guildId);
+      return false;
+    }
+    const now = Date.now();
+    if (!this.emptySince.has(guildId)) this.emptySince.set(guildId, now);
+    return now - this.emptySince.get(guildId)! >= config.radio.emptyChannelHoldMs;
   }
 
   isEnabled(guildId: string): boolean {
@@ -128,6 +194,7 @@ class RadioService {
         nextBreakAt: 0,
         breakPlaying: false,
         interlude: null,
+        holding: false,
       };
       this.states.set(guildId, state);
     }
@@ -181,6 +248,7 @@ class RadioService {
     state.onDeckPromise = null;
     state.breakPlaying = false;
     state.interlude = null;
+    state.holding = false;
     state.nextBreakAt = Date.now() + this.breakIntervalMs();
 
     // Take over advancement and disable looping so old tracks are never repeated.
@@ -236,6 +304,7 @@ class RadioService {
     state.onDeckPromise = null;
     state.breakPlaying = false;
     state.interlude = null;
+    state.holding = false;
     state.nextBreakAt = Date.now() + this.breakIntervalMs();
 
     player.advanceHook = (reason: 'ended' | 'user') => this.handleAdvance(guildId, reason);
@@ -268,6 +337,8 @@ class RadioService {
     state.onDeckPromise = null;
     state.breakPlaying = false;
     state.interlude = null;
+    state.holding = false;
+    this.pools.delete(guildId);
 
     try {
       const player = this.playerService.getPlayer(guildId);
@@ -382,12 +453,28 @@ class RadioService {
     // anything else. The on-deck random track stays untouched, so when the
     // interlude ends the rotation resumes gaplessly through the paths below.
     if (state.interlude) {
+      state.holding = false;
       const { track, requestedBy } = state.interlude;
       state.interlude = null;
       const played = await this.playQueuedTrack(guildId, track, requestedBy);
       if (played) return true;
       logger.warn('Radio interlude failed to play, resuming rotation', { guildId });
     }
+
+    // Nobody has been listening for a while: let this song be the last one,
+    // stay in the channel, and fetch nothing until someone comes back.
+    if (reason === 'ended' && this.shouldHold(guildId)) {
+      if (state.breakPlaying) {
+        state.breakPlaying = false;
+        const player = this.playerService.getPlayer(guildId);
+        if (player) player.radioBreak = false;
+        state.nextBreakAt = Date.now() + this.breakIntervalMs();
+      }
+      state.holding = true;
+      logger.info('Radio held: voice channel is empty', { guildId });
+      return true;
+    }
+    state.holding = false;
 
     // The break video just finished (skip is locked during it, so this is
     // always a natural end). Resume normal rotation and re-arm the timer.
@@ -536,9 +623,10 @@ class RadioService {
   }
 
   /**
-   * Fetch one random Hachimi candidate and extract its audio. Retries a few
-   * fresh candidates on failure (each search call re-randomises and skips
-   * recently-played videos via the history store).
+   * Pick the next radio track. A `libraryShare` of picks come from the local
+   * media cache ("library"), which costs no Bilibili request; the rest
+   * discover a new video from the candidate pool. While Bilibili risk control
+   * is cooling down, every pick comes from the library, repeats allowed.
    */
   private async replenish(guildId: string): Promise<ExtractedTrackData | null> {
     const extractor = this.playerService.getExtractor();
@@ -547,23 +635,71 @@ class RadioService {
       return null;
     }
 
+    if (bilibiliRequestGuard.isCoolingDown()) {
+      return this.pickFromLibrary(guildId, extractor, { allowRepeats: true });
+    }
+
+    if (this.random() < config.radio.libraryShare) {
+      const fromLibrary = await this.pickFromLibrary(guildId, extractor, { allowRepeats: false });
+      if (fromLibrary) return fromLibrary;
+    }
+
+    const discovered = await this.discover(guildId, extractor);
+    if (discovered) return discovered;
+
+    // Discovery failed (e.g. Bilibili started rejecting us mid-rotation):
+    // keep the station on air from the library rather than ending it.
+    return this.pickFromLibrary(guildId, extractor, { allowRepeats: true });
+  }
+
+  /**
+   * Play a track from the local media cache, preferring the ones that have
+   * rested longest and skipping recently played ones (unless `allowRepeats`).
+   */
+  private async pickFromLibrary(
+    guildId: string,
+    extractor: ExtractorLike,
+    { allowRepeats }: { allowRepeats: boolean },
+  ): Promise<ExtractedTrackData | null> {
+    const breakBvid = extractBvid({ url: config.radio.breakVideoUrl });
+    const library = (extractor.listCachedVideoUrls?.() ?? [])
+      .filter((url) => extractBvid({ url }) !== breakBvid);
+    const fresh = library.filter((url) => !this.isRecentlyPlayed(guildId, url));
+    const pickable = fresh.length > 0 ? fresh : allowRepeats ? library : [];
+    if (pickable.length === 0) return null;
+
+    // Random pick among the least recently played half: rotation stays even
+    // across a large library without being predictable.
+    const window = pickable.slice(0, Math.max(1, Math.ceil(pickable.length / 2)));
+    const url = window[Math.floor(this.random() * window.length)];
+    try {
+      const track = await extractor.extractAudio(url);
+      this.recordPlayed(guildId, url);
+      logger.info('Radio picked from library', { guildId, url, librarySize: library.length });
+      return track;
+    } catch (e: unknown) {
+      logger.warn('Radio library pick failed', { guildId, url, error: (e as Error).message });
+      return null;
+    }
+  }
+
+  /**
+   * Extract a new video from the guild's candidate pool. Retries a few
+   * candidates on failure, but stops at once on risk control (HTTP 412): more
+   * attempts would only dig the block deeper.
+   */
+  private async discover(guildId: string, extractor: ExtractorLike): Promise<ExtractedTrackData | null> {
     const maxAttempts = Math.max(1, config.radio.replenishMaxAttempts);
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const candidate = await this.takeCandidate(guildId);
+      if (!candidate) {
+        logger.warn('Radio: no Hachimi candidates returned', { guildId, attempt });
+        return null;
+      }
+
       try {
-        const { results } = await this.bilibiliApi.searchHachimiVideos(1, guildId);
-        const candidate = results && results[0];
-        if (!candidate) {
-          logger.warn('Radio: no Hachimi candidates returned', { guildId, attempt });
-          continue;
-        }
-
         const extracted = await extractor.extractAudio(candidate.url);
-
-        const bvid = extractBvid(candidate);
-        if (bvid && typeof this.bilibiliApi.recordHachimiHistory === 'function') {
-          this.bilibiliApi.recordHachimiHistory(guildId, bvid);
-        }
-
+        this.recordPlayed(guildId, candidate.url, candidate);
         return extracted;
       } catch (e: unknown) {
         logger.warn('Radio replenish attempt failed', {
@@ -571,10 +707,53 @@ class RadioService {
           attempt,
           error: (e as Error).message,
         });
+        if (bilibiliRequestGuard.isRiskControlRejection(e)) return null;
       }
     }
 
     return null;
+  }
+
+  /**
+   * Next not-recently-played candidate from the guild's pool. One search fills
+   * the pool (instead of one search per track); it is refilled when it runs
+   * low or goes stale.
+   */
+  private async takeCandidate(guildId: string): Promise<HachimiCandidate | null> {
+    let pool = this.pools.get(guildId);
+    const stale = !pool
+      || pool.items.length < config.radio.candidatePoolMinSize
+      || Date.now() - pool.fetchedAt > config.radio.candidatePoolMaxAgeMs;
+    if (stale) {
+      const { results } = await this.bilibiliApi.searchHachimiVideos(
+        config.radio.candidatePoolSize,
+        guildId,
+        { fillFromHistory: false },
+      );
+      if (results && results.length > 0) {
+        pool = { items: results.slice(), fetchedAt: Date.now() };
+        this.pools.set(guildId, pool);
+      }
+    }
+
+    while (pool && pool.items.length > 0) {
+      const candidate = pool.items.shift()!;
+      if (!this.isRecentlyPlayed(guildId, candidate.url, candidate)) return candidate;
+    }
+    return null;
+  }
+
+  private isRecentlyPlayed(guildId: string, url: string, candidate?: HachimiCandidate): boolean {
+    const bvid = extractBvid(candidate ?? { url });
+    if (!bvid || typeof this.bilibiliApi.hasHachimiHistory !== 'function') return false;
+    return this.bilibiliApi.hasHachimiHistory(guildId, bvid);
+  }
+
+  private recordPlayed(guildId: string, url: string, candidate?: HachimiCandidate): void {
+    const bvid = extractBvid(candidate ?? { url });
+    if (bvid && typeof this.bilibiliApi.recordHachimiHistory === 'function') {
+      this.bilibiliApi.recordHachimiHistory(guildId, bvid);
+    }
   }
 }
 

@@ -55,6 +55,9 @@ interface UiConfig {
 }
 
 interface BilibiliConfig {
+  riskControlCooldownMs: number;
+  minRequestGapMs: number;
+  requestJitterMs: number;
   likeRateThreshold: number;
   viewCountThreshold: number;
   hachimiPageSize: number;
@@ -105,6 +108,13 @@ interface YouTubeCookieRefreshConfig {
 interface RadioConfig {
   enabled: boolean;
   replenishMaxAttempts: number;
+  // Request-volume controls (2026-10-14: ~5000 Bilibili requests/day from a
+  // 24h radio preceded the IP-level HTTP 412 block).
+  emptyChannelHoldMs: number;
+  candidatePoolSize: number;
+  candidatePoolMinSize: number;
+  candidatePoolMaxAgeMs: number;
+  libraryShare: number;
   // Periodic "take a break" video injected into radio rotation. The feature is
   // enabled for every guild running radio; the interval is global.
   breakEnabled: boolean;
@@ -307,6 +317,13 @@ const config: BotConfig = {
     cooldownMs: parseInt(process.env.UI_COOLDOWN_MS!) || 5000,
   },
   bilibili: {
+    // After an HTTP 412 (risk control), background work (radio discovery)
+    // stops calling Bilibili for this long and plays from the local library.
+    riskControlCooldownMs: Math.max(0, parseIntegerEnv(process.env.BILIBILI_RISK_CONTROL_COOLDOWN_MS, 30 * 60 * 1000)),
+    // Spacing between consecutive Bilibili API requests, plus random jitter,
+    // so traffic is neither bursty nor metronomic.
+    minRequestGapMs: Math.max(0, parseIntegerEnv(process.env.BILIBILI_MIN_REQUEST_GAP_MS, 800)),
+    requestJitterMs: Math.max(0, parseIntegerEnv(process.env.BILIBILI_REQUEST_JITTER_MS, 400)),
     likeRateThreshold: parseFloat(process.env.BILIBILI_LIKE_RATE_THRESHOLD!) || 0.05,
     viewCountThreshold: parseInt(process.env.BILIBILI_VIEW_COUNT_THRESHOLD!) || 10000,
     hachimiPageSize: parseInt(process.env.HACHIMI_PAGE_SIZE!) || 50,
@@ -358,8 +375,8 @@ const config: BotConfig = {
     // combined ~1 GB media-cache budget, mirroring YouTube's other half.
     mediaCacheEnabled: process.env.BILIBILI_MEDIA_CACHE_ENABLED !== "false",
     mediaCacheDir: process.env.BILIBILI_MEDIA_CACHE_DIR || "/app/cache/bilibili",
-    mediaCacheMaxEntries: Math.max(1, parseIntegerEnv(process.env.BILIBILI_MEDIA_CACHE_MAX_ENTRIES, 100)),
-    mediaCacheMaxBytes: Math.max(1, parseIntegerEnv(process.env.BILIBILI_MEDIA_CACHE_MAX_MB, 512)) * 1024 * 1024,
+    mediaCacheMaxEntries: Math.max(1, parseIntegerEnv(process.env.BILIBILI_MEDIA_CACHE_MAX_ENTRIES, 2000)),
+    mediaCacheMaxBytes: Math.max(1, parseIntegerEnv(process.env.BILIBILI_MEDIA_CACHE_MAX_MB, 8192)) * 1024 * 1024,
   },
   youtube: {
     preextractEnabled: process.env.YOUTUBE_PREEXTRACT_ENABLED !== "false",
@@ -440,6 +457,17 @@ const config: BotConfig = {
     // How many random candidates radio will try to extract before giving up on
     // fetching the next track (each attempt re-rolls a fresh random video).
     replenishMaxAttempts: parseIntegerEnv(process.env.RADIO_REPLENISH_MAX_ATTEMPTS, 3),
+    // Hold the rotation (finish the current song, then wait in the channel)
+    // once no human has been in the voice channel for this long.
+    emptyChannelHoldMs: Math.max(0, parseIntegerEnv(process.env.RADIO_EMPTY_CHANNEL_HOLD_MS, 5 * 60 * 1000)),
+    // One search fills a per-guild pool of candidates the rotation draws from,
+    // instead of searching again for every track.
+    candidatePoolSize: Math.max(1, parseIntegerEnv(process.env.RADIO_CANDIDATE_POOL_SIZE, 30)),
+    candidatePoolMinSize: Math.max(0, parseIntegerEnv(process.env.RADIO_CANDIDATE_POOL_MIN_SIZE, 5)),
+    candidatePoolMaxAgeMs: Math.max(60_000, parseIntegerEnv(process.env.RADIO_CANDIDATE_POOL_MAX_AGE_MS, 60 * 60 * 1000)),
+    // Share of radio picks served from the local media cache ("library"),
+    // which costs no Bilibili request. The rest discover new tracks.
+    libraryShare: Math.min(1, Math.max(0, parseFloat(process.env.RADIO_LIBRARY_SHARE ?? '0.7') || 0)),
     // Every breakIntervalMinutes of radio uptime, the next track (after the
     // current one ends naturally) becomes a fixed, non-skippable "take a break"
     // video. Active in every guild; set RADIO_BREAK_ENABLED=false to disable.

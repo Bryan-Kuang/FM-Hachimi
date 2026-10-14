@@ -45,6 +45,7 @@ interface PreExtractionServiceLike {
 
 interface RadioServiceLike {
   isEnabled(guildId: GuildId): boolean;
+  noteVoiceActivity?(guildId: GuildId): Promise<void>;
   isOnBreak(guildId: GuildId): boolean;
   stop(guildId: GuildId): Promise<void>;
   playNow?(

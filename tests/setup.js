@@ -2,6 +2,10 @@
  * Jest test setup and global mocks
  */
 
+// Production spaces Bilibili API requests ~1s apart; tests must not wait.
+process.env.BILIBILI_MIN_REQUEST_GAP_MS = process.env.BILIBILI_MIN_REQUEST_GAP_MS || "0";
+process.env.BILIBILI_REQUEST_JITTER_MS = process.env.BILIBILI_REQUEST_JITTER_MS || "0";
+
 // Mock Discord.js for testing
 jest.mock("discord.js", () => ({
   Client: jest.fn().mockImplementation(() => ({

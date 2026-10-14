@@ -207,6 +207,20 @@ class AudioPlayer {
     return null;
   }
 
+  /**
+   * A remote track whose audio has since been downloaded into the media cache
+   * switches to the local file, so replays and retries need no fresh URL from
+   * the platform (a looping track used to re-ask Bilibili on every loop).
+   */
+  private adoptCachedFile(track: Track): void {
+    if (track.cached || !track.normalizedUrl) return;
+    const localPath = this.getRefreshExtractor(track)?.getCachedAudioPath?.(track.normalizedUrl);
+    if (!localPath) return;
+    track.audioUrl = localPath;
+    track.cached = true;
+    logger.info('Switched track to local media cache file', { title: track.title });
+  }
+
   // ── Convenience accessors (keep existing API surface) ────────────────
   // These proxy to the Queue so that external code (AudioManager, services)
   // can still read `player.currentTrack`, `player.currentIndex`, etc.
@@ -584,6 +598,8 @@ class AudioPlayer {
 
       if (!isCurrent()) return false;
       this.cleanupFFmpegProcess();
+
+      this.adoptCachedFile(this.currentTrack);
 
       // Refresh stale or missing remote URLs. Local media-cache files do not expire.
       if (this.currentTrack.normalizedUrl && !this.currentTrack.cached &&
@@ -1123,6 +1139,8 @@ class AudioPlayer {
       logger.info('Track changed during CDN backoff; aborting retry', { original: trackAtStart.title });
       return;
     }
+
+    this.adoptCachedFile(trackAtStart);
 
     if (trackAtStart.normalizedUrl && !trackAtStart.cached) {
       try {

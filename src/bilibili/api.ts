@@ -5,6 +5,7 @@
 import axios from 'axios';
 import * as logger from '../services/logger_service';
 import config = require('../config/config');
+import { countRequest } from './request_guard';
 import HistoryStoreClass = require('../utils/history_store');
 
 type HistoryStoreInstance = InstanceType<typeof HistoryStoreClass>;
@@ -98,6 +99,11 @@ class BilibiliAPI {
     this.historyStore = historyStore;
   }
 
+  hasHachimiHistory(guildId: string, bvid: string): boolean {
+    if (!this.historyStore || !guildId || !bvid) return false;
+    return this.historyStore.has(guildId, bvid);
+  }
+
   recordHachimiHistory(guildId: string, bvid: string): void {
     if (!this.historyStore || !guildId || !bvid) return;
     this.historyStore.add(guildId, bvid);
@@ -118,6 +124,7 @@ class BilibiliAPI {
         pageSize,
       });
 
+      countRequest('search');
       const response = await axios.get(
         "https://api.bilibili.com/x/web-interface/search/type",
         {
@@ -409,8 +416,11 @@ class BilibiliAPI {
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
-      const requests = fetchPages.map((p) =>
-        axios.get("https://api.bilibili.com/x/web-interface/search/type", {
+      // Counted, not spaced: the pages share one timeout, and with the radio's
+      // candidate pool searches are rare.
+      const requests = fetchPages.map((p) => {
+        countRequest('search');
+        return axios.get("https://api.bilibili.com/x/web-interface/search/type", {
           params: {
             search_type: "video",
             keyword: keyword,
@@ -423,8 +433,8 @@ class BilibiliAPI {
           headers: this.headers,
           timeout: timeoutMs,
           signal: controller.signal,
-        })
-      );
+        });
+      });
 
       const responses = await Promise.allSettled(requests);
       clearTimeout(timeout);

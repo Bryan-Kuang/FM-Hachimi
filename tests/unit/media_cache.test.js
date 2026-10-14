@@ -137,4 +137,18 @@ describe("MediaCache", () => {
     expect(second.get("vid")).toBeNull();            // stale entry dropped
     expect(fs.existsSync(path.join(dir, "orphan.m4a"))).toBe(false); // orphan cleaned
   });
+
+  test("idsByLeastRecentUse lists the longest-rested first without bumping anyone", async () => {
+    mockDownload(Buffer.from("audio"));
+    const cache = new MediaCache({ dir, maxEntries: 10, maxBytes: 1e6 });
+    cache.put("a", "https://cdn/a.m4a");
+    cache.put("b", "https://cdn/b.m4a");
+    cache.put("c", "https://cdn/c.m4a");
+    await cache.drain();
+
+    cache.get("a"); // played most recently now
+
+    expect(cache.idsByLeastRecentUse()).toEqual(["b", "c", "a"]);
+    expect(cache.idsByLeastRecentUse()).toEqual(["b", "c", "a"]);
+  });
 });

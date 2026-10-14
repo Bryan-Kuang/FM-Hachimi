@@ -10,6 +10,8 @@
 import upstream = require('@bryan-kuang/bilibili-audio-extractor');
 import asyncHooks = require('node:async_hooks');
 import * as logger from '../services/logger_service';
+import * as requestGuard from './request_guard';
+import { isRiskControlRejection } from './request_guard';
 
 interface DashAudioSource {
   id?: number;
@@ -82,6 +84,7 @@ class NativeBilibiliExtractor {
       userAgent: this.options.userAgent,
       cookiesFile,
       fetchJson: async (url, init) => {
+        await requestGuard.acquireSlot(requestKind(url));
         const response = await fetch(toRiskControlTolerantUrl(url), {
           headers: init.headers,
           signal: AbortSignal.timeout(init.timeoutMs),
@@ -132,6 +135,7 @@ class NativeBilibiliExtractor {
       // A rejected anonymous buvid is cached upstream; drop it so the next
       // attempt bootstraps a new one.
       if (isRiskControlRejection(error)) {
+        requestGuard.noteRiskControl('native');
         if (this.options.cookiesFile) this.anonymousExtractor = null;
         else this.extractor = this.createUpstream(null);
       }
@@ -201,8 +205,13 @@ function toRiskControlTolerantUrl(url: string): string {
   return parsed.toString();
 }
 
-function isRiskControlRejection(error: unknown): boolean {
-  return /HTTP 412\b/.test((error as Error)?.message ?? '');
+function requestKind(url: string): requestGuard.BilibiliRequestKind {
+  const pathname = new URL(url).pathname;
+  if (pathname.endsWith('/view')) return 'view';
+  if (pathname.endsWith('/playurl')) return 'playurl';
+  if (pathname.endsWith('/nav')) return 'nav';
+  if (pathname.endsWith('/spi')) return 'spi';
+  return 'other';
 }
 
 export = NativeBilibiliExtractor;

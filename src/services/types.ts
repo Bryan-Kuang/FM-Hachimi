@@ -136,7 +136,10 @@ export interface ExtractorLike {
 }
 
 /** For consumers that only refresh stale stream URLs (e.g. AudioPlayer). */
-export type StreamUrlExtractorLike = Pick<ExtractorLike, 'getAudioStreamUrl'>;
+export type StreamUrlExtractorLike = Pick<ExtractorLike, 'getAudioStreamUrl'> & {
+  /** Local file for an already-downloaded track (Bilibili media cache). */
+  getCachedAudioPath?(normalizedUrl: string): string | null;
+};
 
 /** For consumers that only extract (e.g. pre-extraction, coordinator). */
 export type AudioExtractorLike = Pick<ExtractorLike, 'extractAudio'>;
