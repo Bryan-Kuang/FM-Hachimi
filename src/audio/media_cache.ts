@@ -101,6 +101,16 @@ class MediaCache {
     return { path: p, meta: this.index.get(id)!.meta };
   }
 
+  /**
+   * Cached ids, least recently used first, without bumping their LRU position.
+   * Lets callers (the radio library) pick tracks that have rested longest.
+   */
+  idsByLeastRecentUse(): string[] {
+    return [...this.index.entries()]
+      .sort((a, b) => a[1].seq - b[1].seq)
+      .map(([id]) => id);
+  }
+
   has(id: string): boolean {
     return this.get(id) !== null;
   }

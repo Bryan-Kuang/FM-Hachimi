@@ -15,6 +15,7 @@ import ExpiringCache = require('../utils/expiring_cache');
 import MediaCache = require('../audio/media_cache');
 import * as streamProbe from '../playback/stream_probe';
 import UrlValidator = require('./validator');
+import { countRequest, isRiskControlRejection, noteRiskControl } from './request_guard';
 
 interface VideoMetadata {
   success: boolean;
@@ -167,6 +168,25 @@ class BilibiliExtractor {
   }
 
   /**
+   * Locally cached Bilibili video URLs, least recently played first. The radio
+   * treats these as its library: playing one costs no Bilibili request.
+   */
+  listCachedVideoUrls(): string[] {
+    return (this._mediaCache?.idsByLeastRecentUse() ?? [])
+      .filter((id) => UrlValidator.isValidBilibiliUrl(id));
+  }
+
+  /**
+   * Local file for an already-downloaded track, or null. Lets playback swap a
+   * remote URL for the file instead of asking Bilibili for a fresh URL (a
+   * looping radio track did that every loop on 2026-10-11).
+   */
+  getCachedAudioPath(url: string): string | null {
+    const normalizedUrl = UrlValidator.normalizeUrl(url) || url;
+    return this._mediaCache?.get(normalizedUrl) ?? null;
+  }
+
+  /**
    * Clear all cache entries
    */
   clearCache(): void {
@@ -208,6 +228,12 @@ class BilibiliExtractor {
 
     logger.warn("Bilibili cookies file not found", { path: cookiesFile });
     return null;
+  }
+
+  /** Spawn yt-dlp against Bilibili, counted as one Bilibili request. */
+  private _spawnYtDlp(args: string[]): ChildProcess {
+    countRequest('ytdlp');
+    return spawn("yt-dlp", args);
   }
 
   /**
@@ -324,6 +350,7 @@ class BilibiliExtractor {
 
       return await this.extractAudioUncached(url, normalizedUrl, retryCount, maxRetries, totalStartedAt, options);
     } catch (error) {
+      if (isRiskControlRejection(error)) noteRiskControl('extraction');
       logger.error("Audio extraction failed", {
         url,
         error: (error as Error).message,
@@ -541,7 +568,7 @@ class BilibiliExtractor {
 
       logger.debug("Executing yt-dlp for metadata + audio URL (single call)", { url: normalizedUrl });
 
-      const ytdlp: ChildProcess = spawn("yt-dlp", args);
+      const ytdlp: ChildProcess = this._spawnYtDlp(args);
       let stdout = "";
       let stderr = "";
 
@@ -711,7 +738,7 @@ class BilibiliExtractor {
 
       logger.debug("Executing yt-dlp for video info", { args });
 
-      const ytdlp: ChildProcess = spawn("yt-dlp", args);
+      const ytdlp: ChildProcess = this._spawnYtDlp(args);
       let stdout = "";
       let stderr = "";
 
@@ -877,7 +904,7 @@ class BilibiliExtractor {
 
       logger.debug("Executing yt-dlp for audio stream URL", { args });
 
-      const ytdlp: ChildProcess = spawn("yt-dlp", args);
+      const ytdlp: ChildProcess = this._spawnYtDlp(args);
       let stdout = "";
       let stderr = "";
 
@@ -1249,7 +1276,7 @@ class BilibiliExtractor {
    */
   async getSearchVideoIds(searchQuery: string): Promise<string[]> {
     return new Promise((resolve, reject) => {
-      const ytdlpProcess: ChildProcess = spawn("yt-dlp", [
+      const ytdlpProcess: ChildProcess = this._spawnYtDlp([
         searchQuery,
         "--get-id",
         "--no-download",

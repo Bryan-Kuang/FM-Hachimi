@@ -116,6 +116,29 @@ describe("AudioPlayer", () => {
       expect(player.playCurrentTrack).not.toHaveBeenCalled();
     });
 
+    test("switches to the downloaded file instead of asking Bilibili for a fresh URL", async () => {
+      const Track = require("../../src/models/track");
+      const bilibiliExtractor = {
+        getAudioStreamUrl: jest.fn().mockResolvedValue("bili-fresh-url"),
+        getCachedAudioPath: jest.fn().mockReturnValue("/app/cache/bilibili/BVloop.m4a"),
+      };
+      player = new AudioPlayer(bilibiliExtractor);
+      player.currentTrack = new Track({
+        title: "Looping Track",
+        normalizedUrl: "https://www.bilibili.com/video/BVloop",
+        audioUrl: "https://upos.example.com/old.m4a",
+        duration: 180,
+        platform: "bilibili",
+      }, "user");
+      player.playCurrentTrack = jest.fn().mockResolvedValue(true);
+
+      await player.retryCurrentTrack();
+
+      expect(bilibiliExtractor.getAudioStreamUrl).not.toHaveBeenCalled();
+      expect(player.currentTrack.audioUrl).toBe("/app/cache/bilibili/BVloop.m4a");
+      expect(player.currentTrack.cached).toBe(true);
+    });
+
     test("refreshes stale YouTube tracks with the YouTube extractor", async () => {
       const Track = require("../../src/models/track");
       const bilibiliExtractor = { getAudioStreamUrl: jest.fn().mockResolvedValue("bili-fresh-url") };

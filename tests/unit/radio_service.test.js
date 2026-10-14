@@ -16,7 +16,13 @@ jest.mock("../../src/config/config", () => ({
     breakEnabled: true,
     breakIntervalMinutes: 10,
     breakVideoUrl: "https://www.bilibili.com/video/BV1a4sFzwE8E",
+    emptyChannelHoldMs: 300000,
+    candidatePoolSize: 30,
+    candidatePoolMinSize: 5,
+    candidatePoolMaxAgeMs: 3600000,
+    libraryShare: 0,
   },
+  bilibili: { riskControlCooldownMs: 1800000, minRequestGapMs: 0, requestJitterMs: 0 },
 }));
 
 const config = require("../../src/config/config");
@@ -104,6 +110,12 @@ beforeEach(() => {
   config.radio.breakEnabled = true;
   config.radio.breakIntervalMinutes = 10;
   config.radio.breakVideoUrl = "https://www.bilibili.com/video/BV1a4sFzwE8E";
+  config.radio.emptyChannelHoldMs = 300000;
+  config.radio.candidatePoolSize = 30;
+  config.radio.candidatePoolMinSize = 5;
+  config.radio.candidatePoolMaxAgeMs = 3600000;
+  config.radio.libraryShare = 0;
+  require("../../src/bilibili/request_guard")._reset();
 });
 
 afterEach(() => {
@@ -504,5 +516,152 @@ describe("stop", () => {
   test("is a no-op for a guild that never started radio", async () => {
     const w = makeWorld();
     await expect(w.service.stop("g-none")).resolves.toBeUndefined();
+  });
+});
+
+describe("request volume", () => {
+  const url = (id) => `https://www.bilibili.com/video/${id}`;
+
+  test("one search fills a pool the rotation draws from, skipping recently played", async () => {
+    const w = makeWorld();
+    w.bilibiliApi.searchHachimiVideos.mockResolvedValue({
+      results: ["BVa", "BVb", "BVc", "BVd", "BVe", "BVf", "BVg", "BVh"].map((id) => ({ url: url(id), bvid: id })),
+    });
+    w.bilibiliApi.hasHachimiHistory = jest.fn((_g, bvid) => bvid === "BVb");
+    config.radio.candidatePoolMinSize = 2;
+
+    const first = await w.service.replenish("g1");
+    const second = await w.service.replenish("g1");
+    const third = await w.service.replenish("g1");
+
+    expect([first, second, third].map((t) => t.title)).toEqual(["BVa", "BVc", "BVd"]);
+    expect(w.bilibiliApi.searchHachimiVideos).toHaveBeenCalledTimes(1);
+    expect(w.bilibiliApi.searchHachimiVideos).toHaveBeenCalledWith(30, "g1", { fillFromHistory: false });
+  });
+
+  test("refills the pool once it runs low", async () => {
+    const w = makeWorld();
+    w.bilibiliApi.searchHachimiVideos.mockResolvedValue({
+      results: ["BVa", "BVb", "BVc"].map((id) => ({ url: url(id), bvid: id })),
+    });
+    config.radio.candidatePoolMinSize = 2;
+
+    await w.service.replenish("g1"); // search #1, pool 3 -> 2
+    await w.service.replenish("g1"); // pool 2 -> 1
+    await w.service.replenish("g1"); // pool below minimum: search #2
+
+    expect(w.bilibiliApi.searchHachimiVideos).toHaveBeenCalledTimes(2);
+  });
+
+  test("library picks come from the cache, least recently played half, never the break video", async () => {
+    const w = makeWorld();
+    config.radio.libraryShare = 1;
+    w.service.setRandom(() => 0);
+    w.extractor.listCachedVideoUrls = jest.fn(() => [
+      config.radio.breakVideoUrl, url("BVold1"), url("BVold2"), url("BVnew1"), url("BVnew2"),
+    ]);
+    w.bilibiliApi.hasHachimiHistory = jest.fn((_g, bvid) => bvid === "BVold1");
+
+    const track = await w.service.replenish("g1");
+
+    expect(track.title).toBe("BVold2");
+    expect(w.bilibiliApi.searchHachimiVideos).not.toHaveBeenCalled();
+    expect(w.bilibiliApi.recordHachimiHistory).toHaveBeenCalledWith("g1", "BVold2");
+  });
+
+  test("discovers a new video when the library has nothing fresh", async () => {
+    const w = makeWorld();
+    config.radio.libraryShare = 1;
+    w.extractor.listCachedVideoUrls = jest.fn(() => [url("BVplayed")]);
+    w.bilibiliApi.hasHachimiHistory = jest.fn((_g, bvid) => bvid === "BVplayed");
+
+    const track = await w.service.replenish("g1");
+
+    expect(track.title).toBe("BVsong1");
+  });
+
+  test("while Bilibili is cooling down after a 412, plays only from the library, repeats allowed", async () => {
+    const w = makeWorld();
+    require("../../src/bilibili/request_guard").noteRiskControl("test");
+    w.extractor.listCachedVideoUrls = jest.fn(() => [url("BVplayed")]);
+    w.bilibiliApi.hasHachimiHistory = jest.fn(() => true);
+
+    const track = await w.service.replenish("g1");
+
+    expect(track.title).toBe("BVplayed");
+    expect(w.bilibiliApi.searchHachimiVideos).not.toHaveBeenCalled();
+  });
+
+  test("stops retrying on a 412 and keeps the station on air from the library", async () => {
+    const w = makeWorld();
+    w.extractor.listCachedVideoUrls = jest.fn(() => [url("BVcached")]);
+    w.extractor.extractAudio.mockImplementation(async (u) => {
+      if (u.includes("BVsong")) throw new Error("Bilibili API request failed: HTTP 412");
+      return extracted(u.split("/").pop());
+    });
+
+    const track = await w.service.replenish("g1");
+
+    expect(track.title).toBe("BVcached");
+    const discoveryAttempts = w.extractor.extractAudio.mock.calls.filter(([u]) => u.includes("BVsong"));
+    expect(discoveryAttempts).toHaveLength(1);
+  });
+});
+
+describe("empty channel hold", () => {
+  test("holds after the current song once the channel has been empty long enough", async () => {
+    const w = makeWorld();
+    let listeners = 1;
+    w.service.setListenerCounter(() => listeners);
+    await w.service.start("g1", w.voiceChannel, "chan-1");
+    await flush();
+
+    jest.spyOn(Date, "now").mockReturnValue(1000);
+    listeners = 0;
+    await w.service.noteVoiceActivity("g1");
+    Date.now.mockReturnValue(1000 + config.radio.emptyChannelHoldMs);
+    w.playerService.play.mockClear();
+
+    const handled = await w.service.handleAdvance("g1", "ended");
+
+    expect(handled).toBe(true);
+    expect(w.playerService.play).not.toHaveBeenCalled();
+    expect(w.service.isEnabled("g1")).toBe(true);
+
+    listeners = 1;
+    await w.service.noteVoiceActivity("g1");
+
+    expect(w.playerService.play).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps playing while the channel has only just emptied", async () => {
+    const w = makeWorld();
+    let listeners = 1;
+    w.service.setListenerCounter(() => listeners);
+    await w.service.start("g1", w.voiceChannel, "chan-1");
+    await flush();
+
+    jest.spyOn(Date, "now").mockReturnValue(1000);
+    listeners = 0;
+    await w.service.noteVoiceActivity("g1");
+    Date.now.mockReturnValue(1000 + config.radio.emptyChannelHoldMs - 1);
+    w.playerService.play.mockClear();
+
+    await w.service.handleAdvance("g1", "ended");
+
+    expect(w.playerService.play).toHaveBeenCalledTimes(1);
+  });
+
+  test("a user skip in an empty channel still advances", async () => {
+    const w = makeWorld();
+    w.service.setListenerCounter(() => 0);
+    await w.service.start("g1", w.voiceChannel, "chan-1");
+    await flush();
+    jest.spyOn(Date, "now").mockReturnValue(Number.MAX_SAFE_INTEGER);
+    w.playerService.play.mockClear();
+
+    await w.service.handleAdvance("g1", "user");
+
+    expect(w.playerService.play).toHaveBeenCalledTimes(1);
   });
 });

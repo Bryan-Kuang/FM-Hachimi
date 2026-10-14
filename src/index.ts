@@ -156,6 +156,8 @@ class BilibiliDiscordBot {
 
       // Initialize bot client (login, load commands, bind UI)
       await this.botClient.initialize(interfaceUpdater);
+      const botClient = this.botClient;
+      radioService.setListenerCounter((guildId) => botClient.countHumanListeners(guildId));
 
       // Initialize daily hachimi service after bot is ready (needs Discord client)
       dailyHachimiService.initialize(this.botClient.getClient() as any, bilibiliApi);

@@ -215,6 +215,12 @@ class BotClient {
         });
       }
 
+      // Radio holds its rotation while the channel is empty and resumes when
+      // someone arrives; it needs to see every presence change to do that.
+      playerService.getRadioService?.()?.noteVoiceActivity?.(newState.guild.id)?.catch((err: Error) => {
+        logger.warn('Radio failed to handle voice activity', { error: err.message });
+      });
+
       const annoyingService = playerService.getAnnoyingService?.();
       if (oldState.id === botUserId && annoyingService?.getVoiceRecovery?.()?.isRecovering(oldState.guild.id)) return;
 
@@ -503,6 +509,17 @@ class BotClient {
   setExtractor(extractor: any): void {
     this.client.extractor = extractor;
     logger.info('Bilibili extractor attached to Discord client');
+  }
+
+  /**
+   * Humans in the bot's voice channel in a guild, or null when the bot is not
+   * in a voice channel there (or the guild is not cached).
+   */
+  countHumanListeners(guildId: string): number | null {
+    const guild = this.client.guilds.cache.get(guildId);
+    const channel = guild?.members.me?.voice.channel;
+    if (!channel) return null;
+    return channel.members.filter((member) => !member.user.bot).size;
   }
 
   /**
