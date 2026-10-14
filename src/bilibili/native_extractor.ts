@@ -9,6 +9,7 @@
 
 import upstream = require('@bryan-kuang/bilibili-audio-extractor');
 import asyncHooks = require('node:async_hooks');
+import * as logger from '../services/logger_service';
 
 interface DashAudioSource {
   id?: number;
@@ -59,18 +60,29 @@ interface NativeExtractionPayload {
   };
 }
 
+const COOKIE_REJECTION_COOLDOWN_MS = 60 * 60 * 1000;
+
 class NativeBilibiliExtractor {
+  private options: NativeExtractorOptions;
   private extractor: upstream.BilibiliAudioExtractor;
+  // Built on first risk-control rejection; see extractWithRiskControlFallback().
+  private anonymousExtractor: upstream.BilibiliAudioExtractor | null = null;
+  private cookiesRejectedUntil = 0;
   // Preserve upstream's WBI/buvid caches without sharing one video's manifest
   // with another guild's concurrent extraction.
   private audioSources = new asyncHooks.AsyncLocalStorage<{ audio: DashAudioSource[] }>();
 
   constructor(options: NativeExtractorOptions) {
-    this.extractor = new upstream.BilibiliAudioExtractor({
-      userAgent: options.userAgent,
-      cookiesFile: options.cookiesFile ?? null,
+    this.options = options;
+    this.extractor = this.createUpstream(options.cookiesFile ?? null);
+  }
+
+  private createUpstream(cookiesFile: string | null): upstream.BilibiliAudioExtractor {
+    return new upstream.BilibiliAudioExtractor({
+      userAgent: this.options.userAgent,
+      cookiesFile,
       fetchJson: async (url, init) => {
-        const response = await fetch(url, {
+        const response = await fetch(toRiskControlTolerantUrl(url), {
           headers: init.headers,
           signal: AbortSignal.timeout(init.timeoutMs),
         });
@@ -87,9 +99,49 @@ class NativeBilibiliExtractor {
     });
   }
 
+  /**
+   * HTTP 412 is Bilibili risk control rejecting the client fingerprint, and
+   * the configured cookie file *is* that fingerprint (buvid3/buvid4 plus any
+   * X-BILI-SEC-TOKEN it picked up). Retrying with the same cookies can never
+   * succeed — on 2026-10-11 it kept every extraction failing for days across
+   * restarts — so fall back to an anonymous session with a freshly issued
+   * buvid, and stay anonymous for a while instead of re-offering the rejected
+   * cookies on every track.
+   */
+  private async extractWithRiskControlFallback(normalizedUrl: string) {
+    const useCookies = Boolean(this.options.cookiesFile) && Date.now() >= this.cookiesRejectedUntil;
+    if (useCookies) {
+      try {
+        return await this.extractor.extract(normalizedUrl);
+      } catch (error) {
+        if (!isRiskControlRejection(error)) throw error;
+        this.cookiesRejectedUntil = Date.now() + COOKIE_REJECTION_COOLDOWN_MS;
+        logger.warn('Bilibili rejected configured cookies (HTTP 412); using anonymous session', {
+          url: normalizedUrl,
+          cooldownMs: COOKIE_REJECTION_COOLDOWN_MS,
+        });
+      }
+    }
+
+    const anonymous = this.options.cookiesFile
+      ? (this.anonymousExtractor ??= this.createUpstream(null))
+      : this.extractor;
+    try {
+      return await anonymous.extract(normalizedUrl);
+    } catch (error) {
+      // A rejected anonymous buvid is cached upstream; drop it so the next
+      // attempt bootstraps a new one.
+      if (isRiskControlRejection(error)) {
+        if (this.options.cookiesFile) this.anonymousExtractor = null;
+        else this.extractor = this.createUpstream(null);
+      }
+      throw error;
+    }
+  }
+
   async extract(normalizedUrl: string): Promise<NativeExtractionPayload> {
     return this.audioSources.run({ audio: [] }, async () => {
-      const result = await this.extractor.extract(normalizedUrl);
+      const result = await this.extractWithRiskControlFallback(normalizedUrl);
       const selected = this.audioSources.getStore()?.audio.find(source =>
         result.format.formatId !== undefined
           ? String(source.id) === result.format.formatId
@@ -133,6 +185,24 @@ class NativeBilibiliExtractor {
       };
     });
   }
+}
+
+/**
+ * Since 2026-10-11 Bilibili answers the legacy `/x/web-interface/view` (and
+ * the watch page yt-dlp scrapes) with HTTP 412 for the production VPS IP, even
+ * anonymously, while `/x/web-interface/wbi/view` — the endpoint the current
+ * web player uses, same query and response shape — keeps returning 200.
+ * Upstream still calls the legacy path, so route it to the WBI one here.
+ */
+function toRiskControlTolerantUrl(url: string): string {
+  const parsed = new URL(url);
+  if (parsed.hostname !== 'api.bilibili.com' || parsed.pathname !== '/x/web-interface/view') return url;
+  parsed.pathname = '/x/web-interface/wbi/view';
+  return parsed.toString();
+}
+
+function isRiskControlRejection(error: unknown): boolean {
+  return /HTTP 412\b/.test((error as Error)?.message ?? '');
 }
 
 export = NativeBilibiliExtractor;

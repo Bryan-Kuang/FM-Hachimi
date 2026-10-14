@@ -248,7 +248,12 @@ ssh -L 5907:127.0.0.1:5907 ubuntu@<vps>
 on CAPTCHA/2FA. It needs `xdotool` and `xclip` on the VPS so credentials are pasted without
 appearing as process arguments.
 
-Bilibili cookies (`bilibili_cookies.txt`) are static — refresh manually when they expire:
+Bilibili cookies (`bilibili_cookies.txt`) are static: the bot hands yt-dlp a throwaway copy, so
+the file never drifts. (Before 2026-10-14 yt-dlp wrote its cookie jar back into it, persisting a
+risk-control token that made every Bilibili request return HTTP 412, across restarts.) The file
+is optional — without it the bot runs anonymously with a fresh buvid — and on a 412 the native
+extractor already retries anonymously. If you see persistent `HTTP Error 412` from yt-dlp, move
+the file aside and restart. Refresh it manually when needed:
 
 ```bash
 yt-dlp --cookies-from-browser chrome \

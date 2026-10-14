@@ -33,7 +33,7 @@ function mockNativeResponses({ audio = undefined, navCode = 0, navMessage = unde
       return jsonResponse({ code: 0, data: { b_3: "test-buvid3", b_4: "test-buvid4" } });
     }
 
-    if (url.includes("/x/web-interface/view")) {
+    if (url.includes("/x/web-interface/wbi/view")) {
       return jsonResponse({
         code: 0,
         data: {
@@ -143,7 +143,7 @@ describe("Bilibili native extractor", () => {
     });
     expect(spawn).not.toHaveBeenCalled();
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/x/web-interface/view"),
+      expect.stringContaining("/x/web-interface/wbi/view"),
       expect.anything(),
     );
     expect(global.fetch).toHaveBeenCalledWith(
@@ -365,7 +365,7 @@ describe("Bilibili native extractor", () => {
       await nativeExtractor.extract(VIDEO_URL);
 
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("/x/web-interface/view"),
+        expect.stringContaining("/x/web-interface/wbi/view"),
         expect.objectContaining({
           headers: expect.objectContaining({
             Cookie: expect.stringContaining("SESSDATA=secret-session"),
@@ -373,6 +373,99 @@ describe("Bilibili native extractor", () => {
         }),
       );
       expect(JSON.stringify(logger.info.mock.calls)).not.toContain("secret-session");
+    } finally {
+      fs.unlinkSync(cookiesFile);
+    }
+  });
+  test("retries anonymously with a fresh buvid when Bilibili rejects the configured cookies", async () => {
+    const cookiesFile = path.join(os.tmpdir(), `bili-native-412-${Date.now()}.txt`);
+    fs.writeFileSync(
+      cookiesFile,
+      ".bilibili.com\tTRUE\t/\tFALSE\t0\tbuvid3\tflagged-buvid\n",
+      "utf8",
+    );
+    mockNativeResponses();
+    const healthyFetch = global.fetch;
+    global.fetch = jest.fn(async (url, init) => {
+      if (String(init?.headers?.Cookie ?? "").includes("flagged-buvid")) {
+        return { ok: false, status: 412, json: async () => ({}) };
+      }
+      return healthyFetch(url, init);
+    });
+
+    try {
+      const nativeExtractor = new NativeBilibiliExtractor({ userAgent: "Test UA", cookiesFile });
+
+      const first = await nativeExtractor.extract(VIDEO_URL);
+      expect(first.audioUrl).toBe("https://upos.example.com/audio-high.m4a");
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/x/frontend/finger/spi"),
+        expect.anything(),
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("HTTP 412"),
+        expect.anything(),
+      );
+
+      // The rejected cookies are not re-offered on the next track.
+      global.fetch.mockClear();
+      await nativeExtractor.extract(VIDEO_URL);
+      const cookiesSent = global.fetch.mock.calls.map(([, init]) => String(init?.headers?.Cookie ?? ""));
+      expect(cookiesSent.some(cookie => cookie.includes("flagged-buvid"))).toBe(false);
+    } finally {
+      fs.unlinkSync(cookiesFile);
+    }
+  });
+
+  test("re-bootstraps the anonymous buvid after a risk-control rejection", async () => {
+    mockNativeResponses();
+    const healthyFetch = global.fetch;
+    let rejectNext = true;
+    global.fetch = jest.fn(async (url, init) => {
+      if (url.includes("/x/web-interface/wbi/view") && rejectNext) {
+        rejectNext = false;
+        return { ok: false, status: 412, json: async () => ({}) };
+      }
+      return healthyFetch(url, init);
+    });
+    const nativeExtractor = new NativeBilibiliExtractor({ userAgent: "Test UA", cookiesFile: null });
+
+    await expect(nativeExtractor.extract(VIDEO_URL)).rejects.toThrow("HTTP 412");
+    await nativeExtractor.extract(VIDEO_URL);
+
+    const spiCalls = global.fetch.mock.calls.filter(([url]) => url.includes("/x/frontend/finger/spi"));
+    expect(spiCalls).toHaveLength(2);
+  });
+  test("requests metadata from the WBI view endpoint, not the legacy one Bilibili 412s", async () => {
+    mockNativeResponses();
+    const nativeExtractor = new NativeBilibiliExtractor({ userAgent: "Test UA", cookiesFile: null });
+
+    await nativeExtractor.extract(VIDEO_URL);
+
+    const urls = global.fetch.mock.calls.map(([url]) => url);
+    expect(urls.some(url => url.includes("/x/web-interface/wbi/view?"))).toBe(true);
+    expect(urls.some(url => url.includes("/x/web-interface/view?"))).toBe(false);
+  });
+});
+
+describe("Bilibili yt-dlp cookie arguments", () => {
+  test("hands yt-dlp a copy so its cookie-jar write-back never touches the configured file", () => {
+    const cookiesFile = path.join(os.tmpdir(), `bili-ytdlp-cookies-${Date.now()}.txt`);
+    const original = ".bilibili.com\tTRUE\t/\tFALSE\t0\tbuvid3\tpristine\n";
+    fs.writeFileSync(cookiesFile, original, "utf8");
+    const extractor = new BilibiliExtractor();
+    extractor._cookiesFile = cookiesFile;
+
+    try {
+      const args = extractor._getCookieArgs();
+      expect(args[0]).toBe("--cookies");
+      expect(args[1]).not.toBe(cookiesFile);
+      expect(fs.readFileSync(args[1], "utf8")).toBe(original);
+
+      // Simulate yt-dlp dumping a risk-control token back into its jar.
+      fs.appendFileSync(args[1], ".bilibili.com\tTRUE\t/\tFALSE\t0\tX-BILI-SEC-TOKEN\tflagged\n");
+      expect(fs.readFileSync(cookiesFile, "utf8")).toBe(original);
+      fs.rmSync(args[1], { force: true });
     } finally {
       fs.unlinkSync(cookiesFile);
     }

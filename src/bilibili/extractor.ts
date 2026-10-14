@@ -5,6 +5,8 @@
 
 import { spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import * as logger from '../services/logger_service';
 import NativeBilibiliExtractor = require('./native_extractor');
 import { emitPlaybackStage, type PlaybackStageReporter } from '../playback/stage_feedback';
@@ -123,10 +125,17 @@ interface ThumbnailEntry {
   height?: number;
 }
 
+// Outlives any yt-dlp run (they time out well before this).
+const COOKIE_COPY_TTL_MS = 10 * 60 * 1000;
+// Cold-starting yt-dlp's Python on the 1 GB VPS under swap pressure has taken
+// longer than 5 s, which reported a false "yt-dlp is not available".
+const YTDLP_VERSION_CHECK_TIMEOUT_MS = 20_000;
+
 class BilibiliExtractor {
   private userAgent: string;
   private _ytdlpChecked: boolean;
   private _cookiesFile: string | null;
+  private _cookieCopySeq = 0;
   private nativeExtractor: NativeBilibiliExtractor;
   // Shared ExpiringCache owns TTL eviction + size cap + cleanup timer.
   private videoInfoCache: ExpiringCache<VideoMetadata>;
@@ -206,10 +215,27 @@ class BilibiliExtractor {
    * @returns {Array<string>} - Cookie-related args for yt-dlp
    */
   _getCookieArgs(): string[] {
-    if (this._cookiesFile && fs.existsSync(this._cookiesFile)) {
-      return ["--cookies", this._cookiesFile];
+    if (!this._cookiesFile || !fs.existsSync(this._cookiesFile)) return [];
+    // yt-dlp dumps its whole cookie jar back into the --cookies file on exit.
+    // Pointed at the configured file, that persisted a risk-control token and
+    // a flagged buvid into it (2026-10-11), so every later request — native
+    // and yt-dlp, across restarts — got HTTP 412. Hand yt-dlp a throwaway copy
+    // so the configured file stays exactly as provisioned.
+    try {
+      const copy = path.join(
+        os.tmpdir(),
+        `fm-bilibili-cookies-${process.pid}-${++this._cookieCopySeq}.txt`,
+      );
+      fs.copyFileSync(this._cookiesFile, copy);
+      fs.chmodSync(copy, 0o600);
+      setTimeout(() => fs.rm(copy, { force: true }, () => {}), COOKIE_COPY_TTL_MS).unref();
+      return ["--cookies", copy];
+    } catch (error) {
+      logger.warn("Could not copy Bilibili cookies for yt-dlp; running without them", {
+        error: (error as Error).message,
+      });
+      return [];
     }
-    return [];
   }
 
   /**
@@ -1099,19 +1125,20 @@ class BilibiliExtractor {
     return new Promise((resolve) => {
       const ytdlp: ChildProcess = spawn("yt-dlp", ["--version"]);
 
+      const timer = setTimeout(() => {
+        ytdlp.kill();
+        resolve(false);
+      }, YTDLP_VERSION_CHECK_TIMEOUT_MS);
+
       ytdlp.on("close", (code: number | null) => {
+        clearTimeout(timer);
         resolve(code === 0);
       });
 
       ytdlp.on("error", () => {
+        clearTimeout(timer);
         resolve(false);
       });
-
-      // Timeout after 5 seconds
-      setTimeout(() => {
-        ytdlp.kill();
-        resolve(false);
-      }, 5000);
     });
   }
 
