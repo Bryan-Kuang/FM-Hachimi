@@ -139,3 +139,6 @@ data/world_cup/
 
 # Agent session state (local-only)
 .omo/
+
+# Daily auto-fix workflow scratch (raw VPS logs)
+.auto-fix/
