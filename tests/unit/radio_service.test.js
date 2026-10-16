@@ -665,3 +665,16 @@ describe("empty channel hold", () => {
     expect(w.playerService.play).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("voice-recovery restart", () => {
+  test("plays the seeded track (the queue's current track is set before playCurrentTrack)", async () => {
+    const w = makeWorld();
+    w.player.playCurrentTrack = jest.fn(async () => Boolean(w.player.queue.currentTrack));
+
+    const result = await w.service.start("g1", w.voiceChannel, "chan-1", () => true);
+
+    expect(result.success).toBe(true);
+    expect(w.player.queue.currentTrack).toBe(w.player.queue.items[0]);
+    expect(w.service.isEnabled("g1")).toBe(true);
+  });
+});

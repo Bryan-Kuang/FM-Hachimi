@@ -242,6 +242,9 @@ class BilibiliExtractor {
    */
   _getCookieArgs(): string[] {
     if (!this._cookiesFile || !fs.existsSync(this._cookiesFile)) return [];
+    // An empty file (the deploy recreates one when it is missing) makes
+    // yt-dlp abort with "does not look like a Netscape format cookies file".
+    if (fs.statSync(this._cookiesFile).size === 0) return [];
     // yt-dlp dumps its whole cookie jar back into the --cookies file on exit.
     // Pointed at the configured file, that persisted a risk-control token and
     // a flagged buvid into it (2026-10-11), so every later request — native

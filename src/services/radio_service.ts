@@ -262,9 +262,18 @@ class RadioService {
     await this.playerService.addTrack(guildId, first, RADIO_REQUESTED_BY);
     if (recoveryIsCurrent && !recoveryIsCurrent()) return { success: false, error: 'Recovery cancelled' };
     this.playerService.setUIContext(guildId, channelId);
-    const played = recoveryIsCurrent
-      ? await player.playCurrentTrack({ isCurrent: recoveryIsCurrent })
-      : await this.playerService.play(guildId);
+    let played: boolean;
+    if (recoveryIsCurrent) {
+      // playCurrentTrack() plays queue.currentTrack, which addTrack() does not
+      // set. Without this, every voice-recovery restart of a held (silent)
+      // radio failed with "No current track to play" and the bot left the
+      // channel, retrying once a minute for 9 hours (2026-10-16).
+      player.queue.currentIndex = player.queue.items.length - 1;
+      player.queue.currentTrack = player.queue.items[player.queue.currentIndex];
+      played = await player.playCurrentTrack({ isCurrent: recoveryIsCurrent });
+    } else {
+      played = await this.playerService.play(guildId);
+    }
     if (recoveryIsCurrent && !recoveryIsCurrent()) return { success: false, error: 'Recovery cancelled' };
     if (!played) {
       await this.stop(guildId);
