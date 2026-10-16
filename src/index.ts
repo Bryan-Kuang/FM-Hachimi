@@ -119,7 +119,9 @@ class BilibiliDiscordBot {
       const audioManager    = new AudioManager(sessionManager, extractor, youtubeExtractor);
       const progressTracker = new ProgressTracker(sessionManager);
       const historyStore    = new HistoryStore(sessionManager);
-      const interfaceUpdater = new InterfaceUpdater(sessionManager, progressTracker, audioManager);
+      const interfaceUpdater = new InterfaceUpdater(sessionManager, progressTracker, audioManager, {
+        cardStateFile: config.ui.cardStateFile,
+      });
       const preExtractionService = new PreExtractionService({
         bilibiliExtractor: extractor,
         youtubeExtractor,

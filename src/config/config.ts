@@ -48,6 +48,7 @@ interface LoggingConfig {
 }
 
 interface UiConfig {
+  cardStateFile: string;
   progressIntervalMs: number;
   slowEditThresholdMs: number;
   slowEditStreakLimit: number;
@@ -276,6 +277,10 @@ const config: BotConfig = {
     toFile: process.env.LOG_TO_FILE !== "false",
   },
   ui: {
+    // Last now-playing card per guild, so a fresh card (e.g. after a restart)
+    // replaces the previous one instead of leaving it behind.
+    cardStateFile: process.env.UI_CARD_STATE_FILE
+      || path.join(process.cwd(), "data", "now_playing_cards.json"),
     // ProgressTracker tick interval (ms). Each tick checks whether the
     // progress bar string changed vs. last sent edit; if identical we skip
     // the Discord call entirely (content-hash dedup).

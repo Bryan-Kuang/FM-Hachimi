@@ -1,5 +1,7 @@
 import EmbedBuilders = require('./embeds');
 import ButtonBuilders = require('./buttons');
+import * as fs from 'fs';
+import * as path from 'path';
 import * as logger from '../services/logger_service';
 import SessionManager = require('../session/session_manager');
 import ProgressTracker = require('./progress_tracker');
@@ -37,17 +39,95 @@ class InterfaceUpdater {
   /** Last repost time per guild — throttles the first-listener repost. */
   private lastRepostAt: Map<string, number>;
   private readonly repostCooldownMs = 10_000;
+  /**
+   * Card updates run one at a time per guild. Two overlapping updates that
+   * both found no live card each sent one — e.g. a listener joining a held
+   * radio fired the card repost and the resumed track's update together.
+   */
+  private updateChains = new Map<string, Promise<void>>();
+  /**
+   * The card currently owned per guild, persisted (when `cardStateFile` is
+   * set) so the card from before a restart is deleted when a new one is sent.
+   */
+  private cards = new Map<string, { channelId: string; messageId: string }>();
+  private readonly cardStateFile: string | null;
 
   constructor(
     sessionManager: SessionManager,
     progressTracker: ProgressTracker,
     audioManager: AudioManager,
+    options: { cardStateFile?: string | null } = {},
   ) {
     this.client = null;
     this.sessionManager = sessionManager;
     this.progressTracker = progressTracker;
     this.audioManager = audioManager;
     this.lastRepostAt = new Map();
+    this.cardStateFile = options.cardStateFile ?? null;
+    this.loadCards();
+  }
+
+  private loadCards(): void {
+    if (!this.cardStateFile) return;
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.cardStateFile, 'utf8')) as Record<string, { channelId?: string; messageId?: string }>;
+      for (const [guildId, card] of Object.entries(raw)) {
+        if (card?.channelId && card?.messageId) {
+          this.cards.set(guildId, { channelId: card.channelId, messageId: card.messageId });
+        }
+      }
+    } catch (e: unknown) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.warn('Could not read now-playing card state', { error: (e as Error).message });
+      }
+    }
+  }
+
+  private saveCards(): void {
+    if (!this.cardStateFile) return;
+    try {
+      fs.mkdirSync(path.dirname(this.cardStateFile), { recursive: true });
+      fs.writeFileSync(this.cardStateFile, JSON.stringify(Object.fromEntries(this.cards)));
+    } catch (e: unknown) {
+      logger.warn('Could not save now-playing card state', { error: (e as Error).message });
+    }
+  }
+
+  /**
+   * Send a fresh card and make it the guild's only one: the previously owned
+   * card (from this run or, via the state file, from before a restart) is
+   * deleted.
+   */
+  private async sendCard(guildId: string, channelId: string, channel: DiscordChannel, options: unknown): Promise<DiscordMessage> {
+    const sent = await channel.send(options);
+    const previous = this.cards.get(guildId);
+    this.cards.set(guildId, { channelId, messageId: sent.id });
+    this.saveCards();
+    if (previous && previous.messageId !== sent.id) {
+      await this.deleteCard(previous);
+    }
+    return sent;
+  }
+
+  private async deleteCard(card: { channelId: string; messageId: string }): Promise<void> {
+    const client = this.client;
+    if (!client) return;
+    try {
+      const channel = (client.channels.cache.get(card.channelId) ??
+        await client.channels.fetch(card.channelId)) as DiscordChannel;
+      await channel.messages.delete(card.messageId);
+    } catch (_) { /* already deleted or channel gone */ }
+  }
+
+  private runExclusive(guildId: string, task: () => Promise<void>): Promise<void> {
+    const previous = this.updateChains.get(guildId) ?? Promise.resolve();
+    const next = previous.then(task, task);
+    const settled = next.catch(() => undefined);
+    this.updateChains.set(guildId, settled);
+    void settled.then(() => {
+      if (this.updateChains.get(guildId) === settled) this.updateChains.delete(guildId);
+    });
+    return next;
   }
 
   setClient(client: DiscordClient): void {
@@ -90,7 +170,11 @@ class InterfaceUpdater {
     });
   }
 
-  async handleUpdate(guildId: string, state: PlayerState): Promise<void> {
+  handleUpdate(guildId: string, state: PlayerState): Promise<void> {
+    return this.runExclusive(guildId, () => this.applyUpdate(guildId, state));
+  }
+
+  private async applyUpdate(guildId: string, state: PlayerState): Promise<void> {
     try {
       const session = this.sessionManager.get(guildId);
       const s = (session.uiSeq || 0) + 1;
@@ -161,7 +245,7 @@ class InterfaceUpdater {
           // sent its own message. If so, let it own the new messageId instead
           // of sending a duplicate.
           if ((session.uiSeq || 0) !== s) return;
-          const sent = await channel.send(options);
+          const sent = await this.sendCard(guildId, ctx.channelId, channel, options);
           session.uiContext = { channelId: ctx.channelId, messageId: sent.id };
           if (shouldTrackProgress) {
             this.progressTracker.startTracking(guildId, sent as unknown as Parameters<ProgressTracker['startTracking']>[1], () => this._getPlayerState(guildId));
@@ -176,7 +260,7 @@ class InterfaceUpdater {
         // "no messageId" calls from both reaching channel.send() and creating
         // duplicate play cards.
         if ((session.uiSeq || 0) !== s) return;
-        const sent = await channel.send(options);
+        const sent = await this.sendCard(guildId, ctx.channelId, channel, options);
         session.uiContext = { channelId: ctx.channelId, messageId: sent.id };
         if (shouldTrackProgress) {
           this.progressTracker.startTracking(guildId, sent as unknown as Parameters<ProgressTracker['startTracking']>[1], () => this._getPlayerState(guildId));
@@ -197,6 +281,10 @@ class InterfaceUpdater {
    * live card exists, nothing is playing, or the guild is inside the cooldown.
    */
   async repostNowPlaying(guildId: string): Promise<void> {
+    return this.runExclusive(guildId, () => this.repostExclusive(guildId));
+  }
+
+  private async repostExclusive(guildId: string): Promise<void> {
     const now = Date.now();
     const last = this.lastRepostAt.get(guildId) ?? 0;
     if (now - last < this.repostCooldownMs) return;
@@ -224,7 +312,7 @@ class InterfaceUpdater {
       // Drop the messageId so handleUpdate() takes the send-fresh path and
       // repoints uiContext at the new message.
       session.uiContext = { channelId: ctx.channelId, messageId: '' };
-      await this.handleUpdate(guildId, state);
+      await this.applyUpdate(guildId, state);
     } catch (e: unknown) {
       logger.error('Now-playing card repost failed', { guildId, error: (e as Error).message });
     }
