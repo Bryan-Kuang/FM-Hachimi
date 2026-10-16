@@ -470,4 +470,17 @@ describe("Bilibili yt-dlp cookie arguments", () => {
       fs.unlinkSync(cookiesFile);
     }
   });
+
+  test("ignores an empty cookie file instead of handing yt-dlp an invalid one", () => {
+    const cookiesFile = path.join(os.tmpdir(), `bili-empty-cookies-${Date.now()}.txt`);
+    fs.writeFileSync(cookiesFile, "", "utf8");
+    const extractor = new BilibiliExtractor();
+    extractor._cookiesFile = cookiesFile;
+
+    try {
+      expect(extractor._getCookieArgs()).toEqual([]);
+    } finally {
+      fs.unlinkSync(cookiesFile);
+    }
+  });
 });
