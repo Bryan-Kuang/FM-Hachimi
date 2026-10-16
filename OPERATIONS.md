@@ -330,6 +330,22 @@ Three layers, from most to least automated:
    box. The `ops:*` scripts (`npm run ops:logs`, `ops:health`, `ops:deploy`,
    `ops:ssh`) assume a `Host fm-hachimi-vps` entry in your `~/.ssh/config`.
 
+### Daily auto-fix triage
+
+`.github/workflows/auto-fix.yml` runs daily at 01:17 UTC (and on manual dispatch,
+with an `hours` input). It ssh-es to the VPS with the deploy key, runs
+`scripts/ops/collect-error-logs.sh` (ERROR/WARN lines from `logs/app-*.log`,
+plus crash output from `docker logs`), and condenses it with
+`scripts/ops/error-digest.js`. On a day with no errors it stops there. Otherwise
+Claude (`anthropics/claude-code-action`) decides per error whether to fix it,
+opens at most two `auto-fix/*` PRs, and posts its verdict to
+`DISCORD_WEBHOOK_URL`. It never merges: review the PR, and merging deploys as
+usual. Raw logs never reach the public run log or artifacts.
+
+Needs, beyond the Pipeline secrets: `CLAUDE_CODE_OAUTH_TOKEN` (from
+`claude setup-token`) or `ANTHROPIC_API_KEY`, and the Claude GitHub App
+installed on the repo.
+
 ## Gateway outages and the watchdog
 
 Added 2026-09-01 after the bot sat wedged for ~50 minutes while Docker reported
