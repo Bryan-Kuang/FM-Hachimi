@@ -150,6 +150,18 @@ jobs:
             --max-turns 80
             --allowedTools "Read,Write,Edit,Glob,Grep,Bash(npm run lint),Bash(npm run typecheck),Bash(npm test),Bash(npm test:*),Bash(npx jest:*),Bash(git:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr create:*)"
 
+      # The action hides Claude's output on public repos, so a failed run shows
+      # only "is_error:true". The final result line of a failed run is the
+      # error itself (bad token, usage limit), not log content — print it.
+      - name: Show why Claude failed
+        if: failure() && steps.digest.outputs.errors != '0'
+        env:
+          EXEC: ${{ runner.temp }}/claude-execution-output.json
+        run: |
+          REASON="$(jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXEC" 2>/dev/null | head -c 300)"
+          echo "Claude error: ${REASON:-unknown (no execution output)}"
+          printf '%s' "${REASON:-unknown}" > .auto-fix/claude-error.txt
+
       - name: Send verdict to Discord
         if: always() && steps.digest.outputs.errors != '0'
         env:
@@ -160,7 +172,10 @@ jobs:
             DESC="$(head -c 3500 .auto-fix/verdict.md)"
             COLOR=3447003
           else
-            DESC="Claude 没有给出结论（分析步骤可能失败了）。"
+            DESC="Claude 没有给出结论，分析步骤失败了。"
+            if [ -s .auto-fix/claude-error.txt ]; then
+              DESC="$DESC"$'\n'"错误: $(cat .auto-fix/claude-error.txt)"
+            fi
             COLOR=15158332
           fi
           jq -n --arg d "$DESC"$'\n\n'"[查看运行记录]($RUN_URL)" --argjson c "$COLOR" \
